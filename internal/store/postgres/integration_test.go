@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"strings"
 	"sync"
@@ -40,7 +41,7 @@ func TestBillingLifecycleIntegration(t *testing.T) {
 	if err = db.QueryRow(ctx, `SELECT count(*) FROM schema_migrations`).Scan(&migrationCount); err != nil {
 		t.Fatal(err)
 	}
-	if migrationCount < 13 {
+	if migrationCount < 14 {
 		t.Fatalf("only %d migrations applied", migrationCount)
 	}
 	billing := NewBillingStore(db)
@@ -141,8 +142,23 @@ func TestBillingLifecycleIntegration(t *testing.T) {
 	if err != nil || provisionContext.NodeID != nodeID || provisionContext.InstanceName == "" {
 		t.Fatalf("provision context: %+v err=%v", provisionContext, err)
 	}
-	if err = provisioning.CompleteProvision(ctx, provisionJob.ID, "integration-worker", "101", "container-uuid", "192.0.2.10", "2001:db8::10", "running"); err != nil {
+	if err = provisioning.CompleteProvision(ctx, provisionJob.ID, "integration-worker", "101", "container-uuid", "192.0.2.10", "2001:db8::10", "running", nil); err != nil {
 		t.Fatal(err)
+	}
+	rootPasswordCiphertext, err := testSecretBox.Seal("InitialRoot123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	portal := NewPortalStore(db)
+	if err = portal.SaveRootPassword(ctx, account.ID, serviceID, rootPasswordCiphertext); err != nil {
+		t.Fatal(err)
+	}
+	access, err := portal.ServiceAccess(ctx, account.ID, serviceID)
+	if err != nil || access.InstanceName == "" || access.PortMappingCount != 6 || len(access.RootPasswordCiphertext) == 0 {
+		t.Fatalf("service access=%+v err=%v", access, err)
+	}
+	if _, err = portal.ServiceAccess(ctx, "00000000-0000-0000-0000-000000000000", serviceID); !errors.Is(err, ErrServiceNotFound) {
+		t.Fatalf("cross-account service lookup should be hidden, got %v", err)
 	}
 	operations := NewOperationsStore(db)
 	ticket, err := operations.CreateTicket(ctx, account.ID, customerID, serviceID, "Integration support request", "high", "Please verify this VPS.", "203.0.113.5", "integration-test")
@@ -218,7 +234,6 @@ func TestBillingLifecycleIntegration(t *testing.T) {
 	if serviceStatus != "active" || !nextDue.After(time.Now()) {
 		t.Fatalf("service status=%s next_due=%s", serviceStatus, nextDue)
 	}
-	portal := NewPortalStore(db)
 	actionJobID, err := portal.QueueServiceAction(ctx, account.ID, customerID, serviceID, "stop", "203.0.113.5", "integration-test")
 	if err != nil || actionJobID == "" {
 		t.Fatalf("queue customer action: id=%s err=%v", actionJobID, err)

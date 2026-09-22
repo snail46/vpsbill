@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -40,6 +41,75 @@ type CustomerService struct {
 	NextDueAt            *time.Time `json:"next_due_at,omitempty"`
 	LastReconciledAt     *time.Time `json:"last_reconciled_at,omitempty"`
 	LastReconcileError   string     `json:"last_reconcile_error,omitempty"`
+}
+
+type CustomerServiceAccess struct {
+	ServiceID              string
+	Status                 string
+	RuntimeStatus          string
+	InstanceName           string
+	Virtualization         string
+	ProviderType           string
+	BaseURL                string
+	APIKeyCiphertext       []byte
+	RootPasswordCiphertext []byte
+	AllowedTemplateIDs     []string
+	PortMappingCount       int
+}
+
+func (s *PortalStore) ServiceAccess(ctx context.Context, accountID, serviceID string) (CustomerServiceAccess, error) {
+	var result CustomerServiceAccess
+	err := s.db.QueryRow(ctx, `
+		SELECT s.id,s.status,s.runtime_status,s.instance_name,p.virtualization,n.provider_type,n.base_url,
+		       n.api_key_ciphertext,s.root_password_ciphertext,p.allowed_template_ids,p.port_mapping_count
+		FROM services s
+		JOIN plans p ON p.id=s.plan_id
+		JOIN nodes n ON n.id=s.node_id
+		WHERE s.id=$1 AND s.account_id=$2
+	`, serviceID, accountID).Scan(&result.ServiceID, &result.Status, &result.RuntimeStatus, &result.InstanceName,
+		&result.Virtualization, &result.ProviderType, &result.BaseURL, &result.APIKeyCiphertext,
+		&result.RootPasswordCiphertext, &result.AllowedTemplateIDs, &result.PortMappingCount)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return CustomerServiceAccess{}, ErrServiceNotFound
+	}
+	return result, err
+}
+
+func (s *PortalStore) UpdateRootPassword(ctx context.Context, accountID, serviceID, userID string, ciphertext []byte, ip, userAgent string) error {
+	if err := s.SaveRootPassword(ctx, accountID, serviceID, ciphertext); err != nil {
+		return err
+	}
+	return s.RecordServiceOperation(ctx, userID, serviceID, "service.password_reset", ip, userAgent, map[string]any{})
+}
+
+func (s *PortalStore) SaveRootPassword(ctx context.Context, accountID, serviceID string, ciphertext []byte) error {
+	command, err := s.db.Exec(ctx, `UPDATE services SET root_password_ciphertext=$3,updated_at=now() WHERE id=$1 AND account_id=$2`, serviceID, accountID, ciphertext)
+	if err != nil {
+		return err
+	}
+	if command.RowsAffected() != 1 {
+		return ErrServiceNotFound
+	}
+	return nil
+}
+
+func (s *PortalStore) RecordServiceOperation(ctx context.Context, userID, serviceID, action, ip, userAgent string, metadata map[string]any) error {
+	if metadata == nil {
+		metadata = map[string]any{}
+	}
+	body, err := json.Marshal(metadata)
+	if err != nil {
+		return err
+	}
+	var ipValue any
+	if strings.TrimSpace(ip) != "" {
+		ipValue = strings.TrimSpace(ip)
+	}
+	_, err = s.db.Exec(ctx, `
+		INSERT INTO audit_logs(actor_type,actor_id,action,target_type,target_id,ip,user_agent,metadata)
+		VALUES('customer',$1,$2,'service',$3,$4,$5,$6::jsonb)
+	`, userID, action, serviceID, ipValue, userAgent, body)
+	return err
 }
 
 type CustomerInvoice struct {

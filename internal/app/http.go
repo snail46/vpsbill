@@ -43,7 +43,7 @@ func NewHandler(deps Dependencies) (http.Handler, error) {
 	billing := newAdminBilling(deps.Settings, billingStore)
 	adminSettings := adminSettings{settings: deps.Settings}
 	automation := newAdminAutomation(provisioningStore)
-	portal := newCustomerPortal(deps.Settings, portalStore, billingStore, catalogStore)
+	portal := newCustomerPortal(deps.Settings, portalStore, billingStore, catalogStore, secretBox)
 	operations := newOperationsAPI(operationsStore)
 	metrics := newMetricsAPI(monitoringStore, deps.Settings)
 	install := &installer{settings: deps.Settings, auth: auth, logger: deps.Logger}
@@ -90,6 +90,15 @@ func NewHandler(deps Dependencies) (http.Handler, error) {
 	mux.Handle("POST /api/v1/customer/auth/mfa/disable", auth.requireCustomer(http.HandlerFunc(auth.customerMFADisable)))
 	mux.Handle("GET /api/v1/customer/services", auth.requireCustomer(http.HandlerFunc(portal.listServices)))
 	mux.Handle("POST /api/v1/customer/services/{id}/actions/{action}", auth.requireCustomer(http.HandlerFunc(portal.serviceAction)))
+	mux.Handle("GET /api/v1/customer/services/{id}/runtime", auth.requireCustomer(http.HandlerFunc(portal.serviceRuntime)))
+	mux.Handle("GET /api/v1/customer/services/{id}/credential", auth.requireCustomer(http.HandlerFunc(portal.serviceCredential)))
+	mux.Handle("POST /api/v1/customer/services/{id}/reset-password", auth.requireCustomer(http.HandlerFunc(portal.resetServicePassword)))
+	mux.Handle("POST /api/v1/customer/services/{id}/reinstall", auth.requireCustomer(http.HandlerFunc(portal.reinstallService)))
+	mux.Handle("POST /api/v1/customer/services/{id}/port-mappings", auth.requireCustomer(http.HandlerFunc(portal.addPortMapping)))
+	mux.Handle("PUT /api/v1/customer/services/{id}/port-mappings/{index}", auth.requireCustomer(http.HandlerFunc(portal.updatePortMapping)))
+	mux.Handle("DELETE /api/v1/customer/services/{id}/port-mappings/{index}", auth.requireCustomer(http.HandlerFunc(portal.deletePortMapping)))
+	mux.Handle("POST /api/v1/customer/services/{id}/console/{kind}/ticket", auth.requireCustomer(http.HandlerFunc(portal.consoleTicket)))
+	mux.Handle("GET /api/v1/customer/services/{id}/console/{kind}", auth.requireCustomer(http.HandlerFunc(portal.consoleProxy)))
 	mux.Handle("GET /api/v1/customer/invoices", auth.requireCustomer(http.HandlerFunc(portal.listInvoices)))
 	mux.Handle("GET /api/v1/customer/transactions", auth.requireCustomer(http.HandlerFunc(portal.listTransactions)))
 	mux.Handle("GET /api/v1/customer/catalog", auth.requireCustomer(http.HandlerFunc(portal.catalogData)))
@@ -183,6 +192,8 @@ type responseRecorder struct {
 	http.ResponseWriter
 	status int
 }
+
+func (r *responseRecorder) Unwrap() http.ResponseWriter { return r.ResponseWriter }
 
 func (r *responseRecorder) WriteHeader(status int) {
 	r.status = status

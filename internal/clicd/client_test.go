@@ -208,3 +208,75 @@ func TestProbeAndImageEndpoints(t *testing.T) {
 		t.Fatalf("images=%#v err=%v", value, err)
 	}
 }
+
+func TestCustomerInstanceEndpoints(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-API-Key") != "secret" {
+			t.Fatalf("missing API key")
+		}
+		data := any(map[string]any{})
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/containers/svc-1/usage":
+			data = map[string]any{"cpu_usage_pct": 17.5}
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/containers/svc-1/history":
+			data = []map[string]any{{"ts": 1, "cpu": 17.5}}
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/containers/svc-1/traffic":
+			data = map[string]any{"total_used_bytes": 1024}
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/containers/svc-1/reset-password":
+			data = map[string]any{"password": "NewPass123"}
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/containers/svc-1/reinstall":
+			data = map[string]any{"task_id": "task-reinstall"}
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/containers/svc-1/random-port":
+			data = map[string]any{"port": 24001}
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/containers/svc-1/port-mappings":
+			data = []map[string]any{{"container_port": 80, "host_port": 24001, "protocol": "tcp"}}
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": data})
+	}))
+	defer server.Close()
+	client, _ := NewClient(server.URL, "secret", time.Second)
+	if value, err := client.ContainerUsage(context.Background(), "svc-1"); err != nil || value.(map[string]any)["cpu_usage_pct"] != float64(17.5) {
+		t.Fatalf("usage=%#v err=%v", value, err)
+	}
+	if _, err := client.ContainerHistory(context.Background(), "svc-1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.ContainerTraffic(context.Background(), "svc-1"); err != nil {
+		t.Fatal(err)
+	}
+	if password, err := client.ResetPassword(context.Background(), "svc-1", "NewPass123"); err != nil || password != "NewPass123" {
+		t.Fatalf("password=%q err=%v", password, err)
+	}
+	if task, err := client.Reinstall(context.Background(), "svc-1", ReinstallSpec{TemplateID: "debian", SSHAuthMode: "password", SSHPassword: "NewPass123"}); err != nil || task != "task-reinstall" {
+		t.Fatalf("task=%q err=%v", task, err)
+	}
+	port, err := client.RandomPort(context.Background(), "svc-1")
+	if err != nil || port != 24001 {
+		t.Fatalf("port=%d err=%v", port, err)
+	}
+	mappings, err := client.AddPortMapping(context.Background(), "svc-1", PortMapping{ContainerPort: 80, HostPort: port, Protocol: "tcp"})
+	if err != nil || len(mappings) != 1 || mappings[0].HostPort != 24001 {
+		t.Fatalf("mappings=%#v err=%v", mappings, err)
+	}
+}
+
+func TestConsoleTicketPreservesBrowserUserAgentAndTargetHidesCredential(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/vnc-ticket" || r.UserAgent() != "CustomerBrowser/1.0" {
+			t.Fatalf("path=%s user-agent=%q", r.URL.Path, r.UserAgent())
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]string{"ticket": "once-only"}})
+	}))
+	defer server.Close()
+	client, _ := NewClient(server.URL, "secret", time.Second)
+	ticket, err := client.ConsoleTicket(context.Background(), "svc-1", "vnc", "CustomerBrowser/1.0")
+	if err != nil || ticket != "once-only" {
+		t.Fatalf("ticket=%q err=%v", ticket, err)
+	}
+	target, err := client.ConsoleTarget("svc-1", "vnc")
+	if err != nil || target.Path != "/api/vnc" || target.Query().Get("container") != "svc-1" || target.Query().Get("api_key") != "" {
+		t.Fatalf("target=%v err=%v", target, err)
+	}
+}

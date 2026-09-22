@@ -214,6 +214,22 @@ export type CustomerServiceRecord = {
   last_reconcile_error?: string
 }
 
+export type PortMappingRecord = { container_port: number; host_port: number; host_ip?: string; protocol: string; description: string }
+export type ServiceRuntimeRecord = {
+  container: {
+    id: number; name: string; virtualization: string; status: string; template: string; ip: string; ipv6: string
+    vcpu: number; ram_mb: number; disk_gb: number; ssh_port: number; port_mapping_limit: number
+    port_mappings: PortMappingRecord[]; monthly_traffic_gb: number; network_down_mbps: number; network_up_mbps: number
+  }
+  usage?: Record<string, number>
+  history?: Array<Record<string, number | string>>
+  traffic?: Record<string, number | string>
+  templates: AvailableTemplateRecord[]
+  errors: Record<string, string>
+}
+export type ServiceCredentialRecord = { username: string; password: string; stored: boolean }
+export type ConsoleTicketRecord = { ticket: string; websocket_path: string }
+
 export type CustomerInvoiceRecord = {
   id: string
   number: string

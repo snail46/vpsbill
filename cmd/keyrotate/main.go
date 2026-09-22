@@ -64,6 +64,29 @@ func main() {
 		}
 		count++
 	}
+	serviceRows, err := tx.Query(ctx, `SELECT id,root_password_ciphertext FROM services WHERE root_password_ciphertext IS NOT NULL FOR UPDATE`)
+	if err != nil {
+		log.Fatal(err)
+	}
+	services := []secretRow{}
+	for serviceRows.Next() {
+		var row secretRow
+		if err := serviceRows.Scan(&row.id, &row.value); err != nil {
+			log.Fatal(err)
+		}
+		services = append(services, row)
+	}
+	serviceRows.Close()
+	for _, row := range services {
+		sealed, err := reencrypt(oldBox, newBox, row.value)
+		if err != nil {
+			log.Fatalf("cannot decrypt root password for service %s; rotation aborted", row.id)
+		}
+		if _, err = tx.Exec(ctx, `UPDATE services SET root_password_ciphertext=$2,updated_at=now() WHERE id=$1`, row.id, sealed); err != nil {
+			log.Fatal(err)
+		}
+		count++
+	}
 	userRows, err := tx.Query(ctx, `SELECT id,mfa_secret_encrypted,mfa_pending_secret_encrypted FROM users WHERE mfa_secret_encrypted IS NOT NULL OR mfa_pending_secret_encrypted IS NOT NULL FOR UPDATE`)
 	if err != nil {
 		log.Fatal(err)

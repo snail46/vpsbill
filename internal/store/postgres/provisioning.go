@@ -222,7 +222,7 @@ func (s *ProvisioningStore) ProvisionContext(ctx context.Context, jobID string) 
 	return result, nil
 }
 
-func (s *ProvisioningStore) CompleteProvision(ctx context.Context, jobID, workerID, externalID, externalUUID, ipv4, ipv6, runtimeStatus string) error {
+func (s *ProvisioningStore) CompleteProvision(ctx context.Context, jobID, workerID, externalID, externalUUID, ipv4, ipv6, runtimeStatus string, rootPasswordCiphertext []byte) error {
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		return err
@@ -242,9 +242,10 @@ func (s *ProvisioningStore) CompleteProvision(ctx context.Context, jobID, worker
 	if _, err := tx.Exec(ctx, `
 		UPDATE services SET status='active', runtime_status=$2, external_id=nullif($3,''), external_uuid=nullif($4,''),
 		    primary_ipv4=nullif($5,'')::inet, primary_ipv6=nullif($6,'')::inet,
+		    root_password_ciphertext=coalesce($7,root_password_ciphertext),
 		    last_reconciled_at=now(), last_reconcile_error=NULL, version=version+1, updated_at=now()
 		WHERE id=$1
-	`, serviceID, runtimeStatus, externalID, externalUUID, ipv4, ipv6); err != nil {
+	`, serviceID, runtimeStatus, externalID, externalUUID, ipv4, ipv6, rootPasswordCiphertext); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(ctx, `

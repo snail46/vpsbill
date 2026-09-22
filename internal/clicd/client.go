@@ -40,16 +40,38 @@ func IsNotFound(err error) bool {
 }
 
 type Container struct {
-	ID             int    `json:"id"`
-	UUID           string `json:"uuid"`
-	Name           string `json:"name"`
-	Virtualization string `json:"virtualization"`
-	Status         string `json:"status"`
-	IP             string `json:"ip"`
-	IPv6           string `json:"ipv6"`
-	VCPU           int    `json:"vcpu"`
-	RAMMB          int    `json:"ram_mb"`
-	DiskGB         int    `json:"disk_gb"`
+	ID               int           `json:"id"`
+	UUID             string        `json:"uuid"`
+	Name             string        `json:"name"`
+	Virtualization   string        `json:"virtualization"`
+	Status           string        `json:"status"`
+	Template         string        `json:"template"`
+	IP               string        `json:"ip"`
+	IPv6             string        `json:"ipv6"`
+	VCPU             int           `json:"vcpu"`
+	RAMMB            int           `json:"ram_mb"`
+	DiskGB           int           `json:"disk_gb"`
+	SSHPort          int           `json:"ssh_port"`
+	SSHPassword      string        `json:"ssh_password"`
+	PortMappings     []PortMapping `json:"port_mappings"`
+	PortMappingLimit int           `json:"port_mapping_limit"`
+	MonthlyTrafficGB int           `json:"monthly_traffic_gb"`
+	NetworkDownMbps  int           `json:"network_down_mbps"`
+	NetworkUpMbps    int           `json:"network_up_mbps"`
+}
+
+type PortMapping struct {
+	ContainerPort int    `json:"container_port"`
+	HostPort      int    `json:"host_port"`
+	HostIP        string `json:"host_ip,omitempty"`
+	Protocol      string `json:"protocol"`
+	Description   string `json:"description"`
+}
+
+type ReinstallSpec struct {
+	TemplateID  string `json:"template_id"`
+	SSHAuthMode string `json:"ssh_auth_mode"`
+	SSHPassword string `json:"ssh_password,omitempty"`
 }
 
 type CreateSpec struct {
@@ -156,6 +178,90 @@ func (c *Client) GetContainer(ctx context.Context, idOrName string) (Container, 
 	return response.Data, err
 }
 
+func (c *Client) ContainerUsage(ctx context.Context, idOrName string) (any, error) {
+	return c.readData(ctx, "/api/v1/containers/"+url.PathEscape(idOrName)+"/usage")
+}
+
+func (c *Client) ContainerHistory(ctx context.Context, idOrName string) (any, error) {
+	return c.readData(ctx, "/api/v1/containers/"+url.PathEscape(idOrName)+"/history")
+}
+
+func (c *Client) ContainerTraffic(ctx context.Context, idOrName string) (any, error) {
+	return c.readData(ctx, "/api/v1/containers/"+url.PathEscape(idOrName)+"/traffic")
+}
+
+func (c *Client) ResetPassword(ctx context.Context, idOrName, password string) (string, error) {
+	var response APIResponse[map[string]string]
+	err := c.do(ctx, http.MethodPost, "/api/v1/containers/"+url.PathEscape(idOrName)+"/reset-password", map[string]string{"password": password}, &response)
+	return response.Data["password"], err
+}
+
+func (c *Client) Reinstall(ctx context.Context, idOrName string, spec ReinstallSpec) (string, error) {
+	var response APIResponse[map[string]any]
+	err := c.do(ctx, http.MethodPost, "/api/v1/containers/"+url.PathEscape(idOrName)+"/reinstall", spec, &response)
+	if err != nil {
+		return "", err
+	}
+	return taskID(response.Data), nil
+}
+
+func (c *Client) AddPortMapping(ctx context.Context, idOrName string, mapping PortMapping) ([]PortMapping, error) {
+	var response APIResponse[[]PortMapping]
+	err := c.do(ctx, http.MethodPost, "/api/v1/containers/"+url.PathEscape(idOrName)+"/port-mappings", mapping, &response)
+	return response.Data, err
+}
+
+func (c *Client) UpdatePortMapping(ctx context.Context, idOrName string, index int, mapping PortMapping) ([]PortMapping, error) {
+	var response APIResponse[[]PortMapping]
+	path := fmt.Sprintf("/api/v1/containers/%s/port-mappings/%d", url.PathEscape(idOrName), index)
+	err := c.do(ctx, http.MethodPut, path, mapping, &response)
+	return response.Data, err
+}
+
+func (c *Client) DeletePortMapping(ctx context.Context, idOrName string, index int) ([]PortMapping, error) {
+	var response APIResponse[[]PortMapping]
+	path := fmt.Sprintf("/api/v1/containers/%s/port-mappings/%d", url.PathEscape(idOrName), index)
+	err := c.do(ctx, http.MethodDelete, path, nil, &response)
+	return response.Data, err
+}
+
+func (c *Client) RandomPort(ctx context.Context, idOrName string) (int, error) {
+	var response APIResponse[map[string]int]
+	err := c.do(ctx, http.MethodGet, "/api/v1/containers/"+url.PathEscape(idOrName)+"/random-port", nil, &response)
+	return response.Data["port"], err
+}
+
+func (c *Client) ConsoleTicket(ctx context.Context, idOrName, kind, userAgent string) (string, error) {
+	path := "/api/v1/ssh-ticket"
+	if kind == "vnc" {
+		path = "/api/v1/vnc-ticket"
+	} else if kind != "ssh" {
+		return "", errors.New("unsupported console kind")
+	}
+	var response APIResponse[map[string]string]
+	err := c.doWithHeaders(ctx, http.MethodPost, path, map[string]string{"container_name": idOrName}, &response, map[string]string{"User-Agent": userAgent})
+	return response.Data["ticket"], err
+}
+
+// ConsoleTarget returns the node websocket proxy target without exposing its
+// address to the browser. Authentication is carried by a short-lived ticket.
+func (c *Client) ConsoleTarget(idOrName, kind string) (*url.URL, error) {
+	base, err := url.Parse(c.baseURL)
+	if err != nil {
+		return nil, err
+	}
+	switch kind {
+	case "ssh":
+		base.Path = "/api/ssh"
+	case "vnc":
+		base.Path = "/api/vnc"
+	default:
+		return nil, errors.New("unsupported console kind")
+	}
+	base.RawQuery = url.Values{"container": []string{idOrName}}.Encode()
+	return base, nil
+}
+
 func (c *Client) CreateContainer(ctx context.Context, spec CreateSpec) error {
 	var response APIResponse[json.RawMessage]
 	return c.do(ctx, http.MethodPost, "/api/v1/containers", spec, &response)
@@ -177,15 +283,19 @@ func (c *Client) PowerAction(ctx context.Context, idOrName, action string) (stri
 	if err != nil {
 		return "", err
 	}
+	return taskID(response.Data), nil
+}
+
+func taskID(data map[string]any) string {
 	for _, key := range []string{"task_id", "id"} {
-		if value, ok := response.Data[key].(string); ok {
-			return value, nil
+		if value, ok := data[key].(string); ok {
+			return value
 		}
-		if value, ok := response.Data[key].(float64); ok {
-			return fmt.Sprintf("%.0f", value), nil
+		if value, ok := data[key].(float64); ok {
+			return fmt.Sprintf("%.0f", value)
 		}
 	}
-	return "", nil
+	return ""
 }
 
 // DeleteContainer submits CLICD's documented DELETE .../{id-or-name}/delete action.
@@ -245,6 +355,10 @@ func isDefinitiveCreateError(err error) bool {
 }
 
 func (c *Client) do(ctx context.Context, method, path string, body any, target any) error {
+	return c.doWithHeaders(ctx, method, path, body, target, nil)
+}
+
+func (c *Client) doWithHeaders(ctx context.Context, method, path string, body any, target any, headers map[string]string) error {
 	var reader io.Reader
 	if body != nil {
 		encoded, err := json.Marshal(body)
@@ -259,6 +373,9 @@ func (c *Client) do(ctx context.Context, method, path string, body any, target a
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("X-API-Key", c.apiKey)
+	for name, value := range headers {
+		req.Header.Set(name, value)
+	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}

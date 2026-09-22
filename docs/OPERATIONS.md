@@ -42,7 +42,7 @@ chmod +x deploy.sh backup.sh restore.sh rotate-key.sh
 ./rotate-key.sh --confirm
 ```
 
-脚本停止 API，在单个数据库事务中重新加密全部 CLICD API Key、已启用及待确认的 TOTP 密钥，以及安装页保存的支付、通知和 Metrics 密钥；任一记录解密失败则整体回滚。成功后原子替换 `.env` 并重建 API 容器。
+脚本停止 API，在单个数据库事务中重新加密全部 CLICD API Key、服务 root 密码、已启用及待确认的 TOTP 密钥，以及安装页保存的支付、通知和 Metrics 密钥；任一记录解密失败则整体回滚。成功后原子替换 `.env` 并重建 API 容器。
 
 ## 日常检查
 

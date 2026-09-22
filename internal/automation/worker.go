@@ -131,8 +131,15 @@ func (w *Worker) executeProvision(parent context.Context, job postgres.Provision
 		return err
 	}
 	runtimeStatus := normalizeRuntimeStatus(result.Container.Status)
+	var rootPasswordCiphertext []byte
+	if result.Container.SSHPassword != "" {
+		rootPasswordCiphertext, err = w.box.Seal(result.Container.SSHPassword)
+		if err != nil {
+			return fmt.Errorf("encrypt initial root password: %w", err)
+		}
+	}
 	return w.store.CompleteProvision(parent, job.ID, w.workerID, strconv.Itoa(result.Container.ID), result.Container.UUID,
-		result.Container.IP, result.Container.IPv6, runtimeStatus)
+		result.Container.IP, result.Container.IPv6, runtimeStatus, rootPasswordCiphertext)
 }
 
 func (w *Worker) executePowerAction(parent context.Context, job postgres.ProvisioningJob) error {

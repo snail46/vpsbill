@@ -136,7 +136,7 @@ docker compose --env-file .env -f deploy/docker-compose.yml logs -f --tail=200
 登录商家后台后添加区域、套餐和节点。节点需要：
 
 - 管理网络可访问的 CLICD Base URL；
-- 仅具备所需实例查询、创建、启动、停止和删除权限的 API Key；
+- 仅具备 `host:read`、`dashboard:read`、`image:read`、`container:read`、`container:create`、`container:power`、`container:delete`、`container:reinstall`、`container:password`、`container:network`、`terminal:ssh`、`terminal:vnc` 权限的独立 API Key；
 - 正确的 LXC/KVM 类型、CPU、内存和磁盘容量。
 
 先用测试套餐完成一次“下单 → 到账 → 自动开通 → 启停 → 对账”，再开放真实销售。支付回调和收银台协议分别见 `PAYMENT-WEBHOOK.md` 与 `PAYMENT-CHECKOUT.md`。
@@ -151,7 +151,7 @@ cd /opt/clicd-nat
 ./backup.sh /var/backups/clicd
 ```
 
-数据库备份之外，必须把 `.env` 中的 `ENCRYPTION_KEY` 单独保存到密码管理器或离线保险库；缺少它将无法解密节点 API Key 和 TOTP 密钥。备份文件和 `.env` 不应只存放在同一台服务器。
+数据库备份之外，必须把 `.env` 中的 `ENCRYPTION_KEY` 单独保存到密码管理器或离线保险库；缺少它将无法解密节点 API Key、服务 root 密码和 TOTP 密钥。备份文件和 `.env` 不应只存放在同一台服务器。
 
 更新版本：
 
