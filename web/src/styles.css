@@ -230,7 +230,15 @@ tr:last-child td { border-bottom: 0; }
 .checkout-success { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 18px 20px; border: 1px solid rgba(91,208,170,.3); border-radius: 12px; background: rgba(91,208,170,.07); }
 .checkout-success > div { display: flex; flex-direction: column; gap: 5px; }
 .checkout-success span { color: #829089; font-size: 12px; }
-.error-cell { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #d5a1a6; }
+.error-cell { width: min(36vw, 460px); min-width: 260px; color: #d5a1a6; vertical-align: top; }
+.job-error-text,.job-error-details summary,.job-error-details pre { white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; line-height: 1.55; }
+.job-error-empty { color: #657087; }
+.job-error-details summary { display: block; cursor: pointer; color: #d5a1a6; }
+.job-error-details summary::-webkit-details-marker { display: none; }
+.job-error-details summary b { display: block; width: fit-content; margin-top: 7px; color: #93a0ff; font-size: 10px; font-weight: 600; }
+.job-error-details[open] summary { color: #8c7780; }
+.job-error-details[open] summary b::after { content: '（点击收起）'; }
+.job-error-details pre { max-height: 320px; margin: 10px 0 0; padding: 12px; overflow: auto; border: 1px solid #302735; border-radius: 8px; color: #ffb2b8; background: #100d15; font: 400 11px/1.55 'DM Mono',monospace; user-select: text; }
 .customer-shell { background: radial-gradient(circle at 86% 4%, rgba(52,175,143,.12), transparent 25%), #080b14; }
 .customer-shell .nav-item.active { color: #76dbba; background: #13221f; }
 .customer-hero { border-color: #244039; background: linear-gradient(135deg, rgba(20,50,45,.94), rgba(13,18,32,.96)); }
