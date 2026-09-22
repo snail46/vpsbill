@@ -23,6 +23,78 @@ chmod +x deploy.sh
 
 在线支付默认关闭。配置 `PAYMENT_CHECKOUT_URL`、`PAYMENT_PROVIDER_NAME` 和公开 HTTPS `PUBLIC_URL` 后，客户可以从账单进入外部收银台；未配置时仅允许后台人工确认到账。
 
+## 预构建镜像一键部署
+
+`main` 分支每次通过完整 CI 后，GitHub Actions 会构建并推送以下多架构镜像（`linux/amd64`、`linux/arm64`）：
+
+```text
+ghcr.io/snail468/clicd-nat-api:latest
+ghcr.io/snail468/clicd-nat-web:latest
+```
+
+同时发布不可变的提交标签 `sha-<完整提交哈希>`。生产环境建议在 `.env` 中固定该标签，需要升级时再明确修改：
+
+```dotenv
+IMAGE_TAG=sha-完整的40位Git提交哈希
+```
+
+服务器不需要 Git、Go、Node 或项目源码，只需：
+
+```text
+docker-compose.yml   # 使用 deploy/docker-compose.image.yml 的内容
+.env                 # 参考 .env.example，必须使用独立随机密钥
+```
+
+镜像版 Compose 内嵌了 Caddy 配置，要求 Docker Compose 2.23.1 或更高版本。
+
+### 私有 GHCR 登录
+
+仓库及 GHCR 镜像保持私有时，先在 GitHub 创建仅含 `read:packages` 权限的 Personal access token (classic)，然后在服务器执行一次：
+
+```sh
+export CR_PAT='粘贴只读Token'
+printf '%s' "$CR_PAT" | docker login ghcr.io -u snail468 --password-stdin
+unset CR_PAT
+```
+
+不要把 Token 写入 `.env` 或 Compose。若以后把两个 GHCR Package 单独设为 Public，则拉取镜像不需要登录，GitHub 源码仓库仍可保持 Private；但任何人都能下载镜像。
+
+### HTTPS 一条命令启动
+
+`.env` 至少需要设置：
+
+```dotenv
+IMAGE_TAG=latest
+APP_PORT=127.0.0.1:8080
+PUBLIC_URL=https://billing.example.com
+DOMAIN=billing.example.com
+POSTGRES_DB=clicd_billing
+POSTGRES_USER=clicd
+POSTGRES_PASSWORD=随机长密码
+SESSION_SECRET=64位十六进制随机值
+ENCRYPTION_KEY=64位十六进制随机值
+PAYMENT_WEBHOOK_SECRET=64位十六进制随机值
+NOTIFICATION_WEBHOOK_SECRET=64位十六进制随机值
+METRICS_TOKEN=64位十六进制随机值
+```
+
+在 Compose 和 `.env` 所在目录执行：
+
+```sh
+docker compose --env-file .env -f docker-compose.yml --profile tls up -d --pull always
+```
+
+该命令会拉取新镜像、创建 PostgreSQL/API/Web/Caddy 容器、等待数据库和 API 健康后启动入口。验证：
+
+```sh
+docker compose --env-file .env -f docker-compose.yml ps
+curl --fail https://billing.example.com/health/ready
+```
+
+不使用域名的临时 HTTP 模式将 `DOMAIN` 留空、配置 `PUBLIC_URL=http://服务器IP:8080` 和 `APP_PORT=8080`，然后去掉 `--profile tls`。HTTP 模式不适合正式业务。
+
+更新 `latest` 镜像仍使用同一条 `up -d --pull always` 命令。固定 SHA 标签时，应先完成数据库备份，再把 `IMAGE_TAG` 修改为新的 Actions 提交标签。数据库卷不会因容器更新而删除；不要运行 `down -v`。
+
 ## 本地开发
 
 API 需要 PostgreSQL：

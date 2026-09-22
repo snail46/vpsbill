@@ -59,6 +59,8 @@ jobs:
           docker compose version
           docker compose --env-file .env.example -f deploy/docker-compose.yml config --quiet
           docker compose --env-file .env.example -f deploy/docker-compose.yml --profile tls config --quiet
+          docker compose --env-file .env.example -f deploy/docker-compose.image.yml config --quiet
+          docker compose --env-file .env.example -f deploy/docker-compose.image.yml --profile tls config --quiet
       - name: Build production images
         run: |
           docker build --pull -t clicd-billing-api:test .
@@ -69,6 +71,14 @@ jobs:
           docker run --rm \
             -e DOMAIN=billing.example.com \
             -v "$PWD/deploy/Caddyfile:/etc/caddy/Caddyfile:ro" \
+            caddy:2.11.4-alpine \
+            caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+          DOMAIN=billing.example.com PUBLIC_URL=https://billing.example.com APP_PORT=127.0.0.1:8080 \
+            docker compose --env-file .env.example -f deploy/docker-compose.image.yml --profile tls config --format json \
+            | jq -r '.configs.caddyfile.content' > /tmp/Caddyfile.image
+          docker run --rm \
+            -e DOMAIN=billing.example.com \
+            -v "/tmp/Caddyfile.image:/etc/caddy/Caddyfile:ro" \
             caddy:2.11.4-alpine \
             caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
       - name: Start and smoke-test the production Compose stack
@@ -109,3 +119,52 @@ jobs:
           if [ -f .env ]; then
             docker compose --env-file .env -f deploy/docker-compose.yml down --volumes --remove-orphans
           fi
+
+  publish-images:
+    name: Publish ${{ matrix.image }} image
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: api
+            context: .
+            dockerfile: ./Dockerfile
+          - image: web
+            context: ./web
+            dockerfile: ./web/Dockerfile
+    steps:
+      - uses: actions/checkout@v6
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Generate image metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ghcr.io/${{ github.repository }}-${{ matrix.image }}
+          tags: |
+            type=raw,value=latest
+            type=sha,format=long,prefix=sha-
+      - name: Build and publish multi-platform image
+        uses: docker/build-push-action@v7
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}
