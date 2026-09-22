@@ -94,7 +94,10 @@ func main() {
 		}
 		count++
 	}
-	if _, err = tx.Exec(ctx, `INSERT INTO audit_logs(actor_type,action,target_type,metadata) VALUES('system','encryption_key.rotated','system',jsonb_build_object('records',$1))`, count); err != nil {
+	// jsonb_build_object accepts "any", so PostgreSQL cannot infer the type of a
+	// standalone bind parameter. Keep the cast explicit for the extended query
+	// protocol used by pgx.
+	if _, err = tx.Exec(ctx, `INSERT INTO audit_logs(actor_type,action,target_type,metadata) VALUES('system','encryption_key.rotated','system',jsonb_build_object('records',$1::integer))`, count); err != nil {
 		log.Fatal(err)
 	}
 	if err = tx.Commit(ctx); err != nil {

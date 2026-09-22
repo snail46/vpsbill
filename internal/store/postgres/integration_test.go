@@ -8,6 +8,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"clicd-billing/internal/security"
 )
 
 func TestBillingLifecycleIntegration(t *testing.T) {
@@ -98,8 +100,17 @@ func TestBillingLifecycleIntegration(t *testing.T) {
 		t.Fatalf("payment replay was not ignored: %+v", replayed)
 	}
 	serviceID := initial.ServiceIDs[0]
+	testEncryptionKey := strings.Repeat("0123456789abcdef", 4)
+	testSecretBox, err := security.NewSecretBox(testEncryptionKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	testNodeAPIKey, err := testSecretBox.Seal("integration-node-api-key")
+	if err != nil {
+		t.Fatal(err)
+	}
 	var nodeID string
-	if err = db.QueryRow(ctx, `INSERT INTO nodes(region_id,name,base_url,api_key_ciphertext,status,virtualization_types,capacity_vcpu,capacity_ram_mb,capacity_disk_gb) VALUES($1,'integration-node','https://node.example.test',decode('00','hex'),'online',ARRAY['lxc'],8,8192,1000) RETURNING id`, regionID).Scan(&nodeID); err != nil {
+	if err = db.QueryRow(ctx, `INSERT INTO nodes(region_id,name,base_url,api_key_ciphertext,status,virtualization_types,capacity_vcpu,capacity_ram_mb,capacity_disk_gb) VALUES($1,'integration-node','https://node.example.test',$2,'online',ARRAY['lxc'],8,8192,1000) RETURNING id`, regionID, testNodeAPIKey).Scan(&nodeID); err != nil {
 		t.Fatal(err)
 	}
 	provisioning := NewProvisioningStore(db)
