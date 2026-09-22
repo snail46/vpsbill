@@ -1,0 +1,14 @@
+.env
+.cache/
+.pnpm-store/
+.idea/
+.vscode/
+*.log
+coverage.out
+web/node_modules/
+web/dist/
+web/*.tsbuildinfo
+backups/
+*.dump
+*.sha256
+*.exe

@@ -1,0 +1,9 @@
+.git
+.gitignore
+.env
+.cache
+.pnpm-store
+web/node_modules
+web/dist
+**/*_test.go
+*.exe
