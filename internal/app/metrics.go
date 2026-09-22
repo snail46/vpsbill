@@ -6,21 +6,23 @@ import (
 	"net/http"
 	"strings"
 
+	"clicd-billing/internal/settings"
 	"clicd-billing/internal/store/postgres"
 )
 
 type metricsAPI struct {
-	store *postgres.MonitoringStore
-	token string
+	store    *postgres.MonitoringStore
+	settings *settings.Manager
 }
 
-func newMetricsAPI(store *postgres.MonitoringStore, token string) *metricsAPI {
-	return &metricsAPI{store: store, token: token}
+func newMetricsAPI(store *postgres.MonitoringStore, runtime *settings.Manager) *metricsAPI {
+	return &metricsAPI{store: store, settings: runtime}
 }
 func (m *metricsAPI) serve(w http.ResponseWriter, r *http.Request) {
-	if m.token != "" {
+	token := m.settings.Current().MetricsToken
+	if token != "" {
 		provided := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-		if subtle.ConstantTimeCompare([]byte(provided), []byte(m.token)) != 1 {
+		if subtle.ConstantTimeCompare([]byte(provided), []byte(token)) != 1 {
 			w.Header().Set("WWW-Authenticate", "Bearer")
 			writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "authentication_required"})
 			return

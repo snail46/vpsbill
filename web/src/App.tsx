@@ -28,9 +28,9 @@ import {
 } from 'lucide-react'
 import { AccountRecord, api, AuditLogRecord, CustomerCatalogRecord, CustomerIdentity, CustomerInvoiceRecord, CustomerServiceRecord, CustomerTransactionRecord, InvoiceRecord, NodeRecord, OrderRecord, PaymentIntentRecord, PlanRecord, ProvisioningJobRecord, RegionRecord, ServiceRecord, StaffUser, TicketDetailRecord, TicketRecord, TransactionRecord } from './api'
 
-type Meta = { name: string; environment: string; capabilities: string[] }
+type Meta = { name: string; environment: string; installed: boolean; capabilities: string[] }
 type View = 'overview' | 'customers' | 'orders' | 'billing' | 'services' | 'nodes' | 'plans' | 'support' | 'audit' | 'security'
-type AuthScreen = 'loading' | 'bootstrap' | 'login' | 'ready'
+type AuthScreen = 'loading' | 'install' | 'login' | 'ready'
 
 const navItems: Array<{ id: View | 'disabled'; label: string; icon: typeof LayoutDashboard }> = [
   { id: 'overview', label: '运营概览', icon: LayoutDashboard },
@@ -55,17 +55,21 @@ function AdminApp() {
   const [user, setUser] = useState<StaffUser | null>(null)
 
   useEffect(() => {
-    api<Meta>('/api/v1/meta').then(setMeta).catch(() => undefined)
-    api<StaffUser>('/api/v1/auth/me')
-      .then((current) => {
-        setUser(current)
-        setAuthScreen('ready')
+    Promise.all([api<Meta>('/api/v1/meta'), api<{ required: boolean }>('/api/v1/install')])
+      .then(async ([currentMeta, installation]) => {
+        setMeta(currentMeta)
+        if (installation.required) { setAuthScreen('install'); return }
+        try {
+          const current = await api<StaffUser>('/api/v1/auth/me')
+          setUser(current); setAuthScreen('ready')
+        } catch { setAuthScreen('login') }
       })
-      .catch(async () => {
-        const state = await api<{ required: boolean }>('/api/v1/auth/bootstrap')
-        setAuthScreen(state.required ? 'bootstrap' : 'login')
-      })
+      .catch(() => setAuthScreen('login'))
   }, [])
+
+  if (authScreen === 'install') {
+    return <InstallPage onInstalled={(current, appName) => { setMeta((value) => value ? {...value, name: appName, installed: true} : value); setUser(current); setAuthScreen('ready') }}/>
+  }
 
   if (authScreen !== 'ready' || !user) {
     return (
@@ -94,8 +98,6 @@ function AdminApp() {
 }
 
 function AuthPage({ appName, mode, onAuthenticated }: { appName: string; mode: AuthScreen; onAuthenticated: (user: StaffUser) => void }) {
-  const bootstrap = mode === 'bootstrap'
-  const [displayName, setDisplayName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [totpCode, setTotpCode] = useState('')
@@ -107,10 +109,9 @@ function AuthPage({ appName, mode, onAuthenticated }: { appName: string; mode: A
     setSubmitting(true)
     setError('')
     try {
-      const body = bootstrap ? { display_name: displayName, email, password } : { email, password, totp_code: totpCode }
-      const current = await api<StaffUser>(bootstrap ? '/api/v1/auth/bootstrap' : '/api/v1/auth/login', {
+      const current = await api<StaffUser>('/api/v1/auth/login', {
         method: 'POST',
-        body: JSON.stringify(body),
+        body: JSON.stringify({ email, password, totp_code: totpCode }),
       })
       onAuthenticated(current)
     } catch (requestError) {
@@ -133,26 +134,62 @@ function AuthPage({ appName, mode, onAuthenticated }: { appName: string; mode: A
       </section>
       <section className="auth-form-panel">
         <form className="auth-form" onSubmit={submit}>
-          <p className="eyebrow">{bootstrap ? 'FIRST RUN' : 'ADMIN ACCESS'}</p>
-          <h2>{bootstrap ? '创建初始管理员' : '登录商家后台'}</h2>
-          <p>{bootstrap ? '该入口仅在系统没有管理员时开放。' : '使用管理员账号继续。'}</p>
-          {bootstrap && <Field label="管理员姓名" value={displayName} onChange={setDisplayName} autoComplete="name" />}
+          <p className="eyebrow">ADMIN ACCESS</p>
+          <h2>登录商家后台</h2>
+          <p>使用管理员账号继续。</p>
           <Field label="邮箱" value={email} onChange={setEmail} type="email" autoComplete="email" />
-          <Field label="密码" value={password} onChange={setPassword} type="password" autoComplete={bootstrap ? 'new-password' : 'current-password'} hint={bootstrap ? '至少 12 个字符' : undefined} />
-          {!bootstrap && <Field label="二步验证码（启用后填写）" value={totpCode} onChange={setTotpCode} autoComplete="one-time-code" />}
+          <Field label="密码" value={password} onChange={setPassword} type="password" autoComplete="current-password" />
+          <Field label="二步验证码（启用后填写）" value={totpCode} onChange={setTotpCode} autoComplete="one-time-code" required={false} />
           {error && <div className="form-error" role="alert">{error}</div>}
           <button className="primary-button" disabled={submitting || mode === 'loading'}>
-            {mode === 'loading' ? '检查系统状态…' : submitting ? '处理中…' : bootstrap ? '创建并进入后台' : '登录'}
+            {mode === 'loading' ? '检查系统状态…' : submitting ? '处理中…' : '登录'}
           </button>
-          {!bootstrap && <a className="auth-switch" href="/portal"><Users size={15}/>前往客户中心</a>}
+          <a className="auth-switch" href="/portal"><Users size={15}/>前往客户中心</a>
         </form>
       </section>
     </main>
   )
 }
 
-function Field({ label, value, onChange, type = 'text', autoComplete, hint }: { label: string; value: string; onChange: (value: string) => void; type?: string; autoComplete?: string; hint?: string }) {
-  return <label className="field"><span>{label}{hint && <small>{hint}</small>}</span><input required value={value} type={type} autoComplete={autoComplete} onChange={(event) => onChange(event.target.value)} /></label>
+type InstallResponse = { user: StaffUser; generated_secrets: Record<string, string> }
+
+function InstallPage({ onInstalled }: { onInstalled: (user: StaffUser, appName: string) => void }) {
+  const [form, setForm] = useState({
+    app_name: 'CLICD Billing', public_url: window.location.origin, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Shanghai',
+    payment_provider_name: 'generic', payment_checkout_url: '', payment_webhook_secret: '',
+    notification_webhook_url: '', notification_webhook_secret: '', metrics_token: '',
+    worker_poll_interval: '3s', reconcile_interval: '5m', lifecycle_interval: '1m', renewal_lead_time: '168h', overdue_grace_period: '72h', termination_retention: '168h',
+    admin_display_name: '', admin_email: '', admin_password: '',
+  })
+  const [result, setResult] = useState<InstallResponse | null>(null)
+  const [error, setError] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const update = (key: keyof typeof form) => (value: string) => setForm((current) => ({...current, [key]: value}))
+
+  async function submit(event: FormEvent) {
+    event.preventDefault(); setSubmitting(true); setError('')
+    try { setResult(await api<InstallResponse>('/api/v1/install', { method: 'POST', body: JSON.stringify(form) })) }
+    catch (requestError) { setError(requestError instanceof Error ? requestError.message : '安装失败') }
+    finally { setSubmitting(false) }
+  }
+
+  if (result) {
+    return <main className="installer-page"><section className="installer-card installer-complete"><div className="brand"><div className="brand-mark">CB</div><div><strong>{form.app_name}</strong><span>首次安装已完成</span></div></div><ShieldCheck size={52}/><h1>系统已经可以使用</h1><p>数据库初始化、运行参数和超级管理员已原子写入。下面的自动生成密钥只显示一次，请立即保存到密码管理器。</p>{Object.entries(result.generated_secrets).length > 0 && <div className="generated-secrets">{Object.entries(result.generated_secrets).map(([key,value])=><label key={key}><span>{key}</span><code>{value}</code></label>)}</div>}<button className="primary-button" onClick={()=>onInstalled(result.user,form.app_name)}>进入商家后台</button></section></main>
+  }
+
+  return <main className="installer-page"><form className="installer-card" onSubmit={submit}>
+    <header className="installer-header"><div><p className="eyebrow">FIRST-RUN INSTALLER</p><h1>初始化 CLICD Billing</h1><p>容器基础密钥已经就绪。请在这里配置站点、支付通知和首个管理员。</p></div><div className="installer-step">一次提交<br/><strong>事务安装</strong></div></header>
+    <section className="installer-section"><h3>1. 站点设置</h3><div className="installer-grid"><Field label="站点名称" value={form.app_name} onChange={update('app_name')}/><Field label="公开访问地址" value={form.public_url} onChange={update('public_url')} type="url" hint="用于支付回调"/><Field label="时区" value={form.timezone} onChange={update('timezone')}/></div></section>
+    <section className="installer-section"><h3>2. 支付与通知</h3><div className="installer-grid"><Field label="支付服务商标识" value={form.payment_provider_name} onChange={update('payment_provider_name')}/><Field label="外部收银台地址（可选）" value={form.payment_checkout_url} onChange={update('payment_checkout_url')} type="url" required={false}/><Field label="支付回调密钥（留空自动生成）" value={form.payment_webhook_secret} onChange={update('payment_webhook_secret')} type="password" required={false}/><Field label="通知 Webhook（可选）" value={form.notification_webhook_url} onChange={update('notification_webhook_url')} type="url" required={false}/><Field label="通知签名密钥（留空自动生成）" value={form.notification_webhook_secret} onChange={update('notification_webhook_secret')} type="password" required={false}/><Field label="Metrics Token（留空自动生成）" value={form.metrics_token} onChange={update('metrics_token')} type="password" required={false}/></div></section>
+    <details className="installer-section"><summary>3. 自动化时间参数（已有安全默认值）</summary><div className="installer-grid advanced-grid"><Field label="任务轮询" value={form.worker_poll_interval} onChange={update('worker_poll_interval')}/><Field label="节点对账" value={form.reconcile_interval} onChange={update('reconcile_interval')}/><Field label="账务扫描" value={form.lifecycle_interval} onChange={update('lifecycle_interval')}/><Field label="提前续费" value={form.renewal_lead_time} onChange={update('renewal_lead_time')}/><Field label="逾期宽限" value={form.overdue_grace_period} onChange={update('overdue_grace_period')}/><Field label="删除保留" value={form.termination_retention} onChange={update('termination_retention')}/></div></details>
+    <section className="installer-section"><h3>4. 超级管理员</h3><div className="installer-grid"><Field label="管理员姓名" value={form.admin_display_name} onChange={update('admin_display_name')} autoComplete="name"/><Field label="管理员邮箱" value={form.admin_email} onChange={update('admin_email')} type="email" autoComplete="email"/><Field label="管理员密码" value={form.admin_password} onChange={update('admin_password')} type="password" autoComplete="new-password" hint="至少 12 个字符"/></div></section>
+    {error && <div className="form-error" role="alert">{error}</div>}
+    <footer className="installer-footer"><span><ShieldCheck size={16}/>敏感配置将使用 AES-256-GCM 加密保存</span><button className="primary-button compact" disabled={submitting}>{submitting?'正在初始化…':'完成安装'}</button></footer>
+  </form></main>
+}
+
+function Field({ label, value, onChange, type = 'text', autoComplete, hint, required = true }: { label: string; value: string; onChange: (value: string) => void; type?: string; autoComplete?: string; hint?: string; required?: boolean }) {
+  return <label className="field"><span>{label}{hint && <small>{hint}</small>}</span><input required={required} value={value} type={type} autoComplete={autoComplete} onChange={(event) => onChange(event.target.value)} /></label>
 }
 
 type CustomerAuthScreen = 'loading' | 'login' | 'register' | 'ready'
@@ -161,7 +198,7 @@ type PortalView = 'overview' | 'shop' | 'services' | 'billing' | 'support' | 'pr
 function CustomerPortalApp(){
   const [screen,setScreen]=useState<CustomerAuthScreen>('loading')
   const [customer,setCustomer]=useState<CustomerIdentity|null>(null)
-  useEffect(()=>{api<CustomerIdentity>('/api/v1/customer/auth/me').then((value)=>{setCustomer(value);setScreen('ready')}).catch(()=>setScreen('login'))},[])
+  useEffect(()=>{api<{required:boolean}>('/api/v1/install').then((installation)=>{if(installation.required){window.location.replace('/');return}return api<CustomerIdentity>('/api/v1/customer/auth/me').then((value)=>{setCustomer(value);setScreen('ready')}).catch(()=>setScreen('login'))}).catch(()=>setScreen('login'))},[])
   if(screen!=='ready'||!customer)return <CustomerAuthPage mode={screen} onMode={setScreen} onAuthenticated={(value)=>{setCustomer(value);setScreen('ready')}}/>
   return <CustomerShell customer={customer} onLogout={async()=>{await api('/api/v1/customer/auth/logout',{method:'POST'});setCustomer(null);setScreen('login')}}/>
 }

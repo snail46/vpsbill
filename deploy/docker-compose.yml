@@ -20,18 +20,19 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     environment:
+      # Optional mappings preserve settings during upgrades from pre-installer releases.
       APP_NAME: ${APP_NAME:-CLICD Billing}
       APP_ENV: production
       HTTP_ADDR: :8080
       DATABASE_URL: postgres://${POSTGRES_USER:-clicd}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-clicd_billing}?sslmode=disable
       SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET is required}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:?ENCRYPTION_KEY is required}
-      PAYMENT_WEBHOOK_SECRET: ${PAYMENT_WEBHOOK_SECRET:?PAYMENT_WEBHOOK_SECRET is required}
+      PAYMENT_WEBHOOK_SECRET: ${PAYMENT_WEBHOOK_SECRET:-}
       PAYMENT_CHECKOUT_URL: ${PAYMENT_CHECKOUT_URL:-}
       PAYMENT_PROVIDER_NAME: ${PAYMENT_PROVIDER_NAME:-generic}
       NOTIFICATION_WEBHOOK_URL: ${NOTIFICATION_WEBHOOK_URL:-}
       NOTIFICATION_WEBHOOK_SECRET: ${NOTIFICATION_WEBHOOK_SECRET:-}
-      METRICS_TOKEN: ${METRICS_TOKEN:?METRICS_TOKEN is required}
+      METRICS_TOKEN: ${METRICS_TOKEN:-}
       WORKER_POLL_INTERVAL: ${WORKER_POLL_INTERVAL:-3s}
       RECONCILE_INTERVAL: ${RECONCILE_INTERVAL:-5m}
       LIFECYCLE_INTERVAL: ${LIFECYCLE_INTERVAL:-1m}
@@ -39,7 +40,6 @@ services:
       OVERDUE_GRACE_PERIOD: ${OVERDUE_GRACE_PERIOD:-72h}
       TERMINATION_RETENTION: ${TERMINATION_RETENTION:-168h}
       PUBLIC_URL: ${PUBLIC_URL:-http://localhost:8080}
-      TZ: ${TZ:-Asia/Shanghai}
     depends_on:
       postgres:
         condition: service_healthy

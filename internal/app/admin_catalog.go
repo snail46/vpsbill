@@ -6,19 +6,17 @@ import (
 	"time"
 
 	"clicd-billing/internal/clicd"
-	"clicd-billing/internal/config"
 	"clicd-billing/internal/security"
 	"clicd-billing/internal/store/postgres"
 )
 
 type adminCatalog struct {
-	cfg   config.Config
 	store *postgres.CatalogStore
 	box   *security.SecretBox
 }
 
-func newAdminCatalog(cfg config.Config, store *postgres.CatalogStore, box *security.SecretBox) *adminCatalog {
-	return &adminCatalog{cfg: cfg, store: store, box: box}
+func newAdminCatalog(store *postgres.CatalogStore, box *security.SecretBox) *adminCatalog {
+	return &adminCatalog{store: store, box: box}
 }
 
 func (a *adminCatalog) listNodes(w http.ResponseWriter, r *http.Request) {

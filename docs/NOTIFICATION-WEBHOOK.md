@@ -1,6 +1,6 @@
 # 通知事件 Webhook
 
-系统使用数据库 Outbox 可靠投递订单、工单和服务生命周期事件。配置 `NOTIFICATION_WEBHOOK_URL` 与至少 32 字符的 `NOTIFICATION_WEBHOOK_SECRET` 后启用；留空 URL 时不会进行网络投递，事件仍保留在数据库中。
+系统使用数据库 Outbox 可靠投递订单、工单和服务生命周期事件。在首次安装页配置通知 Webhook 与至少 32 字符的签名密钥后启用；签名密钥留空时由系统生成。URL 留空时不会进行网络投递，事件仍保留在数据库中。
 
 ## 请求
 

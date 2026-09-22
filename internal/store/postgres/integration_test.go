@@ -40,7 +40,7 @@ func TestBillingLifecycleIntegration(t *testing.T) {
 	if err = db.QueryRow(ctx, `SELECT count(*) FROM schema_migrations`).Scan(&migrationCount); err != nil {
 		t.Fatal(err)
 	}
-	if migrationCount < 10 {
+	if migrationCount < 11 {
 		t.Fatalf("only %d migrations applied", migrationCount)
 	}
 	billing := NewBillingStore(db)

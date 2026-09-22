@@ -11,19 +11,19 @@ import (
 	"net/http"
 	"strings"
 
-	"clicd-billing/internal/config"
 	"clicd-billing/internal/security"
+	"clicd-billing/internal/settings"
 	"clicd-billing/internal/store/postgres"
 	"github.com/jackc/pgx/v5"
 )
 
 type adminBilling struct {
-	cfg   config.Config
-	store *postgres.BillingStore
+	settings *settings.Manager
+	store    *postgres.BillingStore
 }
 
-func newAdminBilling(cfg config.Config, store *postgres.BillingStore) *adminBilling {
-	return &adminBilling{cfg: cfg, store: store}
+func newAdminBilling(runtime *settings.Manager, store *postgres.BillingStore) *adminBilling {
+	return &adminBilling{settings: runtime, store: store}
 }
 
 func (a *adminBilling) listCustomers(w http.ResponseWriter, r *http.Request) {
@@ -178,7 +178,8 @@ func (a *adminBilling) paymentWebhook(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_request"})
 		return
 	}
-	if !validPaymentSignature(body, r.Header.Get("X-Payment-Signature"), a.cfg.PaymentWebhookSecret) {
+	runtime := a.settings.Current()
+	if !validPaymentSignature(body, r.Header.Get("X-Payment-Signature"), runtime.PaymentWebhookSecret) {
 		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "invalid_signature"})
 		return
 	}
@@ -187,13 +188,13 @@ func (a *adminBilling) paymentWebhook(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_event"})
 		return
 	}
-	event.Provider = a.cfg.PaymentProviderName
+	event.Provider = runtime.PaymentProviderName
 	event.Payload = append([]byte(nil), body...)
 	if event.ProviderEventID == "" || event.ProviderTransactionID == "" || event.InvoiceNumber == "" || event.EventType != "payment.succeeded" {
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "unsupported_event"})
 		return
 	}
-	result, err := a.store.ProcessPayment(r.Context(), event, "payment_provider", a.cfg.PaymentProviderName)
+	result, err := a.store.ProcessPayment(r.Context(), event, "payment_provider", runtime.PaymentProviderName)
 	if err != nil {
 		writePaymentError(w, err)
 		return

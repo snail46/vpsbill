@@ -12,26 +12,38 @@ type Worker struct {
 	store                            *postgres.LifecycleStore
 	logger                           *slog.Logger
 	interval, lead, grace, retention time.Duration
+	current                          func() (time.Duration, time.Duration, time.Duration, time.Duration)
 }
 
 func NewWorker(store *postgres.LifecycleStore, logger *slog.Logger, interval, lead, grace, retention time.Duration) *Worker {
 	return &Worker{store: store, logger: logger, interval: interval, lead: lead, grace: grace, retention: retention}
 }
+func NewDynamicWorker(store *postgres.LifecycleStore, logger *slog.Logger, current func() (time.Duration, time.Duration, time.Duration, time.Duration)) *Worker {
+	return &Worker{store: store, logger: logger, current: current}
+}
 func (w *Worker) Run(ctx context.Context) {
 	w.run(ctx)
-	ticker := time.NewTicker(w.interval)
-	defer ticker.Stop()
 	for {
+		interval := w.interval
+		if w.current != nil {
+			interval, _, _, _ = w.current()
+		}
+		timer := time.NewTimer(interval)
 		select {
 		case <-ctx.Done():
+			timer.Stop()
 			return
-		case <-ticker.C:
+		case <-timer.C:
 			w.run(ctx)
 		}
 	}
 }
 func (w *Worker) run(ctx context.Context) {
-	result, err := w.store.Run(ctx, w.lead, w.grace, w.retention)
+	lead, grace, retention := w.lead, w.grace, w.retention
+	if w.current != nil {
+		_, lead, grace, retention = w.current()
+	}
+	result, err := w.store.Run(ctx, lead, grace, retention)
 	if err != nil {
 		w.logger.Error("billing lifecycle run failed", "error", err)
 		return

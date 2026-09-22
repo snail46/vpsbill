@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -22,6 +23,11 @@ type Worker struct {
 	workerID, endpoint, secret string
 	poll                       time.Duration
 	client                     *http.Client
+	current                    func() (string, string, time.Duration)
+}
+
+func NewDynamicWorker(store *postgres.OutboxStore, logger *slog.Logger, workerID string, current func() (string, string, time.Duration)) *Worker {
+	return &Worker{store: store, logger: logger, workerID: workerID, current: current, client: &http.Client{Timeout: 15 * time.Second}}
 }
 
 func NewWorker(store *postgres.OutboxStore, logger *slog.Logger, workerID, endpoint, secret string, poll time.Duration) *Worker {
@@ -29,14 +35,17 @@ func NewWorker(store *postgres.OutboxStore, logger *slog.Logger, workerID, endpo
 }
 
 func (w *Worker) Run(ctx context.Context) {
-	ticker := time.NewTicker(w.poll)
-	defer ticker.Stop()
 	for {
-		w.drain(ctx)
+		endpoint, _, poll := w.values()
+		if endpoint != "" {
+			w.drain(ctx)
+		}
+		timer := time.NewTimer(poll)
 		select {
 		case <-ctx.Done():
+			timer.Stop()
 			return
-		case <-ticker.C:
+		case <-timer.C:
 		}
 	}
 }
@@ -65,15 +74,19 @@ func (w *Worker) drain(ctx context.Context) {
 }
 
 func (w *Worker) deliver(ctx context.Context, event postgres.OutboxEvent) error {
+	endpoint, secret, _ := w.values()
+	if endpoint == "" {
+		return errors.New("notification webhook is not configured")
+	}
 	body, err := json.Marshal(event)
 	if err != nil {
 		return err
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, w.endpoint, bytes.NewReader(body))
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
-	mac := hmac.New(sha256.New, []byte(w.secret))
+	mac := hmac.New(sha256.New, []byte(secret))
 	_, _ = mac.Write(body)
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("X-CLICD-Signature", "sha256="+hex.EncodeToString(mac.Sum(nil)))
@@ -89,4 +102,11 @@ func (w *Worker) deliver(ctx context.Context, event postgres.OutboxEvent) error 
 		return fmt.Errorf("notification endpoint returned %d: %s", response.StatusCode, string(data))
 	}
 	return nil
+}
+
+func (w *Worker) values() (string, string, time.Duration) {
+	if w.current != nil {
+		return w.current()
+	}
+	return w.endpoint, w.secret, w.poll
 }

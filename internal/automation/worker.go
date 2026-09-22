@@ -16,15 +16,20 @@ import (
 const maxProvisionAttempts = 8
 
 type Worker struct {
-	store    *postgres.ProvisioningStore
-	box      *security.SecretBox
-	logger   *slog.Logger
-	workerID string
-	poll     time.Duration
+	store       *postgres.ProvisioningStore
+	box         *security.SecretBox
+	logger      *slog.Logger
+	workerID    string
+	poll        time.Duration
+	pollCurrent func() time.Duration
 }
 
 func NewWorker(store *postgres.ProvisioningStore, box *security.SecretBox, logger *slog.Logger, workerID string, poll time.Duration) *Worker {
 	return &Worker{store: store, box: box, logger: logger, workerID: workerID, poll: poll}
+}
+
+func NewDynamicWorker(store *postgres.ProvisioningStore, box *security.SecretBox, logger *slog.Logger, workerID string, poll func() time.Duration) *Worker {
+	return &Worker{store: store, box: box, logger: logger, workerID: workerID, pollCurrent: poll}
 }
 
 func (w *Worker) Run(ctx context.Context) {
@@ -34,13 +39,17 @@ func (w *Worker) Run(ctx context.Context) {
 		w.logger.Warn("recovered stale provisioning jobs", "count", count)
 	}
 	w.drain(ctx)
-	ticker := time.NewTicker(w.poll)
-	defer ticker.Stop()
 	for {
+		interval := w.poll
+		if w.pollCurrent != nil {
+			interval = w.pollCurrent()
+		}
+		timer := time.NewTimer(interval)
 		select {
 		case <-ctx.Done():
+			timer.Stop()
 			return
-		case <-ticker.C:
+		case <-timer.C:
 			w.drain(ctx)
 		}
 	}

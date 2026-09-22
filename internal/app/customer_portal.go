@@ -4,21 +4,20 @@ import (
 	"errors"
 	"net/http"
 
-	"clicd-billing/internal/config"
 	"clicd-billing/internal/payment"
+	"clicd-billing/internal/settings"
 	"clicd-billing/internal/store/postgres"
 )
 
 type customerPortal struct {
-	store        *postgres.PortalStore
-	billing      *postgres.BillingStore
-	catalog      *postgres.CatalogStore
-	gateway      payment.GenericGateway
-	providerName string
+	store    *postgres.PortalStore
+	billing  *postgres.BillingStore
+	catalog  *postgres.CatalogStore
+	settings *settings.Manager
 }
 
-func newCustomerPortal(cfg config.Config, store *postgres.PortalStore, billing *postgres.BillingStore, catalog *postgres.CatalogStore) *customerPortal {
-	return &customerPortal{store: store, billing: billing, catalog: catalog, gateway: payment.GenericGateway{BaseURL: cfg.PaymentCheckoutURL, PublicURL: cfg.PublicURL, Secret: cfg.PaymentWebhookSecret}, providerName: cfg.PaymentProviderName}
+func newCustomerPortal(runtime *settings.Manager, store *postgres.PortalStore, billing *postgres.BillingStore, catalog *postgres.CatalogStore) *customerPortal {
+	return &customerPortal{store: store, billing: billing, catalog: catalog, settings: runtime}
 }
 
 func (p *customerPortal) listServices(w http.ResponseWriter, r *http.Request) {
@@ -82,7 +81,7 @@ func (p *customerPortal) catalogData(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "internal_error"})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": map[string]any{"plans": available, "regions": regions, "checkout_enabled": p.gateway.Available()}})
+	writeJSON(w, http.StatusOK, map[string]any{"data": map[string]any{"plans": available, "regions": regions, "checkout_enabled": p.settings.Current().PaymentCheckoutURL != ""}})
 }
 
 func (p *customerPortal) listOrders(w http.ResponseWriter, r *http.Request) {
@@ -112,12 +111,14 @@ func (p *customerPortal) createOrder(w http.ResponseWriter, r *http.Request) {
 }
 
 func (p *customerPortal) checkout(w http.ResponseWriter, r *http.Request) {
-	if !p.gateway.Available() {
+	runtime := p.settings.Current()
+	gateway := payment.GenericGateway{BaseURL: runtime.PaymentCheckoutURL, PublicURL: runtime.PublicURL, Secret: runtime.PaymentWebhookSecret}
+	if !gateway.Available() {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "checkout_unavailable", "message": "商家尚未配置在线支付网关"})
 		return
 	}
 	identity := customerPrincipalFromContext(r.Context())
-	intent, err := p.billing.PreparePaymentIntent(r.Context(), identity.AccountID, r.PathValue("id"), p.providerName)
+	intent, err := p.billing.PreparePaymentIntent(r.Context(), identity.AccountID, r.PathValue("id"), runtime.PaymentProviderName)
 	if errors.Is(err, postgres.ErrInvoiceUnavailable) {
 		writeJSON(w, http.StatusConflict, map[string]any{"error": "invoice_unavailable", "message": "账单不存在、已支付或当前不可付款"})
 		return
@@ -127,7 +128,7 @@ func (p *customerPortal) checkout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if intent.CheckoutURL == "" {
-		intent.CheckoutURL, err = p.gateway.CheckoutURL(payment.CheckoutRequest{MerchantReference: intent.MerchantReference, InvoiceNumber: intent.InvoiceNumber, AmountMinor: intent.AmountMinor, Currency: intent.Currency, ExpiresAt: intent.ExpiresAt})
+		intent.CheckoutURL, err = gateway.CheckoutURL(payment.CheckoutRequest{MerchantReference: intent.MerchantReference, InvoiceNumber: intent.InvoiceNumber, AmountMinor: intent.AmountMinor, Currency: intent.Currency, ExpiresAt: intent.ExpiresAt})
 		if err == nil {
 			err = p.billing.SetPaymentIntentCheckoutURL(r.Context(), intent.ID, identity.AccountID, intent.CheckoutURL)
 		}

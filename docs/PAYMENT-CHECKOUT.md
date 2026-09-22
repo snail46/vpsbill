@@ -17,7 +17,7 @@
 | `return_url` | 支付后返回客户中心的地址 |
 | `signature` | `sha256=<hex-hmac>` |
 
-签名原文是不含 `signature` 的全部查询参数，使用标准 URL 编码并按键排序后的字符串（Go `url.Values.Encode()` 结果）。密钥为 `PAYMENT_WEBHOOK_SECRET`，算法为 HMAC-SHA256。支付适配器必须先验签，再创建支付会话；不得采用浏览器传入的其他金额或币种。
+签名原文是不含 `signature` 的全部查询参数，使用标准 URL 编码并按键排序后的字符串（Go `url.Values.Encode()` 结果）。密钥为安装页生成或填写的支付回调密钥，算法为 HMAC-SHA256。支付适配器必须先验签，再创建支付会话；不得采用浏览器传入的其他金额或币种。
 
 ## 支付结果
 
@@ -27,8 +27,8 @@
 
 ## 生产要求
 
-- `PUBLIC_URL`、`PAYMENT_CHECKOUT_URL` 必须使用 HTTPS。
+- 安装页中的公开 URL、收银台 URL 必须使用 HTTPS。
 - 支付适配器应把 `merchant_reference` 保存到支付服务商元数据，方便对账。
 - 只有最终成功状态才能发送 `payment.succeeded`；支付页面返回不能作为到账依据。
-- 禁止把 `PAYMENT_WEBHOOK_SECRET` 或支付服务商私钥下发给前端。
+- 禁止把支付回调密钥或支付服务商私钥下发给客户前端。
 - 留空 `PAYMENT_CHECKOUT_URL` 会安全关闭在线付款入口，商家仍可在后台人工确认到账。

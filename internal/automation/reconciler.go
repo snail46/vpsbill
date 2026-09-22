@@ -13,11 +13,16 @@ import (
 )
 
 type Reconciler struct {
-	store    *postgres.ProvisioningStore
-	catalog  *postgres.CatalogStore
-	box      *security.SecretBox
-	logger   *slog.Logger
-	interval time.Duration
+	store           *postgres.ProvisioningStore
+	catalog         *postgres.CatalogStore
+	box             *security.SecretBox
+	logger          *slog.Logger
+	interval        time.Duration
+	intervalCurrent func() time.Duration
+}
+
+func NewDynamicReconciler(store *postgres.ProvisioningStore, catalog *postgres.CatalogStore, box *security.SecretBox, logger *slog.Logger, interval func() time.Duration) *Reconciler {
+	return &Reconciler{store: store, catalog: catalog, box: box, logger: logger, intervalCurrent: interval}
 }
 
 func NewReconciler(store *postgres.ProvisioningStore, catalog *postgres.CatalogStore, box *security.SecretBox, logger *slog.Logger, interval time.Duration) *Reconciler {
@@ -26,13 +31,17 @@ func NewReconciler(store *postgres.ProvisioningStore, catalog *postgres.CatalogS
 
 func (r *Reconciler) Run(ctx context.Context) {
 	r.reconcile(ctx)
-	ticker := time.NewTicker(r.interval)
-	defer ticker.Stop()
 	for {
+		interval := r.interval
+		if r.intervalCurrent != nil {
+			interval = r.intervalCurrent()
+		}
+		timer := time.NewTimer(interval)
 		select {
 		case <-ctx.Done():
+			timer.Stop()
 			return
-		case <-ticker.C:
+		case <-timer.C:
 			r.reconcile(ctx)
 		}
 	}

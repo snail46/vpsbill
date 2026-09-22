@@ -10,7 +10,7 @@ POST /api/v1/webhooks/payments/generic
 
 ## 验签
 
-使用 `.env` 中的 `PAYMENT_WEBHOOK_SECRET` 对原始请求体计算 HMAC-SHA256：
+使用首次安装页生成或填写的支付回调密钥，对原始请求体计算 HMAC-SHA256：
 
 ```text
 X-Payment-Signature: sha256=<hex-hmac>

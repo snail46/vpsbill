@@ -138,6 +138,30 @@ input:focus, select:focus, textarea:focus { border-color: #7483f4; box-shadow: 0
 .text-button { border: 0; background: transparent; color: #93a0ff; padding: 7px; white-space: nowrap; }
 .form-error { padding: 11px 13px; margin: 0 0 15px; border: 1px solid rgba(244,102,113,.35); border-radius: 8px; color: #ff9ca5; background: rgba(244,102,113,.08); font-size: 12px; }
 
+.installer-page { min-height: 100vh; max-width: none; padding: 48px clamp(18px,5vw,72px); background: radial-gradient(circle at 80% 0,rgba(124,140,255,.15),transparent 28%),#080b14; }
+.installer-card { width: min(1120px,100%); margin: 0 auto; padding: clamp(24px,4vw,48px); border: 1px solid #283149; border-radius: 20px; background: rgba(13,18,31,.97); box-shadow: 0 28px 80px rgba(0,0,0,.28); }
+.installer-header { display: flex; justify-content: space-between; gap: 32px; padding-bottom: 30px; border-bottom: 1px solid #242c40; }
+.installer-header h1 { margin-bottom: 10px; }
+.installer-header p:last-child,.installer-complete>p { max-width: 720px; color: #8e98ad; line-height: 1.7; }
+.installer-step { flex: 0 0 132px; align-self: center; padding: 16px; border: 1px solid #303a59; border-radius: 12px; color: #748099; font: 500 11px/1.6 'DM Mono',monospace; background: #111727; }
+.installer-step strong { color: #aeb7ff; }
+.installer-section { display: block; padding: 28px 0; border-bottom: 1px solid #20283a; }
+.installer-section h3,.installer-section summary { margin-bottom: 20px; color: #dbe1ed; font-size: 15px; font-weight: 600; }
+.installer-section summary { cursor: pointer; }
+.installer-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 0 18px; }
+.installer-grid .field { margin-bottom: 0; }
+.advanced-grid { margin-top: 22px; row-gap: 18px; }
+.installer-footer { display: flex; justify-content: space-between; align-items: center; gap: 20px; padding-top: 28px; }
+.installer-footer>span { display: flex; align-items: center; gap: 8px; color: #78859a; font-size: 11px; }
+.installer-footer svg { color: #5bd0aa; }
+.installer-complete { max-width: 760px; text-align: center; }
+.installer-complete .brand { justify-content: center; padding-bottom: 26px; text-align: left; }
+.installer-complete>svg { color: #5bd0aa; margin-bottom: 18px; }
+.generated-secrets { margin: 28px 0; display: grid; gap: 10px; text-align: left; }
+.generated-secrets label { padding: 13px 15px; border: 1px solid #29334a; border-radius: 9px; background: #090e19; }
+.generated-secrets span { display: block; margin-bottom: 7px; color: #778399; font-size: 10px; }
+.generated-secrets code { color: #aeb7ff; overflow-wrap: anywhere; }
+
 .workspace-panel { display: flex; flex-direction: column; gap: 20px; }
 .page-actions { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding-bottom: 20px; border-bottom: 1px solid #1d2435; }
 .page-actions h2 { margin-bottom: 8px; }
@@ -282,6 +306,7 @@ tr:last-child td { border-bottom: 0; }
   .form-grid, .plan-grid, .shop-grid { grid-template-columns: 1fr 1fr; }
   .service-grid { grid-template-columns: 1fr; }
   .support-layout { grid-template-columns: 1fr; }
+	.installer-grid { grid-template-columns: 1fr 1fr; row-gap: 18px; }
 }
 
 @media (max-width: 640px) {
@@ -302,4 +327,9 @@ tr:last-child td { border-bottom: 0; }
   .checkout-success { align-items: stretch; flex-direction: column; }
   .service-specs { grid-template-columns: repeat(2,1fr); }
   .profile-panel { grid-template-columns: 1fr; }
+	.installer-page { padding: 16px; }
+	.installer-card { padding: 24px 18px; }
+	.installer-header,.installer-footer { align-items: stretch; flex-direction: column; }
+	.installer-step { flex-basis: auto; }
+	.installer-grid { grid-template-columns: 1fr; }
 }

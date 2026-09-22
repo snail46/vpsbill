@@ -10,15 +10,17 @@ import (
 
 	"clicd-billing/internal/config"
 	"clicd-billing/internal/security"
+	"clicd-billing/internal/settings"
 	"clicd-billing/internal/store/postgres"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type Dependencies struct {
-	Config config.Config
-	DB     *pgxpool.Pool
-	Logger *slog.Logger
+	Config   config.Config
+	DB       *pgxpool.Pool
+	Logger   *slog.Logger
+	Settings *settings.Manager
 }
 
 func NewHandler(deps Dependencies) (http.Handler, error) {
@@ -33,13 +35,17 @@ func NewHandler(deps Dependencies) (http.Handler, error) {
 	portalStore := postgres.NewPortalStore(deps.DB)
 	operationsStore := postgres.NewOperationsStore(deps.DB)
 	monitoringStore := postgres.NewMonitoringStore(deps.DB)
-	auth := newAuthenticator(deps.Config, authStore, secretBox)
-	admin := newAdminCatalog(deps.Config, catalogStore, secretBox)
-	billing := newAdminBilling(deps.Config, billingStore)
+	if deps.Settings == nil {
+		return nil, errors.New("settings manager is required")
+	}
+	auth := newAuthenticator(deps.Config, authStore, secretBox, deps.Settings)
+	admin := newAdminCatalog(catalogStore, secretBox)
+	billing := newAdminBilling(deps.Settings, billingStore)
 	automation := newAdminAutomation(provisioningStore)
-	portal := newCustomerPortal(deps.Config, portalStore, billingStore, catalogStore)
+	portal := newCustomerPortal(deps.Settings, portalStore, billingStore, catalogStore)
 	operations := newOperationsAPI(operationsStore)
-	metrics := newMetricsAPI(monitoringStore, deps.Config.MetricsToken)
+	metrics := newMetricsAPI(monitoringStore, deps.Settings)
+	install := &installer{settings: deps.Settings, auth: auth, logger: deps.Logger}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health/live", func(w http.ResponseWriter, _ *http.Request) {
@@ -57,16 +63,17 @@ func NewHandler(deps Dependencies) (http.Handler, error) {
 	mux.HandleFunc("GET /api/v1/meta", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"data": map[string]any{
-				"name":        deps.Config.AppName,
+				"name":        deps.Settings.Current().AppName,
 				"environment": deps.Config.Environment,
+				"installed":   deps.Settings.Current().Installed,
 				"capabilities": []string{
 					"accounts", "catalog", "billing", "provisioning", "clicd", "support", "audit", "notifications",
 				},
 			},
 		})
 	})
-	mux.HandleFunc("GET /api/v1/auth/bootstrap", auth.bootstrapStatus)
-	mux.HandleFunc("POST /api/v1/auth/bootstrap", auth.bootstrap)
+	mux.HandleFunc("GET /api/v1/install", install.status)
+	mux.HandleFunc("POST /api/v1/install", install.install)
 	mux.HandleFunc("POST /api/v1/auth/login", auth.login)
 	mux.Handle("GET /api/v1/auth/me", auth.require("", http.HandlerFunc(auth.me)))
 	mux.Handle("POST /api/v1/auth/logout", auth.require("", http.HandlerFunc(auth.logout)))
@@ -117,7 +124,17 @@ func NewHandler(deps Dependencies) (http.Handler, error) {
 	mux.Handle("GET /api/v1/admin/audit-logs", auth.require("audit:read", http.HandlerFunc(operations.adminAuditLogs)))
 	mux.HandleFunc("POST /api/v1/webhooks/payments/generic", billing.paymentWebhook)
 
-	return requestLog(deps.Logger, securityHeaders(mux)), nil
+	return requestLog(deps.Logger, securityHeaders(installationGate(deps.Settings, mux))), nil
+}
+
+func installationGate(runtime *settings.Manager, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if runtime.Current().Installed || r.URL.Path == "/health/live" || r.URL.Path == "/health/ready" || r.URL.Path == "/api/v1/meta" || r.URL.Path == "/api/v1/install" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "installation_required", "message": "请先完成系统安装"})
+	})
 }
 
 func decodeJSON(w http.ResponseWriter, r *http.Request, target any) bool {

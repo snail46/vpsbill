@@ -4,26 +4,30 @@
 
 ## 1. 安装基础软件与 Docker
 
-以下命令使用 Docker 官方 apt 仓库：
+以下命令仅适用于官方 Debian/Ubuntu。它会先校验发行版，再使用 Docker 官方 apt 仓库；不要在 Debian 衍生版上直接把衍生版代号传给 Docker 仓库。对应官方说明：[Debian](https://docs.docker.com/engine/install/debian/)、[Ubuntu](https://docs.docker.com/engine/install/ubuntu/)。
 
 ```sh
-sudo apt update
-sudo apt install -y ca-certificates curl git openssl ufw
+sudo apt-get update
+sudo apt-get install -y ca-certificates curl git openssl ufw
+for pkg in docker.io docker-doc docker-compose podman-docker containerd runc; do sudo apt-get remove -y "$pkg" 2>/dev/null || true; done
 sudo install -m 0755 -d /etc/apt/keyrings
-. /etc/os-release
-DOCKER_DISTRO="$ID"
-DOCKER_CODENAME="${UBUNTU_CODENAME:-$VERSION_CODENAME}"
-sudo curl -fsSL "https://download.docker.com/linux/$DOCKER_DISTRO/gpg" -o /etc/apt/keyrings/docker.asc
+OS_ID="$(. /etc/os-release && printf '%s' "$ID")"
+OS_CODENAME="$(. /etc/os-release && printf '%s' "${UBUNTU_CODENAME:-$VERSION_CODENAME}")"
+case "$OS_ID" in
+  debian|ubuntu) ;;
+  *) echo "仅支持 Debian 或 Ubuntu，当前为: $OS_ID"; exit 1 ;;
+esac
+sudo curl -fsSL "https://download.docker.com/linux/${OS_ID}/gpg" -o /etc/apt/keyrings/docker.asc
 sudo chmod a+r /etc/apt/keyrings/docker.asc
-printf 'Types: deb\nURIs: https://download.docker.com/linux/%s\nSuites: %s\nComponents: stable\nArchitectures: %s\nSigned-By: /etc/apt/keyrings/docker.asc\n' \
-  "$DOCKER_DISTRO" "$DOCKER_CODENAME" "$(dpkg --print-architecture)" | \
-  sudo tee /etc/apt/sources.list.d/docker.sources >/dev/null
-sudo apt update
-sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+printf 'Types: deb\nURIs: https://download.docker.com/linux/%s\nSuites: %s\nComponents: stable\nArchitectures: %s\nSigned-By: /etc/apt/keyrings/docker.asc\n' "$OS_ID" "$OS_CODENAME" "$(dpkg --print-architecture)" | sudo tee /etc/apt/sources.list.d/docker.sources >/dev/null
+sudo apt-get update
+sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 sudo systemctl enable --now docker
 sudo docker run --rm hello-world
 sudo docker compose version
 ```
+
+若输出“仅支持 Debian 或 Ubuntu”，请不要强行改 `OS_ID`；应按该发行版的 Docker 官方安装页操作，或改用 Debian/Ubuntu 服务器。若曾安装发行版自带的 `docker.io`/`podman-docker`，先按 Docker 官方“卸载冲突软件”小节清理后再执行上面命令。
 
 后续示例使用 root 部署，避免 Docker socket 权限差异：
 
@@ -76,13 +80,13 @@ chmod +x deploy.sh backup.sh restore.sh rotate-key.sh smoke-test.sh
 nano .env
 ```
 
-`--init` 只创建权限为 `600` 的 `.env` 和随机密钥，不启动服务。使用域名时至少修改：
+`--init` 只创建权限为 `600` 的 `.env`。脚本只生成容器启动不可缺少的三个随机密钥：`POSTGRES_PASSWORD`、`SESSION_SECRET`、`ENCRYPTION_KEY`。站点和业务参数不会再放入 `.env`。
+
+使用域名时修改：
 
 ```dotenv
 APP_PORT=127.0.0.1:8080
-PUBLIC_URL=https://billing.example.com
 DOMAIN=billing.example.com
-TZ=Asia/Shanghai
 ```
 
 其中 `billing.example.com` 替换成真实域名。`APP_PORT` 必须绑定回环地址，外部流量统一从 Caddy 的 80/443 进入。
@@ -91,19 +95,10 @@ TZ=Asia/Shanghai
 
 ```dotenv
 APP_PORT=8080
-PUBLIC_URL=http://服务器公网IP:8080
 DOMAIN=
 ```
 
 HTTP 模式不适合正式收款和保存客户信息。
-
-按需配置支付和通知；未完成适配前保持收银台为空：
-
-```dotenv
-PAYMENT_CHECKOUT_URL=
-PAYMENT_PROVIDER_NAME=generic
-NOTIFICATION_WEBHOOK_URL=
-```
 
 不要改回任何 `CHANGE_ME_*` 值，也不要提交 `.env`。
 
@@ -134,7 +129,7 @@ docker compose --env-file .env -f deploy/docker-compose.yml ps
 docker compose --env-file .env -f deploy/docker-compose.yml logs -f --tail=200
 ```
 
-浏览器打开 `https://billing.example.com`，创建唯一的初始超级管理员；随后立即启用 TOTP 二步验证。客户入口为 `/portal`。
+浏览器打开 `https://billing.example.com` 后进入一次性安装页。在页面中配置站点名称、公开 URL、时区、支付、通知、Metrics、自动化周期和唯一的初始超级管理员。留空的回调密钥与 Metrics Token 会安全生成并只显示一次；请立即保存。安装提交采用数据库事务，完成后不能再次访问安装入口。随后立即启用 TOTP 二步验证。客户入口为 `/portal`。
 
 ## 5. 接入 CLICD 节点
 

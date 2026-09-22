@@ -12,6 +12,7 @@ import (
 
 	"clicd-billing/internal/config"
 	"clicd-billing/internal/security"
+	"clicd-billing/internal/settings"
 	"clicd-billing/internal/store/postgres"
 )
 
@@ -25,13 +26,14 @@ type principalContextKey struct{}
 type customerPrincipalContextKey struct{}
 
 type authenticator struct {
-	cfg   config.Config
-	store *postgres.AuthStore
-	box   *security.SecretBox
+	cfg      config.Config
+	store    *postgres.AuthStore
+	box      *security.SecretBox
+	settings *settings.Manager
 }
 
-func newAuthenticator(cfg config.Config, store *postgres.AuthStore, box *security.SecretBox) *authenticator {
-	return &authenticator{cfg: cfg, store: store, box: box}
+func newAuthenticator(cfg config.Config, store *postgres.AuthStore, box *security.SecretBox, runtime *settings.Manager) *authenticator {
+	return &authenticator{cfg: cfg, store: store, box: box, settings: runtime}
 }
 
 func (a *authenticator) bootstrapStatus(w http.ResponseWriter, r *http.Request) {
@@ -217,7 +219,7 @@ func (a *authenticator) mfaSetup(w http.ResponseWriter, r *http.Request, userID,
 		return
 	}
 	_ = a.store.WriteSecurityAudit(r.Context(), userID, actorType, "mfa.setup_started", remoteIP(r), r.UserAgent())
-	writeJSON(w, http.StatusOK, map[string]any{"data": map[string]string{"secret": secret, "otpauth_uri": security.TOTPUri(a.cfg.AppName, email, secret)}})
+	writeJSON(w, http.StatusOK, map[string]any{"data": map[string]string{"secret": secret, "otpauth_uri": security.TOTPUri(a.settings.Current().AppName, email, secret)}})
 }
 func (a *authenticator) mfaConfirm(w http.ResponseWriter, r *http.Request, userID, actorType string) {
 	var input struct {
@@ -383,7 +385,7 @@ func (a *authenticator) setCookie(w http.ResponseWriter, name, value string, exp
 		Expires:  expires,
 		MaxAge:   int(time.Until(expires).Seconds()),
 		HttpOnly: httpOnly,
-		Secure:   a.cfg.Environment == "production" && strings.HasPrefix(a.cfg.PublicURL, "https://"),
+		Secure:   a.cfg.Environment == "production" && strings.HasPrefix(a.settings.Current().PublicURL, "https://"),
 		SameSite: http.SameSiteStrictMode,
 	})
 }

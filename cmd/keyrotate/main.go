@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -93,6 +94,28 @@ func main() {
 			log.Fatal(err)
 		}
 		count++
+	}
+	var paymentSecret, notificationSecret, metricsToken []byte
+	err = tx.QueryRow(ctx, `SELECT payment_webhook_secret_encrypted,notification_webhook_secret_encrypted,metrics_token_encrypted FROM system_settings WHERE singleton=true FOR UPDATE`).Scan(&paymentSecret, &notificationSecret, &metricsToken)
+	if err == nil {
+		paymentSecret, err = reencrypt(oldBox, newBox, paymentSecret)
+		if err != nil {
+			log.Fatal("cannot decrypt payment webhook secret; rotation aborted")
+		}
+		notificationSecret, err = reencrypt(oldBox, newBox, notificationSecret)
+		if err != nil {
+			log.Fatal("cannot decrypt notification webhook secret; rotation aborted")
+		}
+		metricsToken, err = reencrypt(oldBox, newBox, metricsToken)
+		if err != nil {
+			log.Fatal("cannot decrypt metrics token; rotation aborted")
+		}
+		if _, err = tx.Exec(ctx, `UPDATE system_settings SET payment_webhook_secret_encrypted=$1,notification_webhook_secret_encrypted=$2,metrics_token_encrypted=$3,updated_at=now() WHERE singleton=true`, paymentSecret, notificationSecret, metricsToken); err != nil {
+			log.Fatal(err)
+		}
+		count++
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		log.Fatal(err)
 	}
 	// jsonb_build_object accepts "any", so PostgreSQL cannot infer the type of a
 	// standalone bind parameter. Keep the cast explicit for the extended query

@@ -15,13 +15,13 @@ chmod +x deploy.sh
 ./deploy.sh
 ```
 
-脚本首次运行会从 `.env.example` 生成 `.env` 和随机密钥，然后构建并启动 PostgreSQL、API 和 Web 容器。默认入口为 `http://服务器IP:8080`；填写 `DOMAIN` 后自动启用 Caddy HTTPS。
+脚本首次运行会从 `.env.example` 生成 `.env`，只随机生成数据库密码、会话密钥和数据加密主密钥，然后构建并启动 PostgreSQL、API 和 Web 容器。默认入口为 `http://服务器IP:8080`；填写 `DOMAIN` 后自动启用 Caddy HTTPS。
 
-首次打开页面时，系统会要求创建唯一的初始超级管理员。CLICD 节点的 API Key 使用独立 AES-256-GCM 主密钥加密后保存。
+首次打开页面时会进入一次性安装向导，图形化设置站点、支付、通知、Metrics、自动化周期和唯一的初始超级管理员。CLICD 节点 API Key 与安装页中的敏感参数均使用 AES-256-GCM 主密钥加密保存。
 
 客户中心入口为 `http://服务器IP:8080/portal`。客户身份与商家管理员身份在服务端分别校验；客户只能读取和操作所属账户的服务。
 
-在线支付默认关闭。配置 `PAYMENT_CHECKOUT_URL`、`PAYMENT_PROVIDER_NAME` 和公开 HTTPS `PUBLIC_URL` 后，客户可以从账单进入外部收银台；未配置时仅允许后台人工确认到账。
+在线支付默认关闭。在安装页配置收银台、支付服务商标识和公开 HTTPS URL 后，客户可以从账单进入外部收银台；未配置时仅允许后台人工确认到账。
 
 ## 预构建镜像一键部署
 
@@ -66,16 +66,28 @@ unset CR_PAT
 ```dotenv
 IMAGE_TAG=latest
 APP_PORT=127.0.0.1:8080
-PUBLIC_URL=https://billing.example.com
 DOMAIN=billing.example.com
 POSTGRES_DB=clicd_billing
 POSTGRES_USER=clicd
 POSTGRES_PASSWORD=随机长密码
 SESSION_SECRET=64位十六进制随机值
 ENCRYPTION_KEY=64位十六进制随机值
-PAYMENT_WEBHOOK_SECRET=64位十六进制随机值
-NOTIFICATION_WEBHOOK_SECRET=64位十六进制随机值
-METRICS_TOKEN=64位十六进制随机值
+```
+
+可直接生成最小 `.env`（先把域名改成自己的）：
+
+```sh
+umask 077
+cat >.env <<EOF
+IMAGE_TAG=latest
+APP_PORT=127.0.0.1:8080
+DOMAIN=billing.example.com
+POSTGRES_DB=clicd_billing
+POSTGRES_USER=clicd
+POSTGRES_PASSWORD=$(openssl rand -hex 24)
+SESSION_SECRET=$(openssl rand -hex 32)
+ENCRYPTION_KEY=$(openssl rand -hex 32)
+EOF
 ```
 
 在 Compose 和 `.env` 所在目录执行：
@@ -84,14 +96,14 @@ METRICS_TOKEN=64位十六进制随机值
 docker compose --env-file .env -f docker-compose.yml --profile tls up -d --pull always
 ```
 
-该命令会拉取新镜像、创建 PostgreSQL/API/Web/Caddy 容器、等待数据库和 API 健康后启动入口。验证：
+该命令会拉取新镜像、创建 PostgreSQL/API/Web/Caddy 容器、等待数据库和 API 健康后启动入口。首次打开域名会进入图形化安装页，其余参数无需写入 `.env`。验证：
 
 ```sh
 docker compose --env-file .env -f docker-compose.yml ps
 curl --fail https://billing.example.com/health/ready
 ```
 
-不使用域名的临时 HTTP 模式将 `DOMAIN` 留空、配置 `PUBLIC_URL=http://服务器IP:8080` 和 `APP_PORT=8080`，然后去掉 `--profile tls`。HTTP 模式不适合正式业务。
+不使用域名的临时 HTTP 模式将 `DOMAIN` 留空、配置 `APP_PORT=8080`，然后去掉 `--profile tls`。HTTP 模式不适合正式业务。容器启动后访问页面完成图形化安装。
 
 更新 `latest` 镜像仍使用同一条 `up -d --pull always` 命令。固定 SHA 标签时，应先完成数据库备份，再把 `IMAGE_TAG` 修改为新的 Actions 提交标签。数据库卷不会因容器更新而删除；不要运行 `down -v`。
 

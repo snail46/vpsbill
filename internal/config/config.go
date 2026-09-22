@@ -89,9 +89,6 @@ func Load() (Config, error) {
 	if cfg.PaymentWebhookSecret == "" && cfg.Environment != "production" {
 		cfg.PaymentWebhookSecret = "development-payment-webhook-secret"
 	}
-	if cfg.Environment == "production" && len(cfg.PaymentWebhookSecret) < 32 {
-		return Config{}, errors.New("PAYMENT_WEBHOOK_SECRET must contain at least 32 characters in production")
-	}
 	if cfg.PaymentCheckoutURL != "" {
 		parsed, err := url.Parse(cfg.PaymentCheckoutURL)
 		if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
@@ -106,9 +103,6 @@ func Load() (Config, error) {
 		if len(cfg.NotificationWebhookSecret) < 32 {
 			return Config{}, errors.New("NOTIFICATION_WEBHOOK_SECRET must contain at least 32 characters when notification webhook is enabled")
 		}
-	}
-	if cfg.Environment == "production" && len(cfg.MetricsToken) < 32 {
-		return Config{}, errors.New("METRICS_TOKEN must contain at least 32 characters in production")
 	}
 	return cfg, nil
 }

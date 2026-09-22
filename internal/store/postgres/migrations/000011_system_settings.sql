@@ -1,0 +1,20 @@
+CREATE TABLE system_settings (
+    singleton boolean PRIMARY KEY DEFAULT true CHECK (singleton),
+    installed_at timestamptz NOT NULL DEFAULT now(),
+    app_name text NOT NULL,
+    public_url text NOT NULL,
+    timezone text NOT NULL,
+    payment_provider_name text NOT NULL,
+    payment_checkout_url text NOT NULL DEFAULT '',
+    payment_webhook_secret_encrypted bytea NOT NULL,
+    notification_webhook_url text NOT NULL DEFAULT '',
+    notification_webhook_secret_encrypted bytea,
+    metrics_token_encrypted bytea NOT NULL,
+    worker_poll_interval_seconds integer NOT NULL CHECK (worker_poll_interval_seconds > 0),
+    reconcile_interval_seconds integer NOT NULL CHECK (reconcile_interval_seconds > 0),
+    lifecycle_interval_seconds integer NOT NULL CHECK (lifecycle_interval_seconds > 0),
+    renewal_lead_seconds integer NOT NULL CHECK (renewal_lead_seconds > 0),
+    overdue_grace_seconds integer NOT NULL CHECK (overdue_grace_seconds > 0),
+    termination_retention_seconds integer NOT NULL CHECK (termination_retention_seconds > 0),
+    updated_at timestamptz NOT NULL DEFAULT now()
+);

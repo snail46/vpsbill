@@ -86,6 +86,15 @@ jobs:
           chmod +x deploy.sh backup.sh restore.sh rotate-key.sh smoke-test.sh
           ./deploy.sh
           ./smoke-test.sh
+          INSTALL_RESPONSE="$(curl --fail --silent --show-error -c /tmp/clicd-cookies \
+            -H 'Content-Type: application/json' \
+            --data '{"app_name":"CI Billing","public_url":"http://localhost:8080","timezone":"UTC","payment_provider_name":"generic","payment_checkout_url":"","payment_webhook_secret":"","notification_webhook_url":"","notification_webhook_secret":"","metrics_token":"","worker_poll_interval":"3s","reconcile_interval":"5m","lifecycle_interval":"1m","renewal_lead_time":"168h","overdue_grace_period":"72h","termination_retention":"168h","admin_display_name":"CI Administrator","admin_email":"admin@example.com","admin_password":"integration-password-123"}' \
+            http://localhost:8080/api/v1/install)"
+          test "$(printf '%s' "$INSTALL_RESPONSE" | jq -r '.data.user.email')" = "admin@example.com"
+          METRICS_TOKEN="$(printf '%s' "$INSTALL_RESPONSE" | jq -r '.data.generated_secrets.metrics_token')"
+          test "${#METRICS_TOKEN}" -ge 32
+          curl --fail --silent --show-error -H "Authorization: Bearer $METRICS_TOKEN" http://localhost:8080/metrics | grep -q clicd_billing_accounts
+          test "$(curl --fail --silent --show-error http://localhost:8080/api/v1/install | jq -r '.data.required')" = "false"
       - name: Exercise backup, restore, and encryption-key rotation
         run: |
           mkdir -p ci-backups
@@ -102,6 +111,7 @@ jobs:
           test "${#NEW_KEY}" -eq 64
           test "$OLD_KEY" != "$NEW_KEY"
           ./smoke-test.sh
+          test "$(curl --fail --silent --show-error http://localhost:8080/api/v1/install | jq -r '.data.required')" = "false"
       - name: Verify final container state
         run: |
           test "$(docker compose --env-file .env -f deploy/docker-compose.yml ps --status running --services | sort | tr '\n' ' ')" = "api postgres web "

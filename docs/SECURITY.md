@@ -14,7 +14,7 @@
 `GET /metrics` 使用以下请求头：
 
 ```text
-Authorization: Bearer <METRICS_TOKEN>
+Authorization: Bearer <安装页生成或填写的 Metrics Token>
 ```
 
-指标仅包含汇总数量，不包含客户、账单或实例标识。生产模式要求 `METRICS_TOKEN` 至少 32 个字符。
+指标仅包含汇总数量，不包含客户、账单或实例标识。Metrics Token 至少 32 个字符，留空时由首次安装向导生成并只显示一次。

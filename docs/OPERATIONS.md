@@ -11,7 +11,7 @@ chmod +x deploy.sh backup.sh restore.sh rotate-key.sh
 ./deploy.sh
 ```
 
-`--init` 生成 `.env` 和独立随机密钥但不启动容器。未配置 `DOMAIN` 时入口为 `PUBLIC_URL` 指定的 HTTP 地址；配置域名时必须同时设置 `PUBLIC_URL=https://域名` 和回环绑定（例如 `APP_PORT=127.0.0.1:8080`），脚本会启用 Caddy、申请证书并开放 80/443。
+`--init` 生成 `.env` 及数据库密码、会话密钥和数据加密主密钥，但不启动容器。未配置 `DOMAIN` 时入口为服务器的 `APP_PORT`；配置域名时必须使用回环绑定（例如 `APP_PORT=127.0.0.1:8080`），脚本会启用 Caddy、申请证书并开放 80/443。站点与业务参数在首次 Web 安装页设置。
 
 完整的新服务器与私有仓库步骤见 [全新服务器部署教程](DEPLOYMENT.md)。
 
@@ -42,11 +42,11 @@ chmod +x deploy.sh backup.sh restore.sh rotate-key.sh
 ./rotate-key.sh --confirm
 ```
 
-脚本停止 API，在单个数据库事务中重新加密全部 CLICD API Key、已启用及待确认的 TOTP 密钥；任一记录解密失败则整体回滚。成功后原子替换 `.env` 并重建 API 容器。
+脚本停止 API，在单个数据库事务中重新加密全部 CLICD API Key、已启用及待确认的 TOTP 密钥，以及安装页保存的支付、通知和 Metrics 密钥；任一记录解密失败则整体回滚。成功后原子替换 `.env` 并重建 API 容器。
 
 ## 日常检查
 
 - `/health/live`：进程存活。
 - `/health/ready`：数据库可用且迁移完成。
-- `/metrics`：携带 `Authorization: Bearer <METRICS_TOKEN>` 采集。
+- `/metrics`：携带 `Authorization: Bearer <安装页生成或填写的 Metrics Token>` 采集。
 - 定期执行一次恢复演练，不能只验证备份文件存在。
