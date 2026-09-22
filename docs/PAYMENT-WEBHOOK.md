@@ -10,13 +10,13 @@ POST /api/v1/webhooks/payments/generic
 
 ## 验签
 
-使用首次安装页生成或填写的支付回调密钥，对原始请求体计算 HMAC-SHA256：
+使用后台「支付网关」中配置的通用 HMAC 密钥，对原始请求体计算 HMAC-SHA256：
 
 ```text
 X-Payment-Signature: sha256=<hex-hmac>
 ```
 
-签名必须基于未经重新格式化的原始 JSON 字节。渠道名来自 `PAYMENT_PROVIDER_NAME`。事件通过 `(provider, id)` 唯一约束实现幂等；重复发送已成功处理的事件会返回成功，但不会重复入账或开通 VPS。
+签名必须基于未经重新格式化的原始 JSON 字节。渠道名固定为 `generic`。事件通过 `(provider, id)` 唯一约束实现幂等；重复发送已成功处理的事件会返回成功，但不会重复入账或开通 VPS。支付宝当面付和易支付使用各自的原生回调与验签逻辑，不经过此 JSON 入口。
 
 ## 事件
 

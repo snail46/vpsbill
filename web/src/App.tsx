@@ -1,10 +1,11 @@
-import { FormEvent, useEffect, useState } from 'react'
+import { ChangeEvent, FormEvent, useEffect, useState } from 'react'
 import {
   Activity,
   ArrowLeft,
   Boxes,
   ChevronRight,
   CircleDollarSign,
+	CreditCard,
   Headphones,
   LayoutDashboard,
   LogOut,
@@ -16,6 +17,7 @@ import {
   Send,
   RotateCw,
   ServerCog,
+	Cpu,
   Settings,
   ShieldCheck,
   ShoppingCart,
@@ -26,10 +28,10 @@ import {
   Power,
   X,
 } from 'lucide-react'
-import { AccountRecord, api, AuditLogRecord, CustomerCatalogRecord, CustomerIdentity, CustomerInvoiceRecord, CustomerServiceRecord, CustomerTransactionRecord, InvoiceRecord, NodeRecord, OrderRecord, PaymentIntentRecord, PlanRecord, ProvisioningJobRecord, RegionRecord, ServiceRecord, StaffUser, TicketDetailRecord, TicketRecord, TransactionRecord } from './api'
+import { AccountRecord, api, AuditLogRecord, CustomerCatalogRecord, CustomerIdentity, CustomerInvoiceRecord, CustomerServiceRecord, CustomerTransactionRecord, HostProbeRecord, InvoiceRecord, NodeRecord, OperationsOverviewRecord, OrderRecord, PaymentIntentRecord, PaymentSettingsRecord, PlanRecord, ProvisioningJobRecord, RegionRecord, ServiceRecord, StaffUser, TicketDetailRecord, TicketRecord, TransactionRecord } from './api'
 
 type Meta = { name: string; environment: string; installed: boolean; capabilities: string[] }
-type View = 'overview' | 'customers' | 'orders' | 'billing' | 'services' | 'nodes' | 'plans' | 'support' | 'audit' | 'security'
+type View = 'overview' | 'customers' | 'orders' | 'billing' | 'payment' | 'services' | 'nodes' | 'hosts' | 'plans' | 'support' | 'audit' | 'security'
 type AuthScreen = 'loading' | 'install' | 'login' | 'ready'
 
 const navItems: Array<{ id: View | 'disabled'; label: string; icon: typeof LayoutDashboard }> = [
@@ -37,9 +39,11 @@ const navItems: Array<{ id: View | 'disabled'; label: string; icon: typeof Layou
   { id: 'customers', label: '客户', icon: Users },
   { id: 'orders', label: '订单', icon: ReceiptText },
   { id: 'billing', label: '账单与交易', icon: CircleDollarSign },
+	{ id: 'payment', label: '支付网关', icon: CreditCard },
   { id: 'services', label: 'VPS 服务', icon: Boxes },
   { id: 'plans', label: '商品套餐', icon: PackageOpen },
-  { id: 'nodes', label: 'CLICD 节点', icon: ServerCog },
+	{ id: 'nodes', label: '节点对接', icon: ServerCog },
+	{ id: 'hosts', label: '宿主机探针', icon: Cpu },
   { id: 'support', label: '客户工单', icon: Headphones },
   { id: 'audit', label: '审计日志', icon: ScrollText },
   { id: 'security', label: '登录安全', icon: Settings },
@@ -156,7 +160,6 @@ type InstallResponse = { user: StaffUser; generated_secrets: Record<string, stri
 function InstallPage({ onInstalled }: { onInstalled: (user: StaffUser, appName: string) => void }) {
   const [form, setForm] = useState({
     app_name: 'CLICD Billing', public_url: window.location.origin, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Shanghai',
-    payment_provider_name: 'generic', payment_checkout_url: '', payment_webhook_secret: '',
     notification_webhook_url: '', notification_webhook_secret: '', metrics_token: '',
     worker_poll_interval: '3s', reconcile_interval: '5m', lifecycle_interval: '1m', renewal_lead_time: '168h', overdue_grace_period: '72h', termination_retention: '168h',
     admin_display_name: '', admin_email: '', admin_password: '',
@@ -178,9 +181,9 @@ function InstallPage({ onInstalled }: { onInstalled: (user: StaffUser, appName: 
   }
 
   return <main className="installer-page"><form className="installer-card" onSubmit={submit}>
-    <header className="installer-header"><div><p className="eyebrow">FIRST-RUN INSTALLER</p><h1>初始化 CLICD Billing</h1><p>容器基础密钥已经就绪。请在这里配置站点、支付通知和首个管理员。</p></div><div className="installer-step">一次提交<br/><strong>事务安装</strong></div></header>
+    <header className="installer-header"><div><p className="eyebrow">FIRST-RUN INSTALLER</p><h1>初始化 CLICD Billing</h1><p>容器基础密钥已经就绪。这里只设置运行所需信息与首个管理员，支付网关请登录后台后配置。</p></div><div className="installer-step">一次提交<br/><strong>事务安装</strong></div></header>
     <section className="installer-section"><h3>1. 站点设置</h3><div className="installer-grid"><Field label="站点名称" value={form.app_name} onChange={update('app_name')}/><Field label="公开访问地址" value={form.public_url} onChange={update('public_url')} type="url" hint="用于支付回调"/><Field label="时区" value={form.timezone} onChange={update('timezone')}/></div></section>
-    <section className="installer-section"><h3>2. 支付与通知</h3><div className="installer-grid"><Field label="支付服务商标识" value={form.payment_provider_name} onChange={update('payment_provider_name')}/><Field label="外部收银台地址（可选）" value={form.payment_checkout_url} onChange={update('payment_checkout_url')} type="url" required={false}/><Field label="支付回调密钥（留空自动生成）" value={form.payment_webhook_secret} onChange={update('payment_webhook_secret')} type="password" required={false}/><Field label="通知 Webhook（可选）" value={form.notification_webhook_url} onChange={update('notification_webhook_url')} type="url" required={false}/><Field label="通知签名密钥（留空自动生成）" value={form.notification_webhook_secret} onChange={update('notification_webhook_secret')} type="password" required={false}/><Field label="Metrics Token（留空自动生成）" value={form.metrics_token} onChange={update('metrics_token')} type="password" required={false}/></div></section>
+    <section className="installer-section"><h3>2. 通知与监控</h3><div className="installer-grid"><Field label="通知 Webhook（可选）" value={form.notification_webhook_url} onChange={update('notification_webhook_url')} type="url" required={false}/><Field label="通知签名密钥（留空自动生成）" value={form.notification_webhook_secret} onChange={update('notification_webhook_secret')} type="password" required={false}/><Field label="Metrics Token（留空自动生成）" value={form.metrics_token} onChange={update('metrics_token')} type="password" required={false}/></div></section>
     <details className="installer-section"><summary>3. 自动化时间参数（已有安全默认值）</summary><div className="installer-grid advanced-grid"><Field label="任务轮询" value={form.worker_poll_interval} onChange={update('worker_poll_interval')}/><Field label="节点对账" value={form.reconcile_interval} onChange={update('reconcile_interval')}/><Field label="账务扫描" value={form.lifecycle_interval} onChange={update('lifecycle_interval')}/><Field label="提前续费" value={form.renewal_lead_time} onChange={update('renewal_lead_time')}/><Field label="逾期宽限" value={form.overdue_grace_period} onChange={update('overdue_grace_period')}/><Field label="删除保留" value={form.termination_retention} onChange={update('termination_retention')}/></div></details>
     <section className="installer-section"><h3>4. 超级管理员</h3><div className="installer-grid"><Field label="管理员姓名" value={form.admin_display_name} onChange={update('admin_display_name')} autoComplete="name"/><Field label="管理员邮箱" value={form.admin_email} onChange={update('admin_email')} type="email" autoComplete="email"/><Field label="管理员密码" value={form.admin_password} onChange={update('admin_password')} type="password" autoComplete="new-password" hint="至少 12 个字符"/></div></section>
     {error && <div className="form-error" role="alert">{error}</div>}
@@ -336,8 +339,10 @@ function AdminShell({ meta, user, onLogout }: { meta: Meta | null; user: StaffUs
         {view === 'customers' && <CustomersView />}
         {view === 'orders' && <OrdersView />}
         {view === 'billing' && <BillingView />}
+		{view === 'payment' && <PaymentSettingsView />}
         {view === 'services' && <ServicesView />}
         {view === 'nodes' && <NodesView />}
+		{view === 'hosts' && <HostsView />}
         {view === 'plans' && <PlansView />}
         {view === 'support' && <AdminSupport />}
         {view === 'audit' && <AuditView />}
@@ -348,17 +353,18 @@ function AdminShell({ meta, user, onLogout }: { meta: Meta | null; user: StaffUs
 }
 
 function Overview() {
-  const foundation = [
-    ['客户账户', '订单和服务统一归属', 'ready'], ['服务端计价', '前端不能修改成交金额', 'ready'],
-    ['支付事件', 'HMAC 验签与事件去重', 'ready'], ['交易流水', '数据库只追加保护', 'ready'],
-    ['原子开通', '支付与开通任务同一事务', 'ready'], ['节点调度', '容量预留且防止超卖', 'ready'],
-  ]
-  return <>
-    <section className="hero-card"><div><p className="eyebrow">当前里程碑</p><h2>支付、调度、开通与状态对账已经闭环</h2><p>容量以事务方式预留，开通任务支持租约、重试和宕机恢复；CLICD 实例状态由后台定时校准且不会误触发重建。</p></div><div className="hero-signal" aria-label="里程碑完成度 63%"><span>63%</span><small>总体计划</small></div></section>
-    <section className="metrics" aria-label="工程状态"><article><Activity size={20}/><span>API 状态</span><strong>就绪</strong></article><article><ReceiptText size={20}/><span>订单账单</span><strong>已接通</strong></article><article><ShieldCheck size={20}/><span>支付事件</span><strong>验签去重</strong></article><article><CircleDollarSign size={20}/><span>交易模型</span><strong>只追加</strong></article></section>
-    <section className="panel"><div className="panel-heading"><div><p className="eyebrow">DELIVERY MAP</p><h3>第四批能力进度</h3></div><span className="tag">ITERATION 04</span></div><div className="foundation-list">{foundation.map(([title, description, state]) => <div className="foundation-row" key={title}><span className={state === 'ready' ? 'check ready' : 'check'}>{state === 'ready' ? '✓' : '·'}</span><div><strong>{title}</strong><span>{description}</span></div></div>)}</div></section>
-  </>
+  const [data,setData]=useState<OperationsOverviewRecord|null>(null);const [error,setError]=useState('')
+  const load=()=>api<OperationsOverviewRecord>('/api/v1/admin/overview').then(setData).catch((err)=>setError(err.message));useEffect(()=>{void load();const timer=window.setInterval(()=>void load(),30000);return()=>window.clearInterval(timer)},[])
+  if(!data)return <section className="workspace-panel">{error?<div className="form-error">{error}</div>:<div className="empty-card">正在加载运营数据…</div>}</section>
+  const revenue=data.revenue_30_days.map((item)=>money(item.amount_minor,item.currency)).join(' / ')||money(0,'CNY');const outstanding=data.outstanding.map((item)=>money(item.amount_minor,item.currency)).join(' / ')||money(0,'CNY');const nodeRate=data.nodes?Math.round(data.online_nodes/data.nodes*100):0
+  return <section className="workspace-panel">
+    <section className="hero-card operations-hero"><div><p className="eyebrow">最近 30 天</p><h2>{revenue} 已到账</h2><p>{data.orders_30_days} 笔新订单 · {data.accounts} 个有效客户 · {data.services} 台在管 VPS</p></div><div className="hero-signal"><span>{nodeRate}%</span><small>节点在线率</small></div></section>
+    <section className="metrics"><article><CircleDollarSign size={20}/><span>30 天收入</span><strong>{revenue}</strong></article><article><ReceiptText size={20}/><span>待收金额</span><strong>{outstanding}</strong><small>{data.open_invoices} 张账单</small></article><article><Activity size={20}/><span>运行中 VPS</span><strong>{data.running_services} / {data.services}</strong></article><article><Headphones size={20}/><span>待处理工单</span><strong>{data.open_tickets}</strong></article></section>
+    <div className="content-grid"><section className="panel"><div className="panel-heading"><h3>宿主机与容量</h3><span className="tag">{data.online_nodes}/{data.nodes} ONLINE</span></div><CapacityBar label="vCPU" used={data.reserved_vcpu} total={data.capacity_vcpu}/><CapacityBar label="内存" used={data.reserved_ram_mb} total={data.capacity_ram_mb} suffix=" MB"/><CapacityBar label="磁盘" used={data.reserved_disk_gb} total={data.capacity_disk_gb} suffix=" GB"/></section><section className="panel"><div className="panel-heading"><h3>需要关注</h3><span className="tag">LIVE</span></div><div className="attention-list"><span>逾期服务<strong>{data.overdue_services}</strong></span><span>失败任务<strong>{data.failed_jobs}</strong></span><span>执行中任务<strong>{data.pending_jobs}</strong></span><span>离线节点<strong>{data.nodes-data.online_nodes}</strong></span></div></section></div>
+  </section>
 }
+
+function CapacityBar({label,used,total,suffix=''}:{label:string;used:number;total:number;suffix?:string}){const rate=total?Math.min(100,Math.round(used/total*100)):0;return <div className="capacity-row"><div><span>{label}</span><strong>{used}{suffix} / {total}{suffix}</strong></div><div className="capacity-track"><i style={{width:`${rate}%`}}/></div><small>{rate}% 已预留</small></div>}
 
 function CustomersView() {
   const [customers, setCustomers] = useState<AccountRecord[]>([])
@@ -436,6 +442,20 @@ function BillingView() {
   </section>
 }
 
+function PaymentSettingsView(){
+  const [settings,setSettings]=useState<PaymentSettingsRecord|null>(null);const [form,setForm]=useState({type:'disabled',generic_base_url:'',generic_secret:'',alipay_app_id:'',alipay_private_key:'',alipay_public_key:'',alipay_gateway_url:'https://openapi.alipay.com/gateway.do',epay_api_url:'',epay_partner_id:'',epay_merchant_key:'',epay_payment_type:'alipay'});const [saving,setSaving]=useState(false);const [error,setError]=useState('');const [saved,setSaved]=useState(false)
+  useEffect(()=>{api<PaymentSettingsRecord>('/api/v1/admin/settings/payment').then((value)=>{setSettings(value);setForm((current)=>({...current,...value.gateway}))}).catch((err)=>setError(err.message))},[])
+  const update=(key:keyof typeof form)=>(event:ChangeEvent<HTMLInputElement|HTMLSelectElement|HTMLTextAreaElement>)=>setForm((current)=>({...current,[key]:event.target.value}))
+  async function submit(event:FormEvent){event.preventDefault();setSaving(true);setSaved(false);setError('');try{await api('/api/v1/admin/settings/payment',{method:'PUT',body:JSON.stringify(form)});const value=await api<PaymentSettingsRecord>('/api/v1/admin/settings/payment');setSettings(value);setForm((current)=>({...current,...value.gateway,generic_secret:'',alipay_private_key:'',alipay_public_key:'',epay_merchant_key:''}));setSaved(true)}catch(err){setError(err instanceof Error?err.message:'保存失败')}finally{setSaving(false)}}
+  return <section className="workspace-panel"><div className="page-actions"><div><p className="eyebrow">PAYMENT GATEWAY</p><h2>支付网关</h2><p>一次启用一个收款渠道；密钥加密保存且不会回显。留空代表保留已有密钥。</p></div><StatusBadge status={form.type==='disabled'?'disabled':'online'}/></div>{error&&<div className="form-error">{error}</div>}{saved&&<div className="success-note">支付网关配置已保存并立即生效。</div>}
+    <form className="panel payment-settings" onSubmit={submit}><div className="gateway-options"><label className={form.type==='disabled'?'selected':''}><input type="radio" name="gateway" checked={form.type==='disabled'} onChange={()=>setForm((v)=>({...v,type:'disabled'}))}/><strong>关闭在线支付</strong><span>仅允许后台确认到账</span></label><label className={form.type==='alipay_f2f'?'selected':''}><input type="radio" name="gateway" checked={form.type==='alipay_f2f'} onChange={()=>setForm((v)=>({...v,type:'alipay_f2f'}))}/><strong>支付宝当面付</strong><span>官方预下单 / RSA2</span></label><label className={form.type==='epay'?'selected':''}><input type="radio" name="gateway" checked={form.type==='epay'} onChange={()=>setForm((v)=>({...v,type:'epay'}))}/><strong>易支付</strong><span>彩虹易支付兼容协议</span></label><label className={form.type==='generic'?'selected':''}><input type="radio" name="gateway" checked={form.type==='generic'} onChange={()=>setForm((v)=>({...v,type:'generic'}))}/><strong>通用 HMAC</strong><span>自有外部收银台</span></label></div>
+      {form.type==='generic'&&<div className="form-grid"><label><span>收银台地址</span><input type="url" value={form.generic_base_url} onChange={update('generic_base_url')} required/></label><label><span>签名密钥 {settings?.gateway.generic_secret_configured?'（已配置）':''}</span><input type="password" value={form.generic_secret} onChange={update('generic_secret')} placeholder="留空保留已有密钥"/></label></div>}
+      {form.type==='alipay_f2f'&&<div className="form-grid"><label><span>应用 App ID</span><input value={form.alipay_app_id} onChange={update('alipay_app_id')} required/></label><label><span>网关地址</span><input type="url" value={form.alipay_gateway_url} onChange={update('alipay_gateway_url')} required/></label><label className="wide"><span>应用私钥 {settings?.gateway.alipay_private_key_configured?'（已配置）':''}</span><textarea rows={5} value={form.alipay_private_key} onChange={update('alipay_private_key')} placeholder="PKCS#1 / PKCS#8，留空保留已有密钥"/></label><label className="wide"><span>支付宝公钥 {settings?.gateway.alipay_public_key_configured?'（已配置）':''}</span><textarea rows={5} value={form.alipay_public_key} onChange={update('alipay_public_key')} placeholder="留空保留已有公钥"/></label></div>}
+      {form.type==='epay'&&<div className="form-grid"><label><span>接口地址</span><input type="url" value={form.epay_api_url} onChange={update('epay_api_url')} placeholder="https://pay.example.com/" required/></label><label><span>商户 ID（PID）</span><input value={form.epay_partner_id} onChange={update('epay_partner_id')} required/></label><label><span>支付通道</span><select value={form.epay_payment_type} onChange={update('epay_payment_type')}><option value="alipay">支付宝</option><option value="wxpay">微信支付</option><option value="qqpay">QQ 钱包</option></select></label><label><span>商户密钥 {settings?.gateway.epay_merchant_key_configured?'（已配置）':''}</span><input type="password" value={form.epay_merchant_key} onChange={update('epay_merchant_key')} placeholder="留空保留已有密钥"/></label></div>}
+      {form.type!=='disabled'&&settings&&<div className="callback-box"><span>异步回调地址</span><code>{settings.callbacks[form.type]}</code></div>}<div className="form-actions"><button className="primary-button compact" disabled={saving}>{saving?'保存中…':'保存并启用'}</button></div></form>
+  </section>
+}
+
 function ServicesView() {
   const [services, setServices] = useState<ServiceRecord[]>([])
   const [jobs, setJobs] = useState<ProvisioningJobRecord[]>([])
@@ -485,12 +505,13 @@ function NodesView() {
   }
 
   return <section className="workspace-panel">
-    <PageActions eyebrow="INFRASTRUCTURE" title="节点与地区" description="接入时会实时验证 CLICD API，密钥只以加密形式保存。" action={() => setShowForm(true)} actionLabel="接入节点" />
+    <PageActions eyebrow="PROVIDER INTEGRATIONS" title="节点对接" description="统一管理虚拟化面板连接。当前支持 CLICD，后续适配器不会改变套餐、调度与账务模型。" action={() => setShowForm(true)} actionLabel="新增对接" />
     {error && <div className="form-error" role="alert">{error}</div>}
     {showForm && <NodeForm onClose={() => setShowForm(false)} onCreated={() => { setShowForm(false); load() }} />}
-    <div className="table-wrap"><table><thead><tr><th>节点</th><th>地区</th><th>虚拟化</th><th>可调度总容量</th><th>状态</th><th>最后在线</th><th></th></tr></thead><tbody>
-      {nodes.map((node) => <tr key={node.id}><td><strong>{node.name}</strong><small>{node.base_url}</small></td><td>{node.region_name}<small>{node.region_code}</small></td><td>{node.virtualization_types.join(' / ').toUpperCase()}</td><td>{node.capacity_vcpu} vCPU<small>{node.capacity_ram_mb} MB / {node.capacity_disk_gb} GB</small></td><td><StatusBadge status={node.status}/></td><td>{node.last_seen_at ? new Date(node.last_seen_at).toLocaleString() : '—'}</td><td><button className="text-button" onClick={() => testNode(node.id)} disabled={testing === node.id}><RefreshCw size={14}/>{testing === node.id ? '测试中' : '测试连接'}</button></td></tr>)}
-      {!nodes.length && <tr><td colSpan={7} className="empty-state">尚未接入节点</td></tr>}
+    <div className="provider-strip"><article className="available"><strong>CLICD</strong><span>LXC / KVM · 已可用</span></article><article><strong>Proxmox VE</strong><span>计划适配</span></article><article><strong>Virtualizor</strong><span>计划适配</span></article></div>
+    <div className="table-wrap"><table><thead><tr><th>节点</th><th>对接方式</th><th>地区</th><th>虚拟化</th><th>可调度总容量</th><th>状态</th><th>最后在线</th><th></th></tr></thead><tbody>
+      {nodes.map((node) => <tr key={node.id}><td><strong>{node.name}</strong><small>{node.base_url}</small></td><td><span className="tag">{node.provider_type.toUpperCase()}</span></td><td>{node.region_name}<small>{node.region_code}</small></td><td>{node.virtualization_types.join(' / ').toUpperCase()}</td><td>{node.capacity_vcpu} vCPU<small>{node.capacity_ram_mb} MB / {node.capacity_disk_gb} GB</small></td><td><StatusBadge status={node.status}/></td><td>{node.last_seen_at ? new Date(node.last_seen_at).toLocaleString() : '—'}</td><td><button className="text-button" onClick={() => testNode(node.id)} disabled={testing === node.id}><RefreshCw size={14}/>{testing === node.id ? '测试中' : '测试连接'}</button></td></tr>)}
+      {!nodes.length && <tr><td colSpan={8} className="empty-state">尚未接入节点</td></tr>}
     </tbody></table></div>
   </section>
 }
@@ -501,16 +522,18 @@ function NodeForm({ onClose, onCreated }: { onClose: () => void; onCreated: () =
     event.preventDefault(); setSaving(true); setError('')
     const data = new FormData(event.currentTarget)
     try {
-      await api('/api/v1/admin/nodes', { method: 'POST', body: JSON.stringify({ region_code: data.get('region_code'), region_name: data.get('region_name'), name: data.get('name'), base_url: data.get('base_url'), api_key: data.get('api_key'), virtualization_types: data.getAll('virtualization_types') }) })
+      await api('/api/v1/admin/nodes', { method: 'POST', body: JSON.stringify({ provider_type: data.get('provider_type'), region_code: data.get('region_code'), region_name: data.get('region_name'), name: data.get('name'), base_url: data.get('base_url'), api_key: data.get('api_key'), virtualization_types: data.getAll('virtualization_types') }) })
       onCreated()
     } catch (err) { setError(err instanceof Error ? err.message : '接入失败') }
     finally { setSaving(false) }
   }
-  return <div className="inline-form"><div className="inline-form-heading"><div><h3>接入 CLICD 节点</h3><p>保存前会调用主机信息接口验证连接。</p></div><button className="icon-button" onClick={onClose}><X size={18}/></button></div><form className="form-grid" onSubmit={submit}>
-    <label><span>节点名称</span><input name="name" required placeholder="node-sha-01" /></label><label><span>地区代码</span><input name="region_code" required placeholder="SHA" /></label><label><span>地区名称</span><input name="region_name" required placeholder="上海" /></label><label><span>CLICD API 地址</span><input name="base_url" type="url" required placeholder="https://10.0.0.10:8999" /></label><label className="wide"><span>API Key</span><input name="api_key" type="password" required autoComplete="off" /></label><fieldset className="wide"><legend>虚拟化类型</legend><label className="checkbox"><input type="checkbox" name="virtualization_types" value="lxc" defaultChecked/> LXC</label><label className="checkbox"><input type="checkbox" name="virtualization_types" value="kvm"/> KVM</label></fieldset>
+  return <div className="inline-form"><div className="inline-form-heading"><div><h3>新增节点对接</h3><p>选择适配器并验证连接，凭据只以加密形式保存。</p></div><button className="icon-button" onClick={onClose}><X size={18}/></button></div><form className="form-grid" onSubmit={submit}>
+    <label><span>对接方式</span><select name="provider_type"><option value="clicd">CLICD（LXC / KVM）</option></select></label><label><span>节点名称</span><input name="name" required placeholder="node-sha-01" /></label><label><span>地区代码</span><input name="region_code" required placeholder="SHA" /></label><label><span>地区名称</span><input name="region_name" required placeholder="上海" /></label><label><span>API 地址</span><input name="base_url" type="url" required placeholder="https://10.0.0.10:8999" /></label><label><span>API Key</span><input name="api_key" type="password" required autoComplete="off" /></label><fieldset className="wide"><legend>虚拟化类型</legend><label className="checkbox"><input type="checkbox" name="virtualization_types" value="lxc" defaultChecked/> LXC</label><label className="checkbox"><input type="checkbox" name="virtualization_types" value="kvm"/> KVM</label></fieldset>
     {error && <div className="form-error wide">{error}</div>}<div className="form-actions wide"><button type="button" className="secondary-button" onClick={onClose}>取消</button><button className="primary-button" disabled={saving}>{saving ? '验证并保存…' : '验证并保存'}</button></div>
   </form></div>
 }
+
+function HostsView(){const [hosts,setHosts]=useState<HostProbeRecord[]>([]);const [error,setError]=useState('');const load=()=>api<HostProbeRecord[]>('/api/v1/admin/hosts').then(setHosts).catch((err)=>setError(err.message));useEffect(()=>{void load();const timer=window.setInterval(()=>void load(),30000);return()=>window.clearInterval(timer)},[]);return <section className="workspace-panel"><div className="page-actions"><div><p className="eyebrow">HOST TELEMETRY</p><h2>宿主机探针</h2><p>由节点适配器定时采集主机信息、在线状态与可调度容量，每 30 秒刷新页面。</p></div><button className="secondary-button" onClick={()=>void load()}><RefreshCw size={15}/>刷新</button></div>{error&&<div className="form-error">{error}</div>}<div className="host-grid">{hosts.map((host)=><article className="host-card" key={host.id}><header><div><span className="tag">{host.provider_type.toUpperCase()}</span><h3>{host.name}</h3><small>{host.region_name} · {host.base_url}</small></div><StatusBadge status={host.status}/></header><div className="host-summary"><span><strong>{host.capacity_vcpu-host.reserved_vcpu}</strong> / {host.capacity_vcpu}<small>空闲 vCPU</small></span><span><strong>{host.capacity_ram_mb-host.reserved_ram_mb}</strong> / {host.capacity_ram_mb}<small>空闲内存 MB</small></span><span><strong>{host.capacity_disk_gb-host.reserved_disk_gb}</strong> / {host.capacity_disk_gb}<small>空闲磁盘 GB</small></span></div><CapacityBar label="CPU 预留" used={host.reserved_vcpu} total={host.capacity_vcpu}/><CapacityBar label="内存预留" used={host.reserved_ram_mb} total={host.capacity_ram_mb}/><footer><span>{host.virtualization_types.join(' / ').toUpperCase()}</span><span>最后在线：{host.last_seen_at?new Date(host.last_seen_at).toLocaleString():'从未'}</span></footer></article>)}{!hosts.length&&<div className="empty-card">暂无宿主机探针数据，请先完成节点对接。</div>}</div></section>}
 
 function PlansView() {
   const [plans, setPlans] = useState<PlanRecord[]>([]); const [showForm, setShowForm] = useState(false); const [error, setError] = useState('')
@@ -537,5 +560,5 @@ function StatusBadge({ status }: { status: string }) { const labels: Record<stri
 function cycleLabel(cycle: string) { return ({ monthly: '月', quarterly: '季', semiannual: '半年', annual: '年' } as Record<string, string>)[cycle] ?? cycle }
 function ticketStatusLabel(status:string){return ({open:'待处理',customer_reply:'客户已回复',staff_reply:'客服已回复',resolved:'已解决',closed:'已关闭'} as Record<string,string>)[status]||status}
 function ticketAuthorLabel(type:string){return ({customer:'客户',staff:'客服',system:'系统'} as Record<string,string>)[type]||type}
-function viewTitle(view: View) { return ({ overview: '运营概览', customers: '客户', orders: '订单', billing: '账单与交易', services: 'VPS 服务', nodes: 'CLICD 节点', plans: '商品套餐', support: '客户工单', audit: '审计日志', security: '登录安全' } as Record<View, string>)[view] }
+function viewTitle(view: View) { return ({ overview: '运营概览', customers: '客户', orders: '订单', billing: '账单与交易', payment: '支付网关', services: 'VPS 服务', nodes: '节点对接', hosts: '宿主机探针', plans: '商品套餐', support: '客户工单', audit: '审计日志', security: '登录安全' } as Record<View, string>)[view] }
 function money(amountMinor: number, currency: string) { return new Intl.NumberFormat('zh-CN', { style: 'currency', currency }).format(amountMinor / 100) }

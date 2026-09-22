@@ -22,8 +22,8 @@ func (i *installer) status(w http.ResponseWriter, _ *http.Request) {
 		"required": !runtime.Installed,
 		"defaults": map[string]string{
 			"app_name": "CLICD Billing", "timezone": "Asia/Shanghai",
-			"payment_provider_name": "generic", "worker_poll_interval": "3s",
-			"reconcile_interval": "5m", "lifecycle_interval": "1m",
+			"worker_poll_interval": "3s",
+			"reconcile_interval":   "5m", "lifecycle_interval": "1m",
 			"renewal_lead_time": "168h", "overdue_grace_period": "72h",
 			"termination_retention": "168h",
 		},
@@ -62,9 +62,6 @@ func (i *installer) install(w http.ResponseWriter, r *http.Request) {
 	}
 	runtime := i.settings.Current()
 	generated := map[string]string{}
-	if result.GeneratedPaymentSecret {
-		generated["payment_webhook_secret"] = runtime.PaymentWebhookSecret
-	}
 	if result.GeneratedNotificationSecret {
 		generated["notification_webhook_secret"] = runtime.NotificationWebhookSecret
 	}

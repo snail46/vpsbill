@@ -23,6 +23,7 @@ export type NodeRecord = {
   region_code: string
   region_name: string
   name: string
+	provider_type: string
   base_url: string
   status: string
   virtualization_types: string[]
@@ -31,6 +32,23 @@ export type NodeRecord = {
   capacity_ram_mb: number
   capacity_disk_gb: number
   last_seen_at: string | null
+}
+
+export type MoneyTotal = { currency: string; amount_minor: number }
+export type OperationsOverviewRecord = {
+  accounts: number; orders_30_days: number; services: number; running_services: number; open_invoices: number; overdue_services: number
+  nodes: number; online_nodes: number; open_tickets: number; pending_jobs: number; failed_jobs: number
+  capacity_vcpu: number; reserved_vcpu: number; capacity_ram_mb: number; reserved_ram_mb: number; capacity_disk_gb: number; reserved_disk_gb: number
+  revenue_30_days: MoneyTotal[]; outstanding: MoneyTotal[]
+}
+export type HostProbeRecord = NodeRecord & { reserved_vcpu: number; reserved_ram_mb: number; reserved_disk_gb: number }
+export type PaymentSettingsRecord = {
+  gateway: {
+    type: string; generic_base_url: string; generic_secret_configured: boolean
+    alipay_app_id: string; alipay_gateway_url: string; alipay_private_key_configured: boolean; alipay_public_key_configured: boolean
+    epay_api_url: string; epay_partner_id: string; epay_payment_type: string; epay_merchant_key_configured: boolean
+  }
+  callbacks: Record<string,string>
 }
 
 export type Price = {

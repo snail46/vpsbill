@@ -20,3 +20,17 @@ func TestValidPaymentSignature(t *testing.T) {
 		t.Fatal("tampered payload must fail validation")
 	}
 }
+
+func TestParseAmountMinor(t *testing.T) {
+	for input, expected := range map[string]int64{"19": 1900, "19.0": 1900, "19.05": 1905, "0.01": 1} {
+		actual, err := parseAmountMinor(input)
+		if err != nil || actual != expected {
+			t.Fatalf("%s: got %d, %v", input, actual, err)
+		}
+	}
+	for _, input := range []string{"", "-1.00", "1.001", "abc"} {
+		if _, err := parseAmountMinor(input); err == nil {
+			t.Fatalf("accepted %q", input)
+		}
+	}
+}

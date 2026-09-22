@@ -97,3 +97,11 @@ func (s *BillingStore) SetPaymentIntentCheckoutURL(ctx context.Context, id, acco
 	}
 	return nil
 }
+
+func (s *BillingStore) PaymentIntentByMerchantReference(ctx context.Context, reference, provider string) (PaymentIntent, error) {
+	var result PaymentIntent
+	err := s.db.QueryRow(ctx, `SELECT p.id,p.account_id,p.invoice_id,i.number,p.provider,p.merchant_reference,p.status,p.currency,p.amount_minor,coalesce(p.checkout_url,''),p.expires_at
+		FROM payment_intents p JOIN invoices i ON i.id=p.invoice_id WHERE p.merchant_reference=$1 AND p.provider=$2`, reference, provider).
+		Scan(&result.ID, &result.AccountID, &result.InvoiceID, &result.InvoiceNumber, &result.Provider, &result.MerchantReference, &result.Status, &result.Currency, &result.AmountMinor, &result.CheckoutURL, &result.ExpiresAt)
+	return result, err
+}

@@ -94,6 +94,9 @@ jobs:
           METRICS_TOKEN="$(printf '%s' "$INSTALL_RESPONSE" | jq -r '.data.generated_secrets.metrics_token')"
           test "${#METRICS_TOKEN}" -ge 32
           curl --fail --silent --show-error -H "Authorization: Bearer $METRICS_TOKEN" http://localhost:8080/metrics | grep -q clicd_billing_accounts
+          curl --fail --silent --show-error -b /tmp/clicd-cookies http://localhost:8080/api/v1/admin/overview | jq -e '.data.nodes == 0'
+          curl --fail --silent --show-error -b /tmp/clicd-cookies http://localhost:8080/api/v1/admin/hosts | jq -e '.data | type == "array"'
+          curl --fail --silent --show-error -b /tmp/clicd-cookies http://localhost:8080/api/v1/admin/settings/payment | jq -e '.data.gateway.type == "disabled"'
           test "$(curl --fail --silent --show-error http://localhost:8080/api/v1/install | jq -r '.data.required')" = "false"
       - name: Exercise backup, restore, and encryption-key rotation
         run: |

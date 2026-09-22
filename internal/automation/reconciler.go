@@ -89,6 +89,9 @@ func (r *Reconciler) reconcileNodes(ctx context.Context) {
 		return
 	}
 	for _, node := range nodes {
+		if node.ProviderType != "clicd" {
+			continue
+		}
 		apiKey, err := r.box.Open(node.APIKeyCiphertext)
 		if err != nil {
 			_ = r.catalog.UpdateNodeHealth(ctx, node.ID, "offline", map[string]any{})

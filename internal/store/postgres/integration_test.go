@@ -40,7 +40,7 @@ func TestBillingLifecycleIntegration(t *testing.T) {
 	if err = db.QueryRow(ctx, `SELECT count(*) FROM schema_migrations`).Scan(&migrationCount); err != nil {
 		t.Fatal(err)
 	}
-	if migrationCount < 11 {
+	if migrationCount < 12 {
 		t.Fatalf("only %d migrations applied", migrationCount)
 	}
 	billing := NewBillingStore(db)
@@ -221,5 +221,14 @@ func TestBillingLifecycleIntegration(t *testing.T) {
 	}
 	if transactions != 2 {
 		t.Fatalf("transactions=%d", transactions)
+	}
+	monitoring := NewMonitoringStore(db)
+	overview, err := monitoring.Overview(ctx)
+	if err != nil || overview.Accounts != 1 || overview.Nodes != 1 || overview.CapacityVCPU != 8 || len(overview.Revenue30Days) != 1 {
+		t.Fatalf("operations overview: %+v err=%v", overview, err)
+	}
+	hosts, err := monitoring.Hosts(ctx)
+	if err != nil || len(hosts) != 1 || hosts[0].ProviderType != "clicd" || hosts[0].ReservedVCPU != 1 {
+		t.Fatalf("host probes: %+v err=%v", hosts, err)
 	}
 }

@@ -81,7 +81,7 @@ func (p *customerPortal) catalogData(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "internal_error"})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": map[string]any{"plans": available, "regions": regions, "checkout_enabled": p.settings.Current().PaymentCheckoutURL != ""}})
+	writeJSON(w, http.StatusOK, map[string]any{"data": map[string]any{"plans": available, "regions": regions, "checkout_enabled": p.settings.Current().PaymentGateway.Type != "disabled"}})
 }
 
 func (p *customerPortal) listOrders(w http.ResponseWriter, r *http.Request) {
@@ -112,13 +112,13 @@ func (p *customerPortal) createOrder(w http.ResponseWriter, r *http.Request) {
 
 func (p *customerPortal) checkout(w http.ResponseWriter, r *http.Request) {
 	runtime := p.settings.Current()
-	gateway := payment.GenericGateway{BaseURL: runtime.PaymentCheckoutURL, PublicURL: runtime.PublicURL, Secret: runtime.PaymentWebhookSecret}
-	if !gateway.Available() {
+	config := runtime.PaymentGateway
+	if config.Type == "" || config.Type == "disabled" {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "checkout_unavailable", "message": "商家尚未配置在线支付网关"})
 		return
 	}
 	identity := customerPrincipalFromContext(r.Context())
-	intent, err := p.billing.PreparePaymentIntent(r.Context(), identity.AccountID, r.PathValue("id"), runtime.PaymentProviderName)
+	intent, err := p.billing.PreparePaymentIntent(r.Context(), identity.AccountID, r.PathValue("id"), config.Type)
 	if errors.Is(err, postgres.ErrInvoiceUnavailable) {
 		writeJSON(w, http.StatusConflict, map[string]any{"error": "invoice_unavailable", "message": "账单不存在、已支付或当前不可付款"})
 		return
@@ -127,8 +127,22 @@ func (p *customerPortal) checkout(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "internal_error"})
 		return
 	}
+	if (config.Type == "alipay_f2f" || config.Type == "epay") && intent.Currency != "CNY" {
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "currency_unsupported", "message": "当前支付网关仅支持人民币账单"})
+		return
+	}
 	if intent.CheckoutURL == "" {
-		intent.CheckoutURL, err = gateway.CheckoutURL(payment.CheckoutRequest{MerchantReference: intent.MerchantReference, InvoiceNumber: intent.InvoiceNumber, AmountMinor: intent.AmountMinor, Currency: intent.Currency, ExpiresAt: intent.ExpiresAt})
+		request := payment.CheckoutRequest{MerchantReference: intent.MerchantReference, InvoiceNumber: intent.InvoiceNumber, AmountMinor: intent.AmountMinor, Currency: intent.Currency, ExpiresAt: intent.ExpiresAt}
+		switch config.Type {
+		case "generic":
+			intent.CheckoutURL, err = (payment.GenericGateway{BaseURL: config.GenericBaseURL, PublicURL: runtime.PublicURL, Secret: config.GenericSecret}).CheckoutURL(request)
+		case "epay":
+			intent.CheckoutURL, err = (payment.EpayGateway{APIURL: config.EpayAPIURL, PartnerID: config.EpayPartnerID, MerchantKey: config.EpayMerchantKey, PaymentType: config.EpayPaymentType, PublicURL: runtime.PublicURL, SiteName: runtime.AppName}).CheckoutURL(request)
+		case "alipay_f2f":
+			intent.CheckoutURL, err = (payment.AlipayGateway{AppID: config.AlipayAppID, PrivateKey: config.AlipayPrivateKey, PublicKey: config.AlipayPublicKey, GatewayURL: config.AlipayGatewayURL, PublicURL: runtime.PublicURL}).CheckoutURL(r.Context(), request)
+		default:
+			err = errors.New("unsupported payment gateway")
+		}
 		if err == nil {
 			err = p.billing.SetPaymentIntentCheckoutURL(r.Context(), intent.ID, identity.AccountID, intent.CheckoutURL)
 		}

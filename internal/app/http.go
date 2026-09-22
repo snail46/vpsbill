@@ -41,6 +41,7 @@ func NewHandler(deps Dependencies) (http.Handler, error) {
 	auth := newAuthenticator(deps.Config, authStore, secretBox, deps.Settings)
 	admin := newAdminCatalog(catalogStore, secretBox)
 	billing := newAdminBilling(deps.Settings, billingStore)
+	adminSettings := adminSettings{settings: deps.Settings}
 	automation := newAdminAutomation(provisioningStore)
 	portal := newCustomerPortal(deps.Settings, portalStore, billingStore, catalogStore)
 	operations := newOperationsAPI(operationsStore)
@@ -100,6 +101,8 @@ func NewHandler(deps Dependencies) (http.Handler, error) {
 	mux.Handle("GET /api/v1/customer/tickets/{id}", auth.requireCustomer(http.HandlerFunc(operations.customerTicketDetail)))
 	mux.Handle("POST /api/v1/customer/tickets/{id}/messages", auth.requireCustomer(http.HandlerFunc(operations.customerReplyTicket)))
 	mux.Handle("GET /api/v1/admin/nodes", auth.require("nodes:read", http.HandlerFunc(admin.listNodes)))
+	mux.Handle("GET /api/v1/admin/hosts", auth.require("nodes:read", http.HandlerFunc(metrics.hosts)))
+	mux.Handle("GET /api/v1/admin/overview", auth.require("customers:read", http.HandlerFunc(metrics.overview)))
 	mux.Handle("POST /api/v1/admin/nodes", auth.require("nodes:write", http.HandlerFunc(admin.createNode)))
 	mux.Handle("POST /api/v1/admin/nodes/{id}/test", auth.require("nodes:write", http.HandlerFunc(admin.testNode)))
 	mux.Handle("GET /api/v1/admin/plans", auth.require("plans:read", http.HandlerFunc(admin.listPlans)))
@@ -114,6 +117,8 @@ func NewHandler(deps Dependencies) (http.Handler, error) {
 	mux.Handle("GET /api/v1/admin/invoices", auth.require("billing:read", http.HandlerFunc(billing.listInvoices)))
 	mux.Handle("GET /api/v1/admin/transactions", auth.require("billing:read", http.HandlerFunc(billing.listTransactions)))
 	mux.Handle("POST /api/v1/admin/invoices/{id}/pay", auth.require("billing:write", http.HandlerFunc(billing.recordManualPayment)))
+	mux.Handle("GET /api/v1/admin/settings/payment", auth.require("billing:read", http.HandlerFunc(adminSettings.payment)))
+	mux.Handle("PUT /api/v1/admin/settings/payment", auth.require("billing:write", http.HandlerFunc(adminSettings.updatePayment)))
 	mux.Handle("GET /api/v1/admin/services", auth.require("services:read", http.HandlerFunc(automation.listServices)))
 	mux.Handle("GET /api/v1/admin/jobs", auth.require("services:read", http.HandlerFunc(automation.listJobs)))
 	mux.Handle("POST /api/v1/admin/jobs/{id}/retry", auth.require("services:write", http.HandlerFunc(automation.retryJob)))
@@ -123,6 +128,9 @@ func NewHandler(deps Dependencies) (http.Handler, error) {
 	mux.Handle("PATCH /api/v1/admin/tickets/{id}", auth.require("tickets:write", http.HandlerFunc(operations.adminUpdateTicket)))
 	mux.Handle("GET /api/v1/admin/audit-logs", auth.require("audit:read", http.HandlerFunc(operations.adminAuditLogs)))
 	mux.HandleFunc("POST /api/v1/webhooks/payments/generic", billing.paymentWebhook)
+	mux.HandleFunc("GET /api/v1/webhooks/payments/epay", billing.epayWebhook)
+	mux.HandleFunc("POST /api/v1/webhooks/payments/epay", billing.epayWebhook)
+	mux.HandleFunc("POST /api/v1/webhooks/payments/alipay", billing.alipayWebhook)
 
 	return requestLog(deps.Logger, securityHeaders(installationGate(deps.Settings, mux))), nil
 }

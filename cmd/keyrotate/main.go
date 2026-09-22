@@ -95,8 +95,8 @@ func main() {
 		}
 		count++
 	}
-	var paymentSecret, notificationSecret, metricsToken []byte
-	err = tx.QueryRow(ctx, `SELECT payment_webhook_secret_encrypted,notification_webhook_secret_encrypted,metrics_token_encrypted FROM system_settings WHERE singleton=true FOR UPDATE`).Scan(&paymentSecret, &notificationSecret, &metricsToken)
+	var paymentSecret, notificationSecret, metricsToken, paymentGatewayConfig []byte
+	err = tx.QueryRow(ctx, `SELECT payment_webhook_secret_encrypted,notification_webhook_secret_encrypted,metrics_token_encrypted,payment_gateway_config_encrypted FROM system_settings WHERE singleton=true FOR UPDATE`).Scan(&paymentSecret, &notificationSecret, &metricsToken, &paymentGatewayConfig)
 	if err == nil {
 		paymentSecret, err = reencrypt(oldBox, newBox, paymentSecret)
 		if err != nil {
@@ -110,7 +110,11 @@ func main() {
 		if err != nil {
 			log.Fatal("cannot decrypt metrics token; rotation aborted")
 		}
-		if _, err = tx.Exec(ctx, `UPDATE system_settings SET payment_webhook_secret_encrypted=$1,notification_webhook_secret_encrypted=$2,metrics_token_encrypted=$3,updated_at=now() WHERE singleton=true`, paymentSecret, notificationSecret, metricsToken); err != nil {
+		paymentGatewayConfig, err = reencrypt(oldBox, newBox, paymentGatewayConfig)
+		if err != nil {
+			log.Fatal("cannot decrypt payment gateway configuration; rotation aborted")
+		}
+		if _, err = tx.Exec(ctx, `UPDATE system_settings SET payment_webhook_secret_encrypted=$1,notification_webhook_secret_encrypted=$2,metrics_token_encrypted=$3,payment_gateway_config_encrypted=$4,updated_at=now() WHERE singleton=true`, paymentSecret, notificationSecret, metricsToken, paymentGatewayConfig); err != nil {
 			log.Fatal(err)
 		}
 		count++

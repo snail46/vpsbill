@@ -30,6 +30,7 @@ func (a *adminCatalog) listNodes(w http.ResponseWriter, r *http.Request) {
 
 func (a *adminCatalog) createNode(w http.ResponseWriter, r *http.Request) {
 	var input struct {
+		ProviderType        string   `json:"provider_type"`
 		RegionCode          string   `json:"region_code"`
 		RegionName          string   `json:"region_name"`
 		Name                string   `json:"name"`
@@ -38,6 +39,14 @@ func (a *adminCatalog) createNode(w http.ResponseWriter, r *http.Request) {
 		VirtualizationTypes []string `json:"virtualization_types"`
 	}
 	if !decodeJSON(w, r, &input) {
+		return
+	}
+	input.ProviderType = strings.TrimSpace(input.ProviderType)
+	if input.ProviderType == "" {
+		input.ProviderType = "clicd"
+	}
+	if input.ProviderType != "clicd" {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "provider_unsupported", "message": "当前版本仅支持 CLICD 对接方式"})
 		return
 	}
 	if strings.TrimSpace(input.RegionCode) == "" || strings.TrimSpace(input.RegionName) == "" || strings.TrimSpace(input.Name) == "" || strings.TrimSpace(input.APIKey) == "" || len(input.VirtualizationTypes) == 0 {
@@ -67,6 +76,7 @@ func (a *adminCatalog) createNode(w http.ResponseWriter, r *http.Request) {
 	}
 	totals := clicd.CapacityFromHostInfo(hostInfo)
 	node, err := a.store.CreateNode(r.Context(), postgres.CreateNode{
+		ProviderType:        input.ProviderType,
 		RegionCode:          input.RegionCode,
 		RegionName:          input.RegionName,
 		Name:                input.Name,
@@ -90,6 +100,10 @@ func (a *adminCatalog) testNode(w http.ResponseWriter, r *http.Request) {
 	node, err := a.store.NodeSecret(r.Context(), id)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]any{"error": "node_not_found"})
+		return
+	}
+	if node.ProviderType != "clicd" {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "provider_unsupported", "message": "此对接方式暂不支持连接测试"})
 		return
 	}
 	apiKey, err := a.box.Open(node.APIKeyCiphertext)

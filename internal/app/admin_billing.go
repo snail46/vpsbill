@@ -9,8 +9,10 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 
+	"clicd-billing/internal/payment"
 	"clicd-billing/internal/security"
 	"clicd-billing/internal/settings"
 	"clicd-billing/internal/store/postgres"
@@ -179,7 +181,8 @@ func (a *adminBilling) paymentWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	runtime := a.settings.Current()
-	if !validPaymentSignature(body, r.Header.Get("X-Payment-Signature"), runtime.PaymentWebhookSecret) {
+	config := runtime.PaymentGateway
+	if config.Type != "generic" || !validPaymentSignature(body, r.Header.Get("X-Payment-Signature"), config.GenericSecret) {
 		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "invalid_signature"})
 		return
 	}
@@ -188,18 +191,101 @@ func (a *adminBilling) paymentWebhook(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_event"})
 		return
 	}
-	event.Provider = runtime.PaymentProviderName
+	event.Provider = "generic"
 	event.Payload = append([]byte(nil), body...)
 	if event.ProviderEventID == "" || event.ProviderTransactionID == "" || event.InvoiceNumber == "" || event.EventType != "payment.succeeded" {
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "unsupported_event"})
 		return
 	}
-	result, err := a.store.ProcessPayment(r.Context(), event, "payment_provider", runtime.PaymentProviderName)
+	result, err := a.store.ProcessPayment(r.Context(), event, "payment_provider", "generic")
 	if err != nil {
 		writePaymentError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": result})
+}
+
+func (a *adminBilling) epayWebhook(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		plainWebhook(w, "fail")
+		return
+	}
+	config := a.settings.Current().PaymentGateway
+	if config.Type != "epay" || r.Form.Get("pid") != config.EpayPartnerID || !payment.VerifyEpay(r.Form, config.EpayMerchantKey) || r.Form.Get("trade_status") != "TRADE_SUCCESS" {
+		plainWebhook(w, "fail")
+		return
+	}
+	intent, err := a.store.PaymentIntentByMerchantReference(r.Context(), r.Form.Get("out_trade_no"), "epay")
+	amount, amountErr := parseAmountMinor(r.Form.Get("money"))
+	if err != nil || amountErr != nil || amount != intent.AmountMinor || intent.Currency != "CNY" || r.Form.Get("trade_no") == "" {
+		plainWebhook(w, "fail")
+		return
+	}
+	payload, _ := json.Marshal(r.Form)
+	_, err = a.store.ProcessPayment(r.Context(), postgres.PaymentEvent{Provider: "epay", ProviderEventID: r.Form.Get("trade_no"), EventType: "payment.succeeded", ProviderTransactionID: r.Form.Get("trade_no"), InvoiceNumber: intent.InvoiceNumber, AmountMinor: amount, Currency: intent.Currency, Payload: payload}, "payment_provider", "epay")
+	if err != nil {
+		plainWebhook(w, "fail")
+		return
+	}
+	plainWebhook(w, "success")
+}
+
+func (a *adminBilling) alipayWebhook(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		plainWebhook(w, "failure")
+		return
+	}
+	config := a.settings.Current().PaymentGateway
+	status := r.Form.Get("trade_status")
+	if config.Type != "alipay_f2f" || r.Form.Get("app_id") != config.AlipayAppID || (status != "TRADE_SUCCESS" && status != "TRADE_FINISHED") || !payment.VerifyAlipay(r.Form, config.AlipayPublicKey) {
+		plainWebhook(w, "failure")
+		return
+	}
+	intent, err := a.store.PaymentIntentByMerchantReference(r.Context(), r.Form.Get("out_trade_no"), "alipay_f2f")
+	amount, amountErr := parseAmountMinor(r.Form.Get("total_amount"))
+	if err != nil || amountErr != nil || amount != intent.AmountMinor || intent.Currency != "CNY" || r.Form.Get("trade_no") == "" || r.Form.Get("notify_id") == "" {
+		plainWebhook(w, "failure")
+		return
+	}
+	payload, _ := json.Marshal(r.Form)
+	_, err = a.store.ProcessPayment(r.Context(), postgres.PaymentEvent{Provider: "alipay_f2f", ProviderEventID: r.Form.Get("notify_id"), EventType: "payment.succeeded", ProviderTransactionID: r.Form.Get("trade_no"), InvoiceNumber: intent.InvoiceNumber, AmountMinor: amount, Currency: intent.Currency, Payload: payload}, "payment_provider", "alipay_f2f")
+	if err != nil {
+		plainWebhook(w, "failure")
+		return
+	}
+	plainWebhook(w, "success")
+}
+
+func parseAmountMinor(value string) (int64, error) {
+	parts := strings.Split(strings.TrimSpace(value), ".")
+	if len(parts) > 2 || len(parts) == 0 || parts[0] == "" {
+		return 0, errors.New("invalid amount")
+	}
+	major, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil || major < 0 {
+		return 0, errors.New("invalid amount")
+	}
+	fraction := ""
+	if len(parts) == 2 {
+		fraction = parts[1]
+	}
+	if len(fraction) > 2 {
+		return 0, errors.New("invalid amount")
+	}
+	fraction += strings.Repeat("0", 2-len(fraction))
+	minor := int64(0)
+	if fraction != "" {
+		minor, err = strconv.ParseInt(fraction, 10, 64)
+		if err != nil {
+			return 0, errors.New("invalid amount")
+		}
+	}
+	return major*100 + minor, nil
+}
+
+func plainWebhook(w http.ResponseWriter, value string) {
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	_, _ = w.Write([]byte(value))
 }
 
 func validPaymentSignature(body []byte, signature, secret string) bool {

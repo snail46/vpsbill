@@ -36,3 +36,21 @@ func (m *metricsAPI) serve(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
 	_, _ = fmt.Fprintf(w, "# HELP clicd_billing_accounts Active billing accounts.\n# TYPE clicd_billing_accounts gauge\nclicd_billing_accounts %d\n# HELP clicd_billing_open_invoices Open invoices.\n# TYPE clicd_billing_open_invoices gauge\nclicd_billing_open_invoices %d\n# TYPE clicd_billing_provisioning_jobs gauge\nclicd_billing_provisioning_jobs %d\n# TYPE clicd_billing_failed_jobs gauge\nclicd_billing_failed_jobs %d\n# TYPE clicd_billing_active_services gauge\nclicd_billing_active_services %d\n# TYPE clicd_billing_unhealthy_nodes gauge\nclicd_billing_unhealthy_nodes %d\n# TYPE clicd_billing_open_tickets gauge\nclicd_billing_open_tickets %d\n# TYPE clicd_billing_pending_outbox gauge\nclicd_billing_pending_outbox %d\n", snapshot.Accounts, snapshot.OpenInvoices, snapshot.ProvisioningJobs, snapshot.FailedJobs, snapshot.ActiveServices, snapshot.UnhealthyNodes, snapshot.OpenTickets, snapshot.PendingOutbox)
 }
+
+func (m *metricsAPI) overview(w http.ResponseWriter, r *http.Request) {
+	value, err := m.store.Overview(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "overview_unavailable"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": value})
+}
+
+func (m *metricsAPI) hosts(w http.ResponseWriter, r *http.Request) {
+	value, err := m.store.Hosts(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "hosts_unavailable"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": value})
+}
