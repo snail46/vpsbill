@@ -163,12 +163,18 @@ func buildCreateSpec(value postgres.ProvisionContext) clicd.CreateSpec {
 		expiresAt = value.ExpiresAt.UTC().Format(time.RFC3339)
 	}
 	assignNAT := boolValue(value.Configuration, "assign_nat", true)
+	sshMode := stringValueDefault(value.Configuration, "ssh_auth_mode", "auto_password")
+	sshPassword := stringValue(value.Configuration, "ssh_password")
+	if sshMode == "password" && sshPassword == "" {
+		sshMode = "auto_password"
+	}
 	return clicd.CreateSpec{
 		Name: value.InstanceName, Virtualization: value.Virtualization, TemplateID: stringValue(value.Configuration, "template_id"),
 		VCPU: value.VCPU, RAMMB: value.RAMMB, DiskGB: value.DiskGB, AssignNAT: assignNAT,
-		PortMappingCount: intValue(value.Configuration, "port_mapping_count"), AssignIPv4: !assignNAT,
+		PortMappingCount: intValue(value.Configuration, "port_mapping_count"), AssignIPv4: boolValue(value.Configuration, "assign_ipv4", !assignNAT),
 		IPv4Count: intValueDefault(value.Configuration, "ipv4_count", 1), AssignIPv6: boolValue(value.Configuration, "assign_ipv6", false),
-		IPv6Count: intValueDefault(value.Configuration, "ipv6_count", 1), SSHAuthMode: stringValueDefault(value.Configuration, "ssh_auth_mode", "password"),
+		IPv6Count: intValueDefault(value.Configuration, "ipv6_count", 1), SSHAuthMode: sshMode,
+		SSHPassword:  sshPassword,
 		SSHPublicKey: stringValue(value.Configuration, "ssh_public_key"), ExpiresAt: expiresAt,
 		NetworkDownMbps: value.NetworkDownMbps, NetworkUpMbps: value.NetworkUpMbps,
 		MonthlyTrafficGB: value.TrafficGB, SnapshotLimit: value.SnapshotLimit,

@@ -165,6 +165,12 @@ type pricedItem struct {
 	NetworkDownMbps    int
 	NetworkUpMbps      int
 	SnapshotLimit      int
+	AssignNAT          bool
+	PortMappingCount   int
+	AssignIPv4         bool
+	IPv4Count          int
+	AssignIPv6         bool
+	IPv6Count          int
 	DefaultTemplateID  string
 	AllowedTemplateIDs []string
 	UnitAmountMinor    int64
@@ -203,13 +209,16 @@ func (s *BillingStore) CreateOrder(ctx context.Context, input CreateOrderInput) 
 		if err := tx.QueryRow(ctx, `
 			SELECT p.name, p.virtualization, p.version, p.vcpu, p.ram_mb, p.disk_gb,
 			       p.traffic_gb, p.network_down_mbps, p.network_up_mbps, p.snapshot_limit,
-			       p.default_template_id, p.allowed_template_ids, pp.amount_minor, pp.setup_fee_minor
+		       p.assign_nat, p.port_mapping_count, p.assign_ipv4, p.ipv4_count, p.assign_ipv6, p.ipv6_count,
+		       p.default_template_id, p.allowed_template_ids, pp.amount_minor, pp.setup_fee_minor
 			FROM plans p
 			JOIN plan_prices pp ON pp.plan_id=p.id
 			WHERE p.id=$1 AND p.enabled=true AND pp.currency=$2 AND pp.billing_cycle=$3
 			  AND pp.active_from <= now() AND (pp.active_until IS NULL OR pp.active_until > now())
 			ORDER BY pp.active_from DESC LIMIT 1
-		`, item.PlanID, order.Currency, item.BillingCycle).Scan(&priced.PlanName, &priced.Virtualization, &priced.PlanVersion, &priced.VCPU, &priced.RAMMB, &priced.DiskGB, &priced.TrafficGB, &priced.NetworkDownMbps, &priced.NetworkUpMbps, &priced.SnapshotLimit, &priced.DefaultTemplateID, &priced.AllowedTemplateIDs, &priced.UnitAmountMinor, &priced.SetupFeeMinor); err != nil {
+		`, item.PlanID, order.Currency, item.BillingCycle).Scan(&priced.PlanName, &priced.Virtualization, &priced.PlanVersion, &priced.VCPU, &priced.RAMMB, &priced.DiskGB, &priced.TrafficGB, &priced.NetworkDownMbps, &priced.NetworkUpMbps, &priced.SnapshotLimit,
+			&priced.AssignNAT, &priced.PortMappingCount, &priced.AssignIPv4, &priced.IPv4Count, &priced.AssignIPv6, &priced.IPv6Count,
+			&priced.DefaultTemplateID, &priced.AllowedTemplateIDs, &priced.UnitAmountMinor, &priced.SetupFeeMinor); err != nil {
 			return Order{}, fmt.Errorf("load active plan price: %w", err)
 		}
 		templateID, _ := item.Configuration["template_id"].(string)
@@ -252,16 +261,22 @@ func (s *BillingStore) CreateOrder(ctx context.Context, input CreateOrderInput) 
 
 	for _, item := range items {
 		configuration := map[string]any{
-			"billing_cycle":     item.Input.BillingCycle,
-			"plan_version":      item.PlanVersion,
-			"virtualization":    item.Virtualization,
-			"vcpu":              item.VCPU,
-			"ram_mb":            item.RAMMB,
-			"disk_gb":           item.DiskGB,
-			"traffic_gb":        item.TrafficGB,
-			"network_down_mbps": item.NetworkDownMbps,
-			"network_up_mbps":   item.NetworkUpMbps,
-			"snapshot_limit":    item.SnapshotLimit,
+			"billing_cycle":      item.Input.BillingCycle,
+			"plan_version":       item.PlanVersion,
+			"virtualization":     item.Virtualization,
+			"vcpu":               item.VCPU,
+			"ram_mb":             item.RAMMB,
+			"disk_gb":            item.DiskGB,
+			"traffic_gb":         item.TrafficGB,
+			"network_down_mbps":  item.NetworkDownMbps,
+			"network_up_mbps":    item.NetworkUpMbps,
+			"snapshot_limit":     item.SnapshotLimit,
+			"assign_nat":         item.AssignNAT,
+			"port_mapping_count": item.PortMappingCount,
+			"assign_ipv4":        item.AssignIPv4,
+			"ipv4_count":         item.IPv4Count,
+			"assign_ipv6":        item.AssignIPv6,
+			"ipv6_count":         item.IPv6Count,
 		}
 		for key, value := range item.Input.Configuration {
 			configuration[key] = value
@@ -335,18 +350,6 @@ func sanitizeOrderConfiguration(input map[string]any) (map[string]any, error) {
 				return nil, errors.New("invalid template_id")
 			}
 			result[key] = text
-		case "assign_nat", "assign_ipv4", "assign_ipv6":
-			boolean, ok := value.(bool)
-			if !ok {
-				return nil, fmt.Errorf("invalid %s", key)
-			}
-			result[key] = boolean
-		case "port_mapping_count", "ipv4_count", "ipv6_count":
-			number, ok := value.(float64)
-			if !ok || number < 0 || number > 64 || number != math.Trunc(number) {
-				return nil, fmt.Errorf("invalid %s", key)
-			}
-			result[key] = number
 		case "ssh_auth_mode":
 			text, ok := value.(string)
 			if !ok || (text != "password" && text != "key") {

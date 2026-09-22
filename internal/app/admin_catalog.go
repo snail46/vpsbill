@@ -1,8 +1,11 @@
 package app
 
 import (
+	"context"
 	"net/http"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"clicd-billing/internal/clicd"
@@ -130,6 +133,67 @@ func (a *adminCatalog) testNode(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"data": hostInfo})
 }
 
+func (a *adminCatalog) hostProbe(w http.ResponseWriter, r *http.Request) {
+	node, err := a.store.NodeSecret(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "node_not_found"})
+		return
+	}
+	if node.ProviderType != "clicd" {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "provider_unsupported", "message": "该节点对接方式没有 CLICD 探针详情"})
+		return
+	}
+	apiKey, err := a.box.Open(node.APIKeyCiphertext)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "secret_unavailable"})
+		return
+	}
+	client, err := clicd.NewClient(node.BaseURL, apiKey, 15*time.Second)
+	if err != nil {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "invalid_node"})
+		return
+	}
+	type sourceResult struct {
+		name  string
+		value any
+		err   error
+	}
+	requests := []struct {
+		name string
+		load func(context.Context) (any, error)
+	}{
+		{name: "dashboard", load: client.Dashboard},
+		{name: "host_info", load: func(ctx context.Context) (any, error) { return client.HostInfo(ctx) }},
+		{name: "host_history", load: client.HostHistory},
+		{name: "host_report", load: client.HostReport},
+	}
+	results := make(chan sourceResult, len(requests))
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+	for _, request := range requests {
+		go func(request struct {
+			name string
+			load func(context.Context) (any, error)
+		}) {
+			value, loadErr := request.load(ctx)
+			results <- sourceResult{name: request.name, value: value, err: loadErr}
+		}(request)
+	}
+	sources := make(map[string]any, len(requests))
+	sourceErrors := map[string]string{}
+	for range requests {
+		response := <-results
+		if response.err != nil {
+			sourceErrors[response.name] = response.err.Error()
+			continue
+		}
+		sources[response.name] = response.value
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": map[string]any{
+		"node": node, "sources": sources, "errors": sourceErrors, "fetched_at": time.Now().UTC(),
+	}})
+}
+
 func (a *adminCatalog) listPlans(w http.ResponseWriter, r *http.Request) {
 	plans, err := a.store.ListPlans(r.Context())
 	if err != nil {
@@ -137,6 +201,93 @@ func (a *adminCatalog) listPlans(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": plans})
+}
+
+type availableTemplate struct {
+	ID             string   `json:"id"`
+	Name           string   `json:"name"`
+	Virtualization string   `json:"virtualization"`
+	Distro         string   `json:"distro"`
+	Release        string   `json:"release"`
+	Arch           string   `json:"arch"`
+	Description    string   `json:"description"`
+	NodeIDs        []string `json:"node_ids"`
+	NodeNames      []string `json:"node_names"`
+}
+
+func (a *adminCatalog) listTemplates(w http.ResponseWriter, r *http.Request) {
+	nodes, err := a.store.ListNodeSecrets(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "internal_error"})
+		return
+	}
+	type result struct {
+		node   postgres.Node
+		images []clicd.Image
+		err    error
+	}
+	results := make(chan result, len(nodes))
+	var wait sync.WaitGroup
+	for _, node := range nodes {
+		if node.ProviderType != "clicd" || node.Status != "online" {
+			continue
+		}
+		wait.Add(1)
+		go func(node postgres.Node) {
+			defer wait.Done()
+			apiKey, openErr := a.box.Open(node.APIKeyCiphertext)
+			if openErr != nil {
+				results <- result{node: node, err: openErr}
+				return
+			}
+			client, clientErr := clicd.NewClient(node.BaseURL, apiKey, 12*time.Second)
+			if clientErr != nil {
+				results <- result{node: node, err: clientErr}
+				return
+			}
+			ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+			defer cancel()
+			images, imageErr := client.Images(ctx)
+			results <- result{node: node, images: images, err: imageErr}
+		}(node)
+	}
+	go func() { wait.Wait(); close(results) }()
+	byKey := map[string]*availableTemplate{}
+	warnings := make([]string, 0)
+	for response := range results {
+		if response.err != nil {
+			warnings = append(warnings, response.node.Name+": "+response.err.Error())
+			continue
+		}
+		for _, image := range response.images {
+			if !image.Enabled || !image.Downloaded || (image.Type != "lxc" && image.Type != "kvm") {
+				continue
+			}
+			key := image.Type + "\x00" + image.ID
+			item := byKey[key]
+			if item == nil {
+				item = &availableTemplate{ID: image.ID, Name: image.Name, Virtualization: image.Type, Distro: image.Distro, Release: image.Release, Arch: image.Arch, Description: image.Description}
+				byKey[key] = item
+			}
+			item.NodeIDs = append(item.NodeIDs, response.node.ID)
+			item.NodeNames = append(item.NodeNames, response.node.Name)
+		}
+	}
+	templates := make([]availableTemplate, 0, len(byKey))
+	for _, item := range byKey {
+		templates = append(templates, *item)
+	}
+	if len(templates) == 0 && len(warnings) > 0 {
+		writeJSON(w, http.StatusBadGateway, map[string]any{"error": "template_catalog_unavailable", "message": "无法从在线 CLICD 节点读取模板：" + strings.Join(warnings, "；")})
+		return
+	}
+	sort.Slice(templates, func(i, j int) bool {
+		if templates[i].Virtualization == templates[j].Virtualization {
+			return templates[i].Name < templates[j].Name
+		}
+		return templates[i].Virtualization < templates[j].Virtualization
+	})
+	writeJSON(w, http.StatusOK, map[string]any{"data": templates, "warnings": warnings})
 }
 
 func (a *adminCatalog) createPlan(w http.ResponseWriter, r *http.Request) {
@@ -178,6 +329,27 @@ func (a *adminCatalog) updatePlan(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (a *adminCatalog) replacePlan(w http.ResponseWriter, r *http.Request) {
+	var input postgres.Plan
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	if message := validatePlan(input); message != "" {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "validation_error", "message": message})
+		return
+	}
+	input.DefaultTemplateID = strings.TrimSpace(input.DefaultTemplateID)
+	for index := range input.AllowedTemplateIDs {
+		input.AllowedTemplateIDs[index] = strings.TrimSpace(input.AllowedTemplateIDs[index])
+	}
+	plan, err := a.store.UpdatePlan(r.Context(), r.PathValue("id"), input)
+	if err != nil {
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "plan_update_failed", "message": "套餐不存在、编码重复或参数无效"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": plan})
+}
+
 func validatePlan(plan postgres.Plan) string {
 	if strings.TrimSpace(plan.Code) == "" || strings.TrimSpace(plan.Name) == "" {
 		return "套餐编码和名称不能为空"
@@ -187,6 +359,12 @@ func validatePlan(plan postgres.Plan) string {
 	}
 	if plan.VCPU < 1 || plan.RAMMB < 128 || plan.DiskGB < 1 {
 		return "CPU、内存和磁盘参数无效"
+	}
+	if !plan.AssignNAT && !plan.AssignIPv4 && !plan.AssignIPv6 {
+		return "套餐至少需要启用一种网络方式"
+	}
+	if plan.PortMappingCount < 0 || plan.PortMappingCount > 64 || plan.IPv4Count < 1 || plan.IPv4Count > 64 || plan.IPv6Count < 1 || plan.IPv6Count > 64 {
+		return "网络数量参数无效"
 	}
 	defaultTemplate := strings.TrimSpace(plan.DefaultTemplateID)
 	if defaultTemplate == "" || len(plan.AllowedTemplateIDs) == 0 {

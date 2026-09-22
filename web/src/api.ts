@@ -42,6 +42,12 @@ export type OperationsOverviewRecord = {
   revenue_30_days: MoneyTotal[]; outstanding: MoneyTotal[]
 }
 export type HostProbeRecord = NodeRecord & { reserved_vcpu: number; reserved_ram_mb: number; reserved_disk_gb: number }
+export type HostProbeDetailRecord = {
+  node: NodeRecord
+  sources: Record<'dashboard'|'host_info'|'host_history'|'host_report', unknown>
+  errors: Partial<Record<'dashboard'|'host_info'|'host_history'|'host_report', string>>
+  fetched_at: string
+}
 export type PaymentSettingsRecord = {
   gateway: {
     type: string; generic_base_url: string; generic_secret_configured: boolean
@@ -70,10 +76,29 @@ export type PlanRecord = {
   network_down_mbps: number
   network_up_mbps: number
   snapshot_limit: number
+  assign_nat: boolean
+  port_mapping_count: number
+  assign_ipv4: boolean
+  ipv4_count: number
+  assign_ipv6: boolean
+  ipv6_count: number
   default_template_id: string
   allowed_template_ids: string[]
   enabled: boolean
+  version: number
   prices: Price[]
+}
+
+export type AvailableTemplateRecord = {
+  id: string
+  name: string
+  virtualization: 'lxc' | 'kvm'
+  distro: string
+  release: string
+  arch: string
+  description: string
+  node_ids: string[]
+  node_names: string[]
 }
 
 export type AccountRecord = {

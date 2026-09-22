@@ -40,7 +40,7 @@ func TestBillingLifecycleIntegration(t *testing.T) {
 	if err = db.QueryRow(ctx, `SELECT count(*) FROM schema_migrations`).Scan(&migrationCount); err != nil {
 		t.Fatal(err)
 	}
-	if migrationCount < 12 {
+	if migrationCount < 13 {
 		t.Fatalf("only %d migrations applied", migrationCount)
 	}
 	billing := NewBillingStore(db)
@@ -81,9 +81,24 @@ func TestBillingLifecycleIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	order, err := billing.CreateOrder(ctx, CreateOrderInput{AccountID: account.ID, ActorType: "system", Items: []OrderItemInput{{PlanID: plan.ID, RegionID: regionID, BillingCycle: "monthly", Quantity: 1, Configuration: map[string]any{"template_id": "debian-bookworm", "assign_nat": true}}}})
+	plan.AssignNAT = true
+	plan.PortMappingCount = 6
+	plan.AssignIPv6 = false
+	plan, err = NewCatalogStore(db).UpdatePlan(ctx, plan.ID, plan)
+	if err != nil || plan.Version != 2 {
+		t.Fatalf("update plan: version=%d err=%v", plan.Version, err)
+	}
+	order, err := billing.CreateOrder(ctx, CreateOrderInput{AccountID: account.ID, ActorType: "system", Items: []OrderItemInput{{PlanID: plan.ID, RegionID: regionID, BillingCycle: "monthly", Quantity: 1, Configuration: map[string]any{"template_id": "debian-bookworm"}}}})
 	if err != nil {
 		t.Fatal(err)
+	}
+	var orderConfiguration []byte
+	if err = db.QueryRow(ctx, `SELECT configuration FROM order_items WHERE order_id=$1`, order.ID).Scan(&orderConfiguration); err != nil {
+		t.Fatal(err)
+	}
+	var configuration map[string]any
+	if err = json.Unmarshal(orderConfiguration, &configuration); err != nil || configuration["assign_nat"] != true || configuration["assign_ipv6"] != false || configuration["port_mapping_count"] != float64(6) {
+		t.Fatalf("plan network policy was not snapshotted: %#v err=%v", configuration, err)
 	}
 	initial, err := billing.ProcessPayment(ctx, PaymentEvent{Provider: "test", ProviderEventID: "evt-initial", EventType: "payment.succeeded", ProviderTransactionID: "tx-initial", InvoiceNumber: order.InvoiceNumber, AmountMinor: 1900, Currency: "CNY", Payload: json.RawMessage(`{"test":true}`)}, "system", "")
 	if err != nil {

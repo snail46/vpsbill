@@ -68,6 +68,7 @@ type CreateSpec struct {
 	IPv6Count        int      `json:"ipv6_count,omitempty"`
 	IPv6Addresses    []string `json:"ipv6_addresses,omitempty"`
 	SSHAuthMode      string   `json:"ssh_auth_mode"`
+	SSHPassword      string   `json:"ssh_password,omitempty"`
 	SSHPublicKey     string   `json:"ssh_public_key,omitempty"`
 	ExpiresAt        string   `json:"expires_at,omitempty"`
 	NetworkDownMbps  int      `json:"network_down_mbps"`
@@ -81,9 +82,46 @@ type EnsureResult struct {
 	Created   bool
 }
 
+type Image struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Type        string `json:"type"`
+	Distro      string `json:"distro"`
+	Release     string `json:"release"`
+	Arch        string `json:"arch"`
+	Variant     string `json:"variant,omitempty"`
+	Description string `json:"description"`
+	Downloaded  bool   `json:"downloaded"`
+	Enabled     bool   `json:"enabled"`
+}
+
 func (c *Client) HostInfo(ctx context.Context) (map[string]any, error) {
 	var response APIResponse[map[string]any]
 	err := c.do(ctx, http.MethodGet, "/api/v1/host-info", nil, &response)
+	return response.Data, err
+}
+
+func (c *Client) Dashboard(ctx context.Context) (any, error) {
+	return c.readData(ctx, "/api/v1/dashboard")
+}
+
+func (c *Client) HostHistory(ctx context.Context) (any, error) {
+	return c.readData(ctx, "/api/v1/host-history")
+}
+
+func (c *Client) HostReport(ctx context.Context) (any, error) {
+	return c.readData(ctx, "/api/v1/host-report")
+}
+
+func (c *Client) readData(ctx context.Context, path string) (any, error) {
+	var response APIResponse[any]
+	err := c.do(ctx, http.MethodGet, path, nil, &response)
+	return response.Data, err
+}
+
+func (c *Client) Images(ctx context.Context) ([]Image, error) {
+	var response APIResponse[[]Image]
+	err := c.do(ctx, http.MethodGet, "/api/v1/images", nil, &response)
 	return response.Data, err
 }
 
@@ -179,6 +217,9 @@ func (c *Client) EnsureContainer(ctx context.Context, spec CreateSpec) (EnsureRe
 	}
 
 	createErr := c.CreateContainer(ctx, spec)
+	if isDefinitiveCreateError(createErr) {
+		return EnsureResult{}, fmt.Errorf("create container: %w", createErr)
+	}
 	created, lookupErr := c.GetContainer(ctx, spec.Name)
 	if lookupErr == nil {
 		return EnsureResult{Container: created, Created: createErr == nil}, nil
@@ -187,6 +228,20 @@ func (c *Client) EnsureContainer(ctx context.Context, spec CreateSpec) (EnsureRe
 		return EnsureResult{}, fmt.Errorf("create container: %w; reconciliation failed: %v", createErr, lookupErr)
 	}
 	return EnsureResult{}, fmt.Errorf("container creation returned success but lookup failed: %w", lookupErr)
+}
+
+// Client-side and authorization failures mean CLICD rejected the request before
+// creating anything. Only ambiguous transport/server failures are reconciled by
+// name, otherwise a useful validation error would be obscured by a second 404.
+func isDefinitiveCreateError(err error) bool {
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		return false
+	}
+	return apiErr.StatusCode >= 400 && apiErr.StatusCode < 500 &&
+		apiErr.StatusCode != http.StatusRequestTimeout &&
+		apiErr.StatusCode != http.StatusConflict &&
+		apiErr.StatusCode != http.StatusTooManyRequests
 }
 
 func (c *Client) do(ctx context.Context, method, path string, body any, target any) error {

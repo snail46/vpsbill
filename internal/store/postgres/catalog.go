@@ -193,6 +193,12 @@ type Plan struct {
 	NetworkDownMbps    int       `json:"network_down_mbps"`
 	NetworkUpMbps      int       `json:"network_up_mbps"`
 	SnapshotLimit      int       `json:"snapshot_limit"`
+	AssignNAT          bool      `json:"assign_nat"`
+	PortMappingCount   int       `json:"port_mapping_count"`
+	AssignIPv4         bool      `json:"assign_ipv4"`
+	IPv4Count          int       `json:"ipv4_count"`
+	AssignIPv6         bool      `json:"assign_ipv6"`
+	IPv6Count          int       `json:"ipv6_count"`
 	DefaultTemplateID  string    `json:"default_template_id"`
 	AllowedTemplateIDs []string  `json:"allowed_template_ids"`
 	Enabled            bool      `json:"enabled"`
@@ -204,7 +210,9 @@ type Plan struct {
 func (s *CatalogStore) ListPlans(ctx context.Context) ([]Plan, error) {
 	rows, err := s.db.Query(ctx, `
 		SELECT id, code, name, virtualization, vcpu, ram_mb, disk_gb, traffic_gb,
-		       network_down_mbps, network_up_mbps, snapshot_limit, default_template_id, allowed_template_ids, enabled, version, created_at
+		       network_down_mbps, network_up_mbps, snapshot_limit,
+		       assign_nat, port_mapping_count, assign_ipv4, ipv4_count, assign_ipv6, ipv6_count,
+		       default_template_id, allowed_template_ids, enabled, version, created_at
 		FROM plans ORDER BY created_at DESC
 	`)
 	if err != nil {
@@ -214,7 +222,9 @@ func (s *CatalogStore) ListPlans(ctx context.Context) ([]Plan, error) {
 	plans := make([]Plan, 0)
 	for rows.Next() {
 		var plan Plan
-		if err := rows.Scan(&plan.ID, &plan.Code, &plan.Name, &plan.Virtualization, &plan.VCPU, &plan.RAMMB, &plan.DiskGB, &plan.TrafficGB, &plan.NetworkDownMbps, &plan.NetworkUpMbps, &plan.SnapshotLimit, &plan.DefaultTemplateID, &plan.AllowedTemplateIDs, &plan.Enabled, &plan.Version, &plan.CreatedAt); err != nil {
+		if err := rows.Scan(&plan.ID, &plan.Code, &plan.Name, &plan.Virtualization, &plan.VCPU, &plan.RAMMB, &plan.DiskGB, &plan.TrafficGB, &plan.NetworkDownMbps, &plan.NetworkUpMbps, &plan.SnapshotLimit,
+			&plan.AssignNAT, &plan.PortMappingCount, &plan.AssignIPv4, &plan.IPv4Count, &plan.AssignIPv6, &plan.IPv6Count,
+			&plan.DefaultTemplateID, &plan.AllowedTemplateIDs, &plan.Enabled, &plan.Version, &plan.CreatedAt); err != nil {
 			return nil, err
 		}
 		plan.Prices = []Price{}
@@ -246,6 +256,7 @@ func (s *CatalogStore) ListPlans(ctx context.Context) ([]Plan, error) {
 }
 
 func (s *CatalogStore) CreatePlan(ctx context.Context, input Plan) (Plan, error) {
+	input = withPlanNetworkDefaults(input)
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		return Plan{}, err
@@ -253,10 +264,14 @@ func (s *CatalogStore) CreatePlan(ctx context.Context, input Plan) (Plan, error)
 	defer func() { _ = tx.Rollback(ctx) }()
 	if err := tx.QueryRow(ctx, `
 		INSERT INTO plans(code, name, virtualization, vcpu, ram_mb, disk_gb, traffic_gb,
-		                  network_down_mbps, network_up_mbps, snapshot_limit, default_template_id, allowed_template_ids, enabled)
-		VALUES(upper($1), $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+		                  network_down_mbps, network_up_mbps, snapshot_limit,
+		                  assign_nat, port_mapping_count, assign_ipv4, ipv4_count, assign_ipv6, ipv6_count,
+		                  default_template_id, allowed_template_ids, enabled)
+		VALUES(upper($1), $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
 		RETURNING id, code, version, created_at
-	`, input.Code, input.Name, input.Virtualization, input.VCPU, input.RAMMB, input.DiskGB, input.TrafficGB, input.NetworkDownMbps, input.NetworkUpMbps, input.SnapshotLimit, input.DefaultTemplateID, input.AllowedTemplateIDs, input.Enabled).Scan(&input.ID, &input.Code, &input.Version, &input.CreatedAt); err != nil {
+	`, input.Code, input.Name, input.Virtualization, input.VCPU, input.RAMMB, input.DiskGB, input.TrafficGB, input.NetworkDownMbps, input.NetworkUpMbps, input.SnapshotLimit,
+		input.AssignNAT, input.PortMappingCount, input.AssignIPv4, input.IPv4Count, input.AssignIPv6, input.IPv6Count,
+		input.DefaultTemplateID, input.AllowedTemplateIDs, input.Enabled).Scan(&input.ID, &input.Code, &input.Version, &input.CreatedAt); err != nil {
 		return Plan{}, fmt.Errorf("create plan: %w", err)
 	}
 	for i := range input.Prices {
@@ -273,6 +288,62 @@ func (s *CatalogStore) CreatePlan(ctx context.Context, input Plan) (Plan, error)
 		return Plan{}, err
 	}
 	return input, nil
+}
+
+func (s *CatalogStore) UpdatePlan(ctx context.Context, id string, input Plan) (Plan, error) {
+	input = withPlanNetworkDefaults(input)
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return Plan{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := tx.QueryRow(ctx, `
+		UPDATE plans SET code=upper($2), name=$3, virtualization=$4, vcpu=$5, ram_mb=$6, disk_gb=$7,
+		       traffic_gb=$8, network_down_mbps=$9, network_up_mbps=$10, snapshot_limit=$11,
+		       assign_nat=$12, port_mapping_count=$13, assign_ipv4=$14, ipv4_count=$15,
+		       assign_ipv6=$16, ipv6_count=$17, default_template_id=$18, allowed_template_ids=$19,
+		       enabled=$20, version=version+1, updated_at=now()
+		WHERE id=$1
+		RETURNING id, code, version, created_at
+	`, id, input.Code, input.Name, input.Virtualization, input.VCPU, input.RAMMB, input.DiskGB, input.TrafficGB,
+		input.NetworkDownMbps, input.NetworkUpMbps, input.SnapshotLimit, input.AssignNAT, input.PortMappingCount,
+		input.AssignIPv4, input.IPv4Count, input.AssignIPv6, input.IPv6Count, input.DefaultTemplateID,
+		input.AllowedTemplateIDs, input.Enabled).Scan(&input.ID, &input.Code, &input.Version, &input.CreatedAt); err != nil {
+		return Plan{}, fmt.Errorf("update plan: %w", err)
+	}
+	now := time.Now().UTC()
+	if _, err := tx.Exec(ctx, `UPDATE plan_prices SET active_until=$2 WHERE plan_id=$1 AND active_until IS NULL`, id, now); err != nil {
+		return Plan{}, fmt.Errorf("expire plan prices: %w", err)
+	}
+	for i := range input.Prices {
+		input.Prices[i].Currency = strings.ToUpper(strings.TrimSpace(input.Prices[i].Currency))
+		if err := tx.QueryRow(ctx, `
+			INSERT INTO plan_prices(plan_id, currency, billing_cycle, amount_minor, setup_fee_minor, active_from)
+			VALUES($1, $2, $3, $4, $5, $6)
+			RETURNING id, active_from
+		`, id, input.Prices[i].Currency, input.Prices[i].BillingCycle, input.Prices[i].AmountMinor,
+			input.Prices[i].SetupFeeMinor, now).Scan(&input.Prices[i].ID, &input.Prices[i].ActiveFrom); err != nil {
+			return Plan{}, fmt.Errorf("update plan price: %w", err)
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return Plan{}, err
+	}
+	return input, nil
+}
+
+func withPlanNetworkDefaults(input Plan) Plan {
+	if input.IPv4Count < 1 {
+		input.IPv4Count = 1
+	}
+	if input.IPv6Count < 1 {
+		input.IPv6Count = 1
+	}
+	if !input.AssignNAT && !input.AssignIPv4 && !input.AssignIPv6 {
+		input.AssignNAT = true
+		input.AssignIPv6 = true
+	}
+	return input
 }
 
 func (s *CatalogStore) SetPlanEnabled(ctx context.Context, id string, enabled bool) error {

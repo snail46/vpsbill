@@ -62,6 +62,30 @@ func TestEnsureContainerReturnsExisting(t *testing.T) {
 	}
 }
 
+func TestEnsureContainerReturnsValidationErrorWithoutMisleadingReconciliation(t *testing.T) {
+	var getCount atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			getCount.Add(1)
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": false, "message": "Container not found"})
+		case http.MethodPost:
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": false, "message": "请填写自定义 SSH 密码"})
+		}
+	}))
+	defer server.Close()
+	client, _ := NewClient(server.URL, "secret", time.Second)
+	_, err := client.EnsureContainer(context.Background(), CreateSpec{Name: "svc-invalid"})
+	if err == nil || err.Error() != "create container: clicd api returned 400: 请填写自定义 SSH 密码" {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if getCount.Load() != 1 {
+		t.Fatalf("validation error should not trigger reconciliation lookup; got %d GETs", getCount.Load())
+	}
+}
+
 func TestEnsureContainerReconcilesAfterAmbiguousCreateTimeout(t *testing.T) {
 	var created atomic.Bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -143,5 +167,44 @@ func TestDeleteContainerTreatsMissingAsSuccess(t *testing.T) {
 	client, _ := NewClient(server.URL, "secret", time.Second)
 	if err := client.DeleteContainer(context.Background(), "missing"); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestProbeAndImageEndpoints(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var data any
+		switch r.URL.Path {
+		case "/api/v1/dashboard":
+			data = map[string]any{"total_containers": 3}
+		case "/api/v1/host-info":
+			data = map[string]any{"cpu": map[string]any{"cores": 8}}
+		case "/api/v1/host-history":
+			data = []map[string]any{{"ts": "2026-09-22T00:00:00Z", "cpu": 12.5}}
+		case "/api/v1/host-report":
+			data = map[string]any{"hostname": "node-1"}
+		case "/api/v1/images":
+			data = []map[string]any{{"id": "ubuntu-noble", "name": "Ubuntu 24.04", "type": "lxc", "downloaded": true, "enabled": true}}
+		default:
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": data})
+	}))
+	defer server.Close()
+	client, _ := NewClient(server.URL, "secret", time.Second)
+	if value, err := client.Dashboard(context.Background()); err != nil || value.(map[string]any)["total_containers"] != float64(3) {
+		t.Fatalf("dashboard=%#v err=%v", value, err)
+	}
+	if value, err := client.HostInfo(context.Background()); err != nil || value["cpu"] == nil {
+		t.Fatalf("host info=%#v err=%v", value, err)
+	}
+	if value, err := client.HostHistory(context.Background()); err != nil || len(value.([]any)) != 1 {
+		t.Fatalf("host history=%#v err=%v", value, err)
+	}
+	if value, err := client.HostReport(context.Background()); err != nil || value.(map[string]any)["hostname"] != "node-1" {
+		t.Fatalf("host report=%#v err=%v", value, err)
+	}
+	if value, err := client.Images(context.Background()); err != nil || len(value) != 1 || value[0].Name != "Ubuntu 24.04" {
+		t.Fatalf("images=%#v err=%v", value, err)
 	}
 }

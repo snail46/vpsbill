@@ -13,13 +13,19 @@ func TestSanitizeOrderConfigurationRejectsResourceOverride(t *testing.T) {
 	}
 }
 
-func TestSanitizeOrderConfigurationAllowsCustomerOptions(t *testing.T) {
-	got, err := sanitizeOrderConfiguration(map[string]any{"template_id": "debian-bookworm", "assign_nat": true, "assign_ipv6": true, "port_mapping_count": float64(3)})
+func TestSanitizeOrderConfigurationAllowsTemplate(t *testing.T) {
+	got, err := sanitizeOrderConfiguration(map[string]any{"template_id": "debian-bookworm"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got["template_id"] != "debian-bookworm" || got["port_mapping_count"] != float64(3) {
+	if got["template_id"] != "debian-bookworm" {
 		t.Fatalf("unexpected configuration: %#v", got)
+	}
+}
+
+func TestSanitizeOrderConfigurationRejectsNetworkOverride(t *testing.T) {
+	if _, err := sanitizeOrderConfiguration(map[string]any{"template_id": "debian-bookworm", "assign_nat": true}); err == nil {
+		t.Fatal("expected customer network override to be rejected")
 	}
 }
 

@@ -10,10 +10,25 @@ func TestBuildCreateSpec(t *testing.T) {
 	if spec.Name != "svc-1" || spec.TemplateID != "debian" || !spec.AssignNAT || !spec.AssignIPv6 || spec.AssignIPv4 {
 		t.Fatalf("unexpected spec: %+v", spec)
 	}
+	if spec.SSHAuthMode != "auto_password" {
+		t.Fatalf("expected auto-generated SSH password, got %q", spec.SSHAuthMode)
+	}
 }
 
 func TestNormalizeRuntimeStatus(t *testing.T) {
 	if normalizeRuntimeStatus("started") != "running" || normalizeRuntimeStatus("surprise") != "unknown" {
 		t.Fatal("runtime status normalization failed")
+	}
+}
+
+func TestBuildCreateSpecHonorsPlanNetworkAndRepairsLegacyPasswordMode(t *testing.T) {
+	spec := buildCreateSpec(postgres.ProvisionContext{Configuration: map[string]any{
+		"assign_nat": true, "assign_ipv4": true, "ssh_auth_mode": "password",
+	}})
+	if !spec.AssignNAT || !spec.AssignIPv4 {
+		t.Fatalf("expected both plan network modes, got %+v", spec)
+	}
+	if spec.SSHAuthMode != "auto_password" {
+		t.Fatalf("missing legacy custom password should fall back to auto_password, got %q", spec.SSHAuthMode)
 	}
 }
