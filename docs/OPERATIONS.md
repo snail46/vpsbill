@@ -6,10 +6,14 @@
 
 ```sh
 chmod +x deploy.sh backup.sh restore.sh rotate-key.sh
+./deploy.sh --init
+# 编辑 .env 后再启动
 ./deploy.sh
 ```
 
-首次运行生成 `.env` 和独立随机密钥。未配置 `DOMAIN` 时入口为 `PUBLIC_URL` 指定的 HTTP 地址；配置域名时必须同时设置 `PUBLIC_URL=https://域名`，脚本会启用 Caddy、申请证书并开放 80/443。
+`--init` 生成 `.env` 和独立随机密钥但不启动容器。未配置 `DOMAIN` 时入口为 `PUBLIC_URL` 指定的 HTTP 地址；配置域名时必须同时设置 `PUBLIC_URL=https://域名` 和回环绑定（例如 `APP_PORT=127.0.0.1:8080`），脚本会启用 Caddy、申请证书并开放 80/443。
+
+完整的新服务器与私有仓库步骤见 [全新服务器部署教程](DEPLOYMENT.md)。
 
 ## 备份
 

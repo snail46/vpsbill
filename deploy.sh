@@ -4,6 +4,12 @@ set -eu
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 ENV_FILE="$ROOT_DIR/.env"
 COMPOSE_FILE="$ROOT_DIR/deploy/docker-compose.yml"
+MODE=${1:-deploy}
+
+case "$MODE" in
+  deploy|--init) ;;
+  *) echo "Usage: ./deploy.sh [--init]"; exit 1 ;;
+esac
 
 if ! command -v docker >/dev/null 2>&1; then
   echo "Docker is required. Install Docker Engine and the Compose plugin first."
@@ -54,13 +60,26 @@ ensure_secret() {
 ensure_secret METRICS_TOKEN
 chmod 600 "$ENV_FILE"
 
+if [ "$MODE" = "--init" ]; then
+  echo "Initialization completed. Edit .env, then run ./deploy.sh."
+  exit 0
+fi
+
 DOMAIN=$(sed -n 's/^DOMAIN=//p' "$ENV_FILE")
 if [ -n "$DOMAIN" ]; then
   PUBLIC_URL=$(sed -n 's/^PUBLIC_URL=//p' "$ENV_FILE")
+  APP_PORT=$(sed -n 's/^APP_PORT=//p' "$ENV_FILE")
   if [ "$PUBLIC_URL" != "https://$DOMAIN" ]; then
     echo "When DOMAIN is set, PUBLIC_URL must equal https://$DOMAIN"
     exit 1
   fi
+  case "$APP_PORT" in
+    127.0.0.1:*|\[::1\]:*) ;;
+    *)
+      echo "When DOMAIN is set, APP_PORT must bind to loopback, for example 127.0.0.1:8080"
+      exit 1
+      ;;
+  esac
   docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" --profile tls up -d --build
 else
   docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d --build

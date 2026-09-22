@@ -87,3 +87,5 @@ chmod +x verify.sh integration-test.sh
 自动续费账单、逾期停机、付款恢复与延期删除见 [服务生命周期](docs/SERVICE-LIFECYCLE.md)。
 
 HTTPS、备份恢复和 AES 主密钥轮换见 [运维手册](docs/OPERATIONS.md)。
+
+私有 GitHub 仓库、Deploy Key、Docker 安装和首次上线步骤见 [全新服务器部署教程](docs/DEPLOYMENT.md)。
