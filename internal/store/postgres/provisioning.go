@@ -40,24 +40,22 @@ type ProvisioningJob struct {
 }
 
 type ProvisionContext struct {
-	JobID            string
-	ServiceID        string
-	InstanceName     string
-	NodeID           string
-	NodeName         string
-	ProviderType     string
-	BaseURL          string
-	APIKeyCiphertext []byte
-	Virtualization   string
-	VCPU             int
-	RAMMB            int
-	DiskGB           int
-	TrafficGB        int
-	NetworkDownMbps  int
-	NetworkUpMbps    int
-	SnapshotLimit    int
-	ExpiresAt        *time.Time
-	Configuration    map[string]any
+	JobID        string
+	ServiceID    string
+	InstanceName string
+	NodeID       string
+	NodeName     string
+	NodeEndpoint
+	Virtualization  string
+	VCPU            int
+	RAMMB           int
+	DiskGB          int
+	TrafficGB       int
+	NetworkDownMbps int
+	NetworkUpMbps   int
+	SnapshotLimit   int
+	ExpiresAt       *time.Time
+	Configuration   map[string]any
 }
 
 type ServiceRecord struct {
@@ -79,20 +77,16 @@ type ServiceRecord struct {
 }
 
 type ReconcileTarget struct {
-	ServiceID        string
-	InstanceName     string
-	ProviderType     string
-	BaseURL          string
-	APIKeyCiphertext []byte
+	ServiceID    string
+	InstanceName string
+	NodeEndpoint
 }
 
 type ActionContext struct {
-	JobID            string
-	ServiceID        string
-	InstanceName     string
-	ProviderType     string
-	BaseURL          string
-	APIKeyCiphertext []byte
+	JobID        string
+	ServiceID    string
+	InstanceName string
+	NodeEndpoint
 }
 
 // ClaimJob leases one due job. SKIP LOCKED allows more worker replicas without
@@ -201,7 +195,7 @@ func (s *ProvisioningStore) ProvisionContext(ctx context.Context, jobID string) 
 	var result ProvisionContext
 	var payload []byte
 	err := s.db.QueryRow(ctx, `
-		SELECT j.id, s.id, s.instance_name, n.id, n.name, n.provider_type, n.base_url, n.api_key_ciphertext,
+		SELECT j.id, s.id, s.instance_name, n.id, n.name, n.provider_type, n.base_url, n.api_key_ciphertext,n.provider_options,
 		       p.virtualization, p.vcpu, p.ram_mb, p.disk_gb, p.traffic_gb,
 		       p.network_down_mbps, p.network_up_mbps, p.snapshot_limit, s.expires_at, j.payload
 		FROM provisioning_jobs j
@@ -210,7 +204,7 @@ func (s *ProvisioningStore) ProvisionContext(ctx context.Context, jobID string) 
 		JOIN nodes n ON n.id=s.node_id
 		WHERE j.id=$1
 	`, jobID).Scan(&result.JobID, &result.ServiceID, &result.InstanceName, &result.NodeID, &result.NodeName,
-		&result.ProviderType, &result.BaseURL, &result.APIKeyCiphertext, &result.Virtualization, &result.VCPU, &result.RAMMB,
+		&result.ProviderType, &result.BaseURL, &result.APIKeyCiphertext, &result.ProviderOptions, &result.Virtualization, &result.VCPU, &result.RAMMB,
 		&result.DiskGB, &result.TrafficGB, &result.NetworkDownMbps, &result.NetworkUpMbps,
 		&result.SnapshotLimit, &result.ExpiresAt, &payload)
 	if err != nil {
@@ -274,10 +268,10 @@ func (s *ProvisioningStore) CompleteProvision(ctx context.Context, jobID, worker
 func (s *ProvisioningStore) ActionContext(ctx context.Context, jobID string) (ActionContext, error) {
 	var result ActionContext
 	err := s.db.QueryRow(ctx, `
-		SELECT j.id,s.id,s.instance_name,n.provider_type,n.base_url,n.api_key_ciphertext
+		SELECT j.id,s.id,s.instance_name,n.provider_type,n.base_url,n.api_key_ciphertext,n.provider_options
 		FROM provisioning_jobs j JOIN services s ON s.id=j.service_id JOIN nodes n ON n.id=s.node_id
 		WHERE j.id=$1
-	`, jobID).Scan(&result.JobID, &result.ServiceID, &result.InstanceName, &result.ProviderType, &result.BaseURL, &result.APIKeyCiphertext)
+	`, jobID).Scan(&result.JobID, &result.ServiceID, &result.InstanceName, &result.ProviderType, &result.BaseURL, &result.APIKeyCiphertext, &result.ProviderOptions)
 	return result, err
 }
 
@@ -454,7 +448,7 @@ func (s *ProvisioningStore) ListJobs(ctx context.Context) ([]ProvisioningJob, er
 
 func (s *ProvisioningStore) ListReconcileTargets(ctx context.Context) ([]ReconcileTarget, error) {
 	rows, err := s.db.Query(ctx, `
-		SELECT s.id,s.instance_name,n.provider_type,n.base_url,n.api_key_ciphertext
+		SELECT s.id,s.instance_name,n.provider_type,n.base_url,n.api_key_ciphertext,n.provider_options
 		FROM services s JOIN nodes n ON n.id=s.node_id
 		WHERE s.status IN ('active','suspended','overdue')
 		ORDER BY s.last_reconciled_at NULLS FIRST
@@ -466,7 +460,7 @@ func (s *ProvisioningStore) ListReconcileTargets(ctx context.Context) ([]Reconci
 	result := make([]ReconcileTarget, 0)
 	for rows.Next() {
 		var row ReconcileTarget
-		if err := rows.Scan(&row.ServiceID, &row.InstanceName, &row.ProviderType, &row.BaseURL, &row.APIKeyCiphertext); err != nil {
+		if err := rows.Scan(&row.ServiceID, &row.InstanceName, &row.ProviderType, &row.BaseURL, &row.APIKeyCiphertext, &row.ProviderOptions); err != nil {
 			return nil, err
 		}
 		result = append(result, row)

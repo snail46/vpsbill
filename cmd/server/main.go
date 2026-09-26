@@ -16,7 +16,8 @@ import (
 	"vpsbill/internal/billing"
 	"vpsbill/internal/config"
 	"vpsbill/internal/notifications"
-	_ "vpsbill/internal/provider/clicd" // registers the CLICD node driver
+	_ "vpsbill/internal/provider/clicd"  // registers the CLICD node driver
+	_ "vpsbill/internal/provider/lxdapi" // registers the LXDAPI node driver
 	"vpsbill/internal/security"
 	"vpsbill/internal/settings"
 	"vpsbill/internal/store/postgres"

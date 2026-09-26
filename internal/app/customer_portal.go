@@ -81,7 +81,7 @@ func (p *customerPortal) serviceDriver(r *http.Request) (postgres.CustomerServic
 	if _, registered := provider.Lookup(access.ProviderType); access.Status != "active" || !registered {
 		return access, nil, postgres.ErrServiceActionUnavailable
 	}
-	driver, err := provider.OpenSealed(p.box, access.ProviderType, access.BaseURL, access.APIKeyCiphertext, 20*time.Second)
+	driver, err := provider.OpenSealed(p.box, access.Sealed(), 20*time.Second)
 	return access, driver, err
 }
 

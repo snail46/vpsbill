@@ -44,14 +44,12 @@ type CustomerService struct {
 }
 
 type CustomerServiceAccess struct {
-	ServiceID              string
-	Status                 string
-	RuntimeStatus          string
-	InstanceName           string
-	Virtualization         string
-	ProviderType           string
-	BaseURL                string
-	APIKeyCiphertext       []byte
+	ServiceID      string
+	Status         string
+	RuntimeStatus  string
+	InstanceName   string
+	Virtualization string
+	NodeEndpoint
 	RootPasswordCiphertext []byte
 	AllowedTemplateIDs     []string
 	PortMappingCount       int
@@ -61,13 +59,13 @@ func (s *PortalStore) ServiceAccess(ctx context.Context, accountID, serviceID st
 	var result CustomerServiceAccess
 	err := s.db.QueryRow(ctx, `
 		SELECT s.id,s.status,s.runtime_status,s.instance_name,p.virtualization,n.provider_type,n.base_url,
-		       n.api_key_ciphertext,s.root_password_ciphertext,p.allowed_template_ids,p.port_mapping_count
+		       n.api_key_ciphertext,n.provider_options,s.root_password_ciphertext,p.allowed_template_ids,p.port_mapping_count
 		FROM services s
 		JOIN plans p ON p.id=s.plan_id
 		JOIN nodes n ON n.id=s.node_id
 		WHERE s.id=$1 AND s.account_id=$2
 	`, serviceID, accountID).Scan(&result.ServiceID, &result.Status, &result.RuntimeStatus, &result.InstanceName,
-		&result.Virtualization, &result.ProviderType, &result.BaseURL, &result.APIKeyCiphertext,
+		&result.Virtualization, &result.ProviderType, &result.BaseURL, &result.APIKeyCiphertext, &result.ProviderOptions,
 		&result.RootPasswordCiphertext, &result.AllowedTemplateIDs, &result.PortMappingCount)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return CustomerServiceAccess{}, ErrServiceNotFound

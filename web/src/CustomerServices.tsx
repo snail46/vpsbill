@@ -115,6 +115,9 @@ function ServiceCard({ service, onReload }: { service: CustomerServiceRecord; on
 
   const usage = runtime?.usage || {}
   const traffic = runtime?.traffic || {}
+  // Until the runtime loads, show every action; the node still rejects unsupported calls.
+  const capabilities = runtime?.capabilities
+  const hasConsole = (kind: string) => !capabilities || capabilities.console.includes(kind)
   const memoryTotal = Number(usage.memory_total_bytes) || service.ram_mb * 1024 ** 2
   const memoryUsed = Number(usage.memory_usage_bytes) || 0
   const diskTotal = service.disk_gb * 1024 ** 3
@@ -266,14 +269,16 @@ function ServiceCard({ service, onReload }: { service: CustomerServiceRecord; on
         >
           <RotateCw size={13} />重启
         </button>
-        <button
-          className="secondary-button"
-          disabled={!available || service.runtime_status === 'stopped'}
-          onClick={() => setConsoleKind('ssh')}
-        >
-          <TerminalSquare size={14} />WebSSH
-        </button>
-        {service.virtualization === 'kvm' && (
+        {hasConsole('ssh') && (
+          <button
+            className="secondary-button"
+            disabled={!available || service.runtime_status === 'stopped'}
+            onClick={() => setConsoleKind('ssh')}
+          >
+            <TerminalSquare size={14} />WebSSH
+          </button>
+        )}
+        {service.virtualization === 'kvm' && hasConsole('vnc') && (
           <button
             className="secondary-button"
             disabled={!available || service.runtime_status === 'stopped'}
@@ -285,15 +290,21 @@ function ServiceCard({ service, onReload }: { service: CustomerServiceRecord; on
       </div>
 
       <div className="service-actions manage-row">
-        <button className="button-link" disabled={!available} onClick={() => setDialog('password')}>
-          <KeyRound size={13} />重置密码
-        </button>
-        <button className="button-link danger" disabled={!available} onClick={() => { void load(false); setDialog('reinstall') }}>
-          <Server size={13} />重装系统
-        </button>
-        <button className="button-link" disabled={!available} onClick={() => setDialog('ports')}>
-          <Globe size={13} />IPv4 端口映射 ({runtime?.container.port_mappings?.length || 0}/{runtime?.container.port_mapping_limit || 0})
-        </button>
+        {(!capabilities || capabilities.reset_password) && (
+          <button className="button-link" disabled={!available} onClick={() => setDialog('password')}>
+            <KeyRound size={13} />重置密码
+          </button>
+        )}
+        {(!capabilities || capabilities.reinstall) && (
+          <button className="button-link danger" disabled={!available} onClick={() => { void load(false); setDialog('reinstall') }}>
+            <Server size={13} />重装系统
+          </button>
+        )}
+        {(!capabilities || capabilities.port_mapping) && (
+          <button className="button-link" disabled={!available} onClick={() => setDialog('ports')}>
+            <Globe size={13} />IPv4 端口映射 ({runtime?.container.port_mappings?.length || 0}/{runtime?.container.port_mapping_limit || 0})
+          </button>
+        )}
       </div>
 
       <footer>

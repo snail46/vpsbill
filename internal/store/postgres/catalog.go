@@ -19,14 +19,12 @@ func NewCatalogStore(db *pgxpool.Pool) *CatalogStore {
 }
 
 type Node struct {
-	ID                  string         `json:"id"`
-	RegionID            string         `json:"region_id"`
-	RegionCode          string         `json:"region_code"`
-	RegionName          string         `json:"region_name"`
-	Name                string         `json:"name"`
-	ProviderType        string         `json:"provider_type"`
-	BaseURL             string         `json:"base_url"`
-	APIKeyCiphertext    []byte         `json:"-"`
+	ID         string `json:"id"`
+	RegionID   string `json:"region_id"`
+	RegionCode string `json:"region_code"`
+	RegionName string `json:"region_name"`
+	Name       string `json:"name"`
+	NodeEndpoint
 	Status              string         `json:"status"`
 	VirtualizationTypes []string       `json:"virtualization_types"`
 	Capacity            map[string]any `json:"capacity"`
@@ -44,6 +42,7 @@ type CreateNode struct {
 	ProviderType        string
 	BaseURL             string
 	APIKeyCiphertext    []byte
+	ProviderOptions     json.RawMessage
 	VirtualizationTypes []string
 	Capacity            map[string]any
 	CapacityVCPU        int
@@ -53,7 +52,7 @@ type CreateNode struct {
 
 func (s *CatalogStore) ListNodes(ctx context.Context) ([]Node, error) {
 	rows, err := s.db.Query(ctx, `
-		SELECT n.id, n.region_id, r.code, r.name, n.name, n.provider_type, n.base_url, n.status,
+		SELECT n.id, n.region_id, r.code, r.name, n.name, n.provider_type, n.base_url, n.provider_options, n.status,
 		       n.virtualization_types, n.capacity, n.capacity_vcpu, n.capacity_ram_mb,
 		       n.capacity_disk_gb, n.last_seen_at, n.created_at
 		FROM nodes n JOIN regions r ON r.id=n.region_id
@@ -67,7 +66,7 @@ func (s *CatalogStore) ListNodes(ctx context.Context) ([]Node, error) {
 	for rows.Next() {
 		var node Node
 		var capacity []byte
-		if err := rows.Scan(&node.ID, &node.RegionID, &node.RegionCode, &node.RegionName, &node.Name, &node.ProviderType, &node.BaseURL, &node.Status, &node.VirtualizationTypes, &capacity, &node.CapacityVCPU, &node.CapacityRAMMB, &node.CapacityDiskGB, &node.LastSeenAt, &node.CreatedAt); err != nil {
+		if err := rows.Scan(&node.ID, &node.RegionID, &node.RegionCode, &node.RegionName, &node.Name, &node.ProviderType, &node.BaseURL, &node.ProviderOptions, &node.Status, &node.VirtualizationTypes, &capacity, &node.CapacityVCPU, &node.CapacityRAMMB, &node.CapacityDiskGB, &node.LastSeenAt, &node.CreatedAt); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal(capacity, &node.Capacity)
@@ -94,10 +93,10 @@ func (s *CatalogStore) CreateNode(ctx context.Context, input CreateNode) (Node, 
 	var node Node
 	if err := tx.QueryRow(ctx, `
 		INSERT INTO nodes(region_id, name, provider_type, base_url, api_key_ciphertext, status, virtualization_types, capacity,
-		                  capacity_vcpu, capacity_ram_mb, capacity_disk_gb, last_seen_at)
-		VALUES($1, $2, $3, $4, $5, 'online', $6, $7, $8, $9, $10, now())
+		                  capacity_vcpu, capacity_ram_mb, capacity_disk_gb, last_seen_at, provider_options)
+		VALUES($1, $2, $3, $4, $5, 'online', $6, $7, $8, $9, $10, now(), coalesce($11::jsonb, '{}'::jsonb))
 		RETURNING id, status, last_seen_at, created_at
-	`, regionID, strings.TrimSpace(input.Name), input.ProviderType, strings.TrimRight(strings.TrimSpace(input.BaseURL), "/"), input.APIKeyCiphertext, input.VirtualizationTypes, capacity, input.CapacityVCPU, input.CapacityRAMMB, input.CapacityDiskGB).Scan(&node.ID, &node.Status, &node.LastSeenAt, &node.CreatedAt); err != nil {
+	`, regionID, strings.TrimSpace(input.Name), input.ProviderType, strings.TrimRight(strings.TrimSpace(input.BaseURL), "/"), input.APIKeyCiphertext, input.VirtualizationTypes, capacity, input.CapacityVCPU, input.CapacityRAMMB, input.CapacityDiskGB, nullableJSON(input.ProviderOptions)).Scan(&node.ID, &node.Status, &node.LastSeenAt, &node.CreatedAt); err != nil {
 		return Node{}, fmt.Errorf("create node: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -109,6 +108,7 @@ func (s *CatalogStore) CreateNode(ctx context.Context, input CreateNode) (Node, 
 	node.Name = strings.TrimSpace(input.Name)
 	node.ProviderType = input.ProviderType
 	node.BaseURL = strings.TrimRight(strings.TrimSpace(input.BaseURL), "/")
+	node.ProviderOptions = input.ProviderOptions
 	node.VirtualizationTypes = input.VirtualizationTypes
 	node.Capacity = input.Capacity
 	node.CapacityVCPU = input.CapacityVCPU
@@ -121,18 +121,18 @@ func (s *CatalogStore) NodeSecret(ctx context.Context, id string) (Node, error) 
 	var node Node
 	var capacity []byte
 	err := s.db.QueryRow(ctx, `
-		SELECT n.id, n.region_id, r.code, r.name, n.name, n.provider_type, n.base_url, n.api_key_ciphertext,
+		SELECT n.id, n.region_id, r.code, r.name, n.name, n.provider_type, n.base_url, n.api_key_ciphertext,n.provider_options,
 		       n.status, n.virtualization_types, n.capacity, n.capacity_vcpu, n.capacity_ram_mb,
 		       n.capacity_disk_gb, n.last_seen_at, n.created_at
 		FROM nodes n JOIN regions r ON r.id=n.region_id WHERE n.id=$1
-	`, id).Scan(&node.ID, &node.RegionID, &node.RegionCode, &node.RegionName, &node.Name, &node.ProviderType, &node.BaseURL, &node.APIKeyCiphertext, &node.Status, &node.VirtualizationTypes, &capacity, &node.CapacityVCPU, &node.CapacityRAMMB, &node.CapacityDiskGB, &node.LastSeenAt, &node.CreatedAt)
+	`, id).Scan(&node.ID, &node.RegionID, &node.RegionCode, &node.RegionName, &node.Name, &node.ProviderType, &node.BaseURL, &node.APIKeyCiphertext, &node.ProviderOptions, &node.Status, &node.VirtualizationTypes, &capacity, &node.CapacityVCPU, &node.CapacityRAMMB, &node.CapacityDiskGB, &node.LastSeenAt, &node.CreatedAt)
 	_ = json.Unmarshal(capacity, &node.Capacity)
 	return node, err
 }
 
 func (s *CatalogStore) ListNodeSecrets(ctx context.Context) ([]Node, error) {
 	rows, err := s.db.Query(ctx, `
-		SELECT n.id,n.region_id,r.code,r.name,n.name,n.provider_type,n.base_url,n.api_key_ciphertext,n.status,
+		SELECT n.id,n.region_id,r.code,r.name,n.name,n.provider_type,n.base_url,n.api_key_ciphertext,n.provider_options,n.status,
 		       n.virtualization_types,n.capacity,n.capacity_vcpu,n.capacity_ram_mb,n.capacity_disk_gb,n.last_seen_at,n.created_at
 		FROM nodes n JOIN regions r ON r.id=n.region_id ORDER BY n.created_at
 	`)
@@ -144,7 +144,7 @@ func (s *CatalogStore) ListNodeSecrets(ctx context.Context) ([]Node, error) {
 	for rows.Next() {
 		var node Node
 		var capacity []byte
-		if err := rows.Scan(&node.ID, &node.RegionID, &node.RegionCode, &node.RegionName, &node.Name, &node.ProviderType, &node.BaseURL, &node.APIKeyCiphertext,
+		if err := rows.Scan(&node.ID, &node.RegionID, &node.RegionCode, &node.RegionName, &node.Name, &node.ProviderType, &node.BaseURL, &node.APIKeyCiphertext, &node.ProviderOptions,
 			&node.Status, &node.VirtualizationTypes, &capacity, &node.CapacityVCPU, &node.CapacityRAMMB, &node.CapacityDiskGB, &node.LastSeenAt, &node.CreatedAt); err != nil {
 			return nil, err
 		}

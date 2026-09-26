@@ -23,8 +23,9 @@ export type NodeRecord = {
   region_code: string
   region_name: string
   name: string
-	provider_type: string
+  provider_type: string
   base_url: string
+  provider_options?: Record<string, unknown>
   status: string
   virtualization_types: string[]
   capacity: Record<string, unknown>
@@ -32,6 +33,14 @@ export type NodeRecord = {
   capacity_ram_mb: number
   capacity_disk_gb: number
   last_seen_at: string | null
+}
+
+export type ProviderOptionField = {
+  key: string; label: string; kind: 'text' | 'number' | 'bool' | 'list'; required: boolean; placeholder?: string; help?: string
+}
+export type ProviderTypeRecord = {
+  type: string; name: string; credential_label: string; base_url_hint: string
+  virtualization_types: string[]; agent_managed: boolean; options: ProviderOptionField[] | null
 }
 
 export type MoneyTotal = { currency: string; amount_minor: number }

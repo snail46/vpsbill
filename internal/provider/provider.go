@@ -11,6 +11,7 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -42,7 +43,10 @@ func (e *Error) Error() string {
 type Config struct {
 	BaseURL    string
 	Credential string
-	Timeout    time.Duration
+	// Options holds the node's non-secret provider settings as a JSON
+	// object; each adapter decodes it into its own typed struct.
+	Options json.RawMessage
+	Timeout time.Duration
 }
 
 // Driver is the minimum every provider must support to be sellable:
@@ -82,8 +86,13 @@ type PortMapper interface {
 	DeletePortMapping(ctx context.Context, name string, index int) ([]PortMapping, error)
 }
 
-// Metrics exposes per-instance monitoring documents. The shapes are passed
-// through to the customer UI unchanged.
+// Metrics exposes per-instance monitoring documents, passed through to the
+// customer UI. Adapters should emit these keys where the backend has them:
+//
+//	usage:   cpu_usage_pct, memory_usage_bytes, memory_total_bytes, disk_usage_bytes,
+//	         network_rx_bps, network_tx_bps, disk_read_bps, disk_write_bps
+//	traffic: total_used_bytes, rx_bytes, tx_bytes, limit_gb
+//	history: a list of timestamped samples, or nil when unavailable
 type Metrics interface {
 	InstanceUsage(ctx context.Context, name string) (any, error)
 	InstanceTraffic(ctx context.Context, name string) (any, error)

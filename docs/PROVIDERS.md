@@ -25,28 +25,34 @@
 - 工厂函数不得发起网络请求，连通性由调用方通过 `HostInfo` 验证。
 - 节点凭据只以 AES-256-GCM 密文落库，调用方用 `provider.OpenSealed` 解密后立即交给驱动。
 
+节点的非敏感设置保存在 `nodes.provider_options`（JSONB），由描述符中的 `options` 字段声明，接入时经 `provider.NormalizeOptions` 校验。后台「新增节点」表单按 `GET /api/v1/admin/provider-types` 返回的描述符动态渲染。
+
 ## 已接入
 
-| 类型 | 后端 | 状态 |
-|---|---|---|
-| `clicd` | [CLICD](https://cli.cd) `/api/v1`，`X-API-Key` | 已接入，全部可选能力（除 `Suspender`） |
+| 类型 | 后端 | 虚拟化 | 可选能力 |
+|---|---|---|---|
+| `clicd` | [CLICD](https://cli.cd) `/api/v1`，`X-API-Key` | LXC / KVM | 重装、重置密码、端口映射、监控、WebSSH/VNC、宿主机探针 |
+| `lxdapi` | [xkatld/lxdapi-web-server](https://github.com/xkatld/lxdapi-web-server) 系统接口 `/api/system`，`X-API-Hash` | LXC | 重装、重置密码、端口映射、监控（无历史曲线）、暂停/恢复 |
+
+### LXDAPI 说明
+
+接口依据 LXDAPI 服务端源码（MIT 许可）中 `internal/api/system` 的处理函数：
+
+- 所有响应都是 HTTP 200，结果看响应体的 `code`：`200` 成功、`404` 不存在、`401` 密钥错误。
+- 创建、删除、重装为异步任务。适配器轮询 `GET /api/system/tasks/detail?id=` 直到完成；创建前先查 `GET /api/system/tasks?name=`，若有进行中的创建任务就继续等待它，不会重复提交。
+- 端口映射使用 `/api/system/port-mapping`（`version=v4`），按映射 ID 升序对应计费系统的映射序号。修改映射 = 释放旧规则 + 在同一公网端口分配新规则，失败时恢复旧规则。
+- 系统接口不提供镜像列表和宿主机容量，因此需要在节点设置中填写：NAT 公网 IPv4、出口网卡、端口范围、可售镜像别名、可分配 vCPU/内存/磁盘。
+- LXDAPI 默认使用自签名证书。节点必须二选一：开启「校验 HTTPS 证书」（受信任证书），或填写证书 SHA-256 指纹进行固定。获取指纹：
+
+  ```sh
+  openssl s_client -connect 节点IP:8443 </dev/null 2>/dev/null | openssl x509 -noout -fingerprint -sha256
+  ```
+
+- 暂不支持：WebSSH/VNC（LXDAPI 控制台是其自带页面，无法经本站同源代理）、历史监控曲线、宿主机探针详情。
+- `Suspender`（pause/resume）已实现，但欠费流程目前仍使用关机，接入暂停需要另行调整生命周期。
 
 ## 规划
 
-### `lxdapi` — xkatld/lxdapi-web-server
+### `hatch` — 自研 Agent
 
-接口依据官方开源 FOSSBilling 插件 `Fmis/fossbilling/Servicelxdapi/Service.php`（main-stable 分支）：
-
-- 地址 `https://{host}:8443`，Header `X-API-Hash: <后端 Hash>`，默认自签证书，需要按节点配置是否校验证书。
-- `POST /api/system/containers` 创建；`GET/DELETE /api/system/containers/{name}` 查询 / 删除。
-- `POST /api/system/containers/{name}/action?action=start|stop|restart|pause|resume|reinstall|reset-password`。
-- `POST /api/system/console/create-token` 控制台；`POST /api/system/traffic/reset?name=` 重置流量。
-- `pause` / `resume` 对应 `Suspender`，用于欠费暂停。
-
-注意：vps-billing-agent-pack 中名为 `lxdapi` 的适配器对接的是原生 LXD REST（`/1.0/instances`，客户端证书），并非 xkatld 的 LXDAPI，不能复用。
-
-### `runman` — narwhal-cloud/runman-agent
-
-协议为 Agent 主动拨入平台的 gRPC 双向流（`AgentGateway.Connect`，Bearer token）。上游 `main.go` 将平台地址写死为常量，官方二进制无法连接自建平台。
-
-该仓库截至 2026-09-26 **没有任何开源许可证**（GitHub API `license: null`）。公开仓库不等于开源：未授权时默认保留全部权利，修改和分发其代码都需要作者许可。在取得作者书面授权（或上游添加开源许可证 / 可配置平台地址）之前，本项目不 fork、不分发 runman-agent，也不复制其源码或 proto 文件。
+参见 [Hatch Agent](HATCH-AGENT.md)。

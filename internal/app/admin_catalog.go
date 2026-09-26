@@ -33,13 +33,14 @@ func (a *adminCatalog) listNodes(w http.ResponseWriter, r *http.Request) {
 
 func (a *adminCatalog) createNode(w http.ResponseWriter, r *http.Request) {
 	var input struct {
-		ProviderType        string   `json:"provider_type"`
-		RegionCode          string   `json:"region_code"`
-		RegionName          string   `json:"region_name"`
-		Name                string   `json:"name"`
-		BaseURL             string   `json:"base_url"`
-		APIKey              string   `json:"api_key"`
-		VirtualizationTypes []string `json:"virtualization_types"`
+		ProviderType        string         `json:"provider_type"`
+		RegionCode          string         `json:"region_code"`
+		RegionName          string         `json:"region_name"`
+		Name                string         `json:"name"`
+		BaseURL             string         `json:"base_url"`
+		APIKey              string         `json:"api_key"`
+		VirtualizationTypes []string       `json:"virtualization_types"`
+		ProviderOptions     map[string]any `json:"provider_options"`
 	}
 	if !decodeJSON(w, r, &input) {
 		return
@@ -53,8 +54,17 @@ func (a *adminCatalog) createNode(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "provider_unsupported", "message": "不支持的对接方式"})
 		return
 	}
-	if strings.TrimSpace(input.RegionCode) == "" || strings.TrimSpace(input.RegionName) == "" || strings.TrimSpace(input.Name) == "" || strings.TrimSpace(input.APIKey) == "" || len(input.VirtualizationTypes) == 0 {
+	if strings.TrimSpace(input.RegionCode) == "" || strings.TrimSpace(input.RegionName) == "" || strings.TrimSpace(input.Name) == "" || strings.TrimSpace(input.APIKey) == "" || len(input.VirtualizationTypes) == 0 ||
+		(!descriptor.AgentManaged && strings.TrimSpace(input.BaseURL) == "") {
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "validation_error", "message": "节点名称、地区、API 地址、" + descriptor.CredentialLabel + " 和虚拟化类型不能为空"})
+		return
+	}
+	if descriptor.AgentManaged {
+		input.BaseURL = provider.AgentEndpoint(input.APIKey)
+	}
+	options, err := provider.NormalizeOptions(descriptor, input.ProviderOptions)
+	if err != nil {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "validation_error", "message": err.Error()})
 		return
 	}
 	for _, virtualization := range input.VirtualizationTypes {
@@ -63,14 +73,14 @@ func (a *adminCatalog) createNode(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	driver, err := provider.Open(input.ProviderType, provider.Config{BaseURL: input.BaseURL, Credential: input.APIKey, Timeout: 12 * time.Second})
+	driver, err := provider.Open(input.ProviderType, provider.Config{BaseURL: input.BaseURL, Credential: input.APIKey, Options: options, Timeout: 12 * time.Second})
 	if err != nil {
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "validation_error", "message": err.Error()})
 		return
 	}
 	info, err := driver.HostInfo(r.Context())
 	if err != nil {
-		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "node_unreachable", "message": "无法验证 " + descriptor.Name + " 节点连接"})
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "node_unreachable", "message": "无法验证 " + descriptor.Name + " 节点连接：" + err.Error()})
 		return
 	}
 	hostInfo := info.Raw
@@ -87,6 +97,7 @@ func (a *adminCatalog) createNode(w http.ResponseWriter, r *http.Request) {
 		Name:                input.Name,
 		BaseURL:             input.BaseURL,
 		APIKeyCiphertext:    ciphertext,
+		ProviderOptions:     options,
 		VirtualizationTypes: input.VirtualizationTypes,
 		Capacity:            hostInfo,
 		CapacityVCPU:        totals.VCPU,
@@ -132,7 +143,7 @@ func (a *adminCatalog) openNode(w http.ResponseWriter, node postgres.Node) (prov
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "provider_unsupported", "message": "此对接方式在当前版本中不可用"})
 		return nil, false
 	}
-	driver, err := provider.OpenSealed(a.box, node.ProviderType, node.BaseURL, node.APIKeyCiphertext, 15*time.Second)
+	driver, err := provider.OpenSealed(a.box, node.Sealed(), 15*time.Second)
 	if err != nil {
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "invalid_node"})
 		return nil, false
@@ -230,7 +241,7 @@ func (a *adminCatalog) listTemplates(w http.ResponseWriter, r *http.Request) {
 		wait.Add(1)
 		go func(node postgres.Node) {
 			defer wait.Done()
-			driver, openErr := provider.OpenSealed(a.box, node.ProviderType, node.BaseURL, node.APIKeyCiphertext, 12*time.Second)
+			driver, openErr := provider.OpenSealed(a.box, node.Sealed(), 12*time.Second)
 			if openErr != nil {
 				results <- result{node: node, err: openErr}
 				return

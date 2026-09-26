@@ -70,7 +70,7 @@ func TestRegistryOpensRegisteredTypesOnly(t *testing.T) {
 	if _, err := Open("missing", Config{}); !errors.Is(err, ErrUnknownType) {
 		t.Fatalf("expected ErrUnknownType, got %v", err)
 	}
-	if _, err := OpenSealed(fakeBox{plaintext: "secret"}, "test-registry", "https://node", []byte("sealed"), 0); err != nil {
+	if _, err := OpenSealed(fakeBox{plaintext: "secret"}, Sealed{Type: "test-registry", BaseURL: "https://node", CredentialCiphertext: []byte("sealed")}, 0); err != nil {
 		t.Fatal(err)
 	}
 	if received.Credential != "secret" || received.BaseURL != "https://node" {

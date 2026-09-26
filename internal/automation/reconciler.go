@@ -54,7 +54,7 @@ func (r *Reconciler) reconcile(ctx context.Context) {
 		return
 	}
 	for _, target := range targets {
-		driver, err := provider.OpenSealed(r.box, target.ProviderType, target.BaseURL, target.APIKeyCiphertext, 20*time.Second)
+		driver, err := provider.OpenSealed(r.box, target.Sealed(), 20*time.Second)
 		if err != nil {
 			r.recordError(ctx, target, "error", err)
 			continue
@@ -86,7 +86,7 @@ func (r *Reconciler) reconcileNodes(ctx context.Context) {
 		if _, registered := provider.Lookup(node.ProviderType); !registered {
 			continue
 		}
-		driver, err := provider.OpenSealed(r.box, node.ProviderType, node.BaseURL, node.APIKeyCiphertext, 15*time.Second)
+		driver, err := provider.OpenSealed(r.box, node.Sealed(), 15*time.Second)
 		if err != nil {
 			_ = r.catalog.UpdateNodeHealth(ctx, node.ID, "offline", map[string]any{})
 			continue

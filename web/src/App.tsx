@@ -44,6 +44,7 @@ import {
   HostProbeRecord,
   InvoiceRecord,
   NodeRecord,
+  ProviderTypeRecord,
   OperationsOverviewRecord,
   OrderRecord,
   PaymentIntentRecord,
@@ -3055,23 +3056,44 @@ function NodesView() {
 function NodeForm({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
+  const [types, setTypes] = useState<ProviderTypeRecord[]>([])
+  const [selected, setSelected] = useState('clicd')
+
+  useEffect(() => {
+    api<ProviderTypeRecord[]>('/api/v1/admin/provider-types')
+      .then((items) => {
+        setTypes(items)
+        if (items.length > 0 && !items.some((item) => item.type === 'clicd')) setSelected(items[0].type)
+      })
+      .catch((err: Error) => setError(err.message))
+  }, [])
+
+  const descriptor = types.find((item) => item.type === selected)
+  const options = descriptor?.options ?? []
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    if (!descriptor) return
     setSaving(true)
     setError('')
     const data = new FormData(event.currentTarget)
+    const providerOptions: Record<string, unknown> = {}
+    for (const field of options) {
+      const name = `option_${field.key}`
+      providerOptions[field.key] = field.kind === 'bool' ? data.get(name) === 'on' : String(data.get(name) ?? '')
+    }
     try {
       await api('/api/v1/admin/nodes', {
         method: 'POST',
         body: JSON.stringify({
-          provider_type: data.get('provider_type'),
+          provider_type: descriptor.type,
           region_code: data.get('region_code'),
           region_name: data.get('region_name'),
           name: data.get('name'),
-          base_url: data.get('base_url'),
+          base_url: descriptor.agent_managed ? '' : data.get('base_url'),
           api_key: data.get('api_key'),
           virtualization_types: data.getAll('virtualization_types'),
+          provider_options: providerOptions,
         }),
       })
       onCreated()
@@ -3087,16 +3109,20 @@ function NodeForm({ onClose, onCreated }: { onClose: () => void; onCreated: () =
       <div className="inline-form-heading">
         <div>
           <h3>新增虚拟化节点对接</h3>
-          <p>配置节点访问端点并验证连通性，所有通信 API Key 将加密存储。</p>
+          <p>配置节点访问端点并验证连通性，所有通信密钥将加密存储。</p>
         </div>
         <button className="icon-button" onClick={onClose}><X size={18} /></button>
       </div>
 
-      <form className="form-grid" onSubmit={submit}>
+      <form className="form-grid" onSubmit={submit} key={selected}>
         <label>
-          <span>适配器类型</span>
-          <select name="provider_type">
-            <option value="clicd">CLICD 原生面板（LXC / KVM）</option>
+          <span>对接方式</span>
+          <select name="provider_type" value={selected} onChange={(event) => setSelected(event.target.value)}>
+            {types.map((item) => (
+              <option key={item.type} value={item.type}>
+                {item.name}（{item.virtualization_types.join(' / ').toUpperCase()}）
+              </option>
+            ))}
           </select>
         </label>
         <label>
@@ -3111,35 +3137,66 @@ function NodeForm({ onClose, onCreated }: { onClose: () => void; onCreated: () =
           <span>地域中文名称</span>
           <input name="region_name" required placeholder="华东上海" />
         </label>
+        {descriptor && !descriptor.agent_managed && (
+          <label>
+            <span>API 接口根地址</span>
+            <input name="base_url" type="url" required placeholder={descriptor.base_url_hint} />
+          </label>
+        )}
         <label>
-          <span>API 接口根地址</span>
-          <input name="base_url" type="url" required placeholder="https://10.0.0.10:8999" />
-        </label>
-        <label>
-          <span>面板 API Key</span>
+          <span>{descriptor?.credential_label ?? 'API Key'}</span>
           <input name="api_key" type="password" required autoComplete="off" />
         </label>
+        {descriptor?.agent_managed && (
+          <p className="form-hint wide">该节点由 Agent 主动连入。先在宿主机安装 Agent 并连接到本站，再填写 Agent 安装时显示的令牌完成接入。</p>
+        )}
+        {options.map((field) =>
+          field.kind === 'bool' ? (
+            <label className="checkbox" key={field.key} title={field.help}>
+              <input type="checkbox" name={`option_${field.key}`} /> {field.label}
+            </label>
+          ) : (
+            <label key={field.key} title={field.help}>
+              <span>{field.label}{field.required ? '' : '（可选）'}</span>
+              <input
+                name={`option_${field.key}`}
+                type={field.kind === 'number' ? 'number' : 'text'}
+                required={field.required}
+                placeholder={field.placeholder}
+              />
+              {field.help && <small>{field.help}</small>}
+            </label>
+          ),
+        )}
         <fieldset className="wide">
           <legend>支持的虚拟化技术</legend>
-          <label className="checkbox">
-            <input type="checkbox" name="virtualization_types" value="lxc" defaultChecked /> LXC 容器
-          </label>
-          <label className="checkbox">
-            <input type="checkbox" name="virtualization_types" value="kvm" /> KVM 硬件虚拟化
-          </label>
+          {(descriptor?.virtualization_types ?? []).map((kind, index) => (
+            <label className="checkbox" key={kind}>
+              <input type="checkbox" name="virtualization_types" value={kind} defaultChecked={index === 0} /> {virtualizationLabel(kind)}
+            </label>
+          ))}
         </fieldset>
 
         {error && <div className="form-error wide">{error}</div>}
 
         <div className="form-actions wide">
           <button type="button" className="secondary-button" onClick={onClose}>取消</button>
-          <button className="primary-button" disabled={saving}>
+          <button className="primary-button" disabled={saving || !descriptor}>
             {saving ? '正在测试并接入…' : '验证并接入节点'}
           </button>
         </div>
       </form>
     </div>
   )
+}
+
+function virtualizationLabel(kind: string) {
+  switch (kind) {
+    case 'lxc': return 'LXC 容器'
+    case 'kvm': return 'KVM 硬件虚拟化'
+    case 'podman': return 'Podman 容器'
+    default: return kind.toUpperCase()
+  }
 }
 
 function HostsView({ onOpen }: { onOpen?: (id: string) => void }) {

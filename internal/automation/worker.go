@@ -91,7 +91,7 @@ func (w *Worker) executeTerminate(parent context.Context, job postgres.Provision
 	if err != nil {
 		return fmt.Errorf("load termination context: %w", err)
 	}
-	driver, err := provider.OpenSealed(w.box, action.ProviderType, action.BaseURL, action.APIKeyCiphertext, 45*time.Second)
+	driver, err := provider.OpenSealed(w.box, action.Sealed(), 45*time.Second)
 	if err != nil {
 		return err
 	}
@@ -111,7 +111,7 @@ func (w *Worker) executeProvision(parent context.Context, job postgres.Provision
 	if err != nil {
 		return fmt.Errorf("load provision context: %w", err)
 	}
-	driver, err := provider.OpenSealed(w.box, provision.ProviderType, provision.BaseURL, provision.APIKeyCiphertext, 90*time.Second)
+	driver, err := provider.OpenSealed(w.box, provision.Sealed(), 90*time.Second)
 	if err != nil {
 		return err
 	}
@@ -138,7 +138,7 @@ func (w *Worker) executePowerAction(parent context.Context, job postgres.Provisi
 	if err != nil {
 		return fmt.Errorf("load action context: %w", err)
 	}
-	driver, err := provider.OpenSealed(w.box, action.ProviderType, action.BaseURL, action.APIKeyCiphertext, 30*time.Second)
+	driver, err := provider.OpenSealed(w.box, action.Sealed(), 30*time.Second)
 	if err != nil {
 		return err
 	}
