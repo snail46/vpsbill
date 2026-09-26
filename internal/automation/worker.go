@@ -144,11 +144,36 @@ func (w *Worker) executePowerAction(parent context.Context, job postgres.Provisi
 	}
 	requestCtx, cancel := context.WithTimeout(parent, 45*time.Second)
 	defer cancel()
-	taskID, err := driver.PowerAction(requestCtx, action.InstanceName, job.Action)
+	taskID, desired, err := powerAction(requestCtx, driver, action.InstanceName, job.Action, action.Source)
 	if err != nil {
 		return err
 	}
-	return w.store.CompleteAction(parent, job.ID, w.workerID, taskID)
+	return w.store.CompleteAction(parent, job.ID, w.workerID, taskID, desired)
+}
+
+// powerAction performs a power job. Overdue suspension pauses the instance
+// when the node supports it, keeping its memory state for a quick recovery,
+// and a later start resumes a paused instance before powering it on. The
+// returned desired status overrides the service's target when non-empty.
+func powerAction(ctx context.Context, driver provider.Driver, name, action, source string) (string, string, error) {
+	suspender, canSuspend := driver.(provider.Suspender)
+	switch {
+	case action == "stop" && source == "billing_lifecycle" && canSuspend:
+		return "", "suspended", suspender.Suspend(ctx, name)
+	case action == "start" && canSuspend:
+		instance, err := driver.GetInstance(ctx, name)
+		if err != nil {
+			return "", "", err
+		}
+		switch provider.NormalizeStatus(instance.Status) {
+		case "suspended":
+			return "", "running", suspender.Resume(ctx, name)
+		case "running":
+			return "", "running", nil
+		}
+	}
+	taskID, err := driver.PowerAction(ctx, name, action)
+	return taskID, "", err
 }
 
 func buildCreateSpec(value postgres.ProvisionContext) provider.CreateSpec {

@@ -242,7 +242,7 @@ func TestBillingLifecycleIntegration(t *testing.T) {
 	if err != nil || !claimed || actionJob.ID != actionJobID || actionJob.Action != "stop" {
 		t.Fatalf("claim customer action: claimed=%v job=%+v err=%v", claimed, actionJob, err)
 	}
-	if err = provisioning.CompleteAction(ctx, actionJob.ID, "integration-worker", "clicd-task-1"); err != nil {
+	if err = provisioning.CompleteAction(ctx, actionJob.ID, "integration-worker", "clicd-task-1", ""); err != nil {
 		t.Fatal(err)
 	}
 	var transactions int

@@ -87,6 +87,8 @@ type ActionContext struct {
 	ServiceID    string
 	InstanceName string
 	NodeEndpoint
+	// Source is the payload source, e.g. billing_lifecycle for overdue stops.
+	Source string
 }
 
 // ClaimJob leases one due job. SKIP LOCKED allows more worker replicas without
@@ -268,14 +270,16 @@ func (s *ProvisioningStore) CompleteProvision(ctx context.Context, jobID, worker
 func (s *ProvisioningStore) ActionContext(ctx context.Context, jobID string) (ActionContext, error) {
 	var result ActionContext
 	err := s.db.QueryRow(ctx, `
-		SELECT j.id,s.id,s.instance_name,n.provider_type,n.base_url,n.api_key_ciphertext,n.provider_options
+		SELECT j.id,s.id,s.instance_name,n.provider_type,n.base_url,n.api_key_ciphertext,n.provider_options,coalesce(j.payload->>'source','')
 		FROM provisioning_jobs j JOIN services s ON s.id=j.service_id JOIN nodes n ON n.id=s.node_id
 		WHERE j.id=$1
-	`, jobID).Scan(&result.JobID, &result.ServiceID, &result.InstanceName, &result.ProviderType, &result.BaseURL, &result.APIKeyCiphertext, &result.ProviderOptions)
+	`, jobID).Scan(&result.JobID, &result.ServiceID, &result.InstanceName, &result.ProviderType, &result.BaseURL, &result.APIKeyCiphertext, &result.ProviderOptions, &result.Source)
 	return result, err
 }
 
-func (s *ProvisioningStore) CompleteAction(ctx context.Context, jobID, workerID, externalTaskID string) error {
+// CompleteAction finishes a leased power job. A non-empty desired replaces the
+// service's desired runtime status, e.g. "suspended" after a pause.
+func (s *ProvisioningStore) CompleteAction(ctx context.Context, jobID, workerID, externalTaskID, desired string) error {
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		return err
@@ -289,7 +293,7 @@ func (s *ProvisioningStore) CompleteAction(ctx context.Context, jobID, workerID,
 	if err != nil {
 		return fmt.Errorf("complete leased action: %w", err)
 	}
-	if _, err := tx.Exec(ctx, "UPDATE services SET desired_runtime_status=CASE WHEN $2='restart' THEN NULL ELSE desired_runtime_status END,last_reconcile_error=NULL,updated_at=now() WHERE id=$1", serviceID, action); err != nil {
+	if _, err := tx.Exec(ctx, "UPDATE services SET desired_runtime_status=CASE WHEN $3<>'' THEN $3 WHEN $2='restart' THEN NULL ELSE desired_runtime_status END,last_reconcile_error=NULL,updated_at=now() WHERE id=$1", serviceID, action, desired); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
