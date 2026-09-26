@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"clicd-billing/internal/security"
+	"vpsbill/internal/security"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"

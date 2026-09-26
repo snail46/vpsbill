@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"clicd-billing/internal/store/postgres"
+	"vpsbill/internal/store/postgres"
 )
 
 func TestDeliverSignsEventAndSetsIdempotencyKey(t *testing.T) {
@@ -25,13 +25,13 @@ func TestDeliverSignsEventAndSetsIdempotencyKey(t *testing.T) {
 		mac := hmac.New(sha256.New, []byte(secret))
 		_, _ = mac.Write(body)
 		want := "sha256=" + hex.EncodeToString(mac.Sum(nil))
-		if got := r.Header.Get("X-CLICD-Signature"); got != want {
+		if got := r.Header.Get("X-VPSBill-Signature"); got != want {
 			t.Fatalf("signature=%q want %q", got, want)
 		}
 		if got := r.Header.Get("Idempotency-Key"); got != "ticket:1" {
 			t.Fatalf("idempotency key=%q", got)
 		}
-		if got := r.Header.Get("X-CLICD-Event"); got != "ticket.created" {
+		if got := r.Header.Get("X-VPSBill-Event"); got != "ticket.created" {
 			t.Fatalf("event=%q", got)
 		}
 		w.WriteHeader(http.StatusNoContent)

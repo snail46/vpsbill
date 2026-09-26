@@ -20,7 +20,7 @@ chmod +x deploy.sh backup.sh restore.sh rotate-key.sh
 ```sh
 ./backup.sh
 # 或指定备份目录
-./backup.sh /mnt/offsite/clicd
+./backup.sh /mnt/offsite/vpsbill
 ```
 
 备份采用 PostgreSQL custom format，并生成 SHA-256 校验文件。`.env` 中的 `ENCRYPTION_KEY` 不在数据库备份内，必须使用独立的加密密码库异地保存；缺少该密钥将无法读取节点 API Key 和 TOTP 密钥。
@@ -30,7 +30,7 @@ chmod +x deploy.sh backup.sh restore.sh rotate-key.sh
 恢复会覆盖当前数据库，因此必须显式确认：
 
 ```sh
-./restore.sh backups/clicd-billing-YYYYMMDDTHHMMSSZ.dump --confirm
+./restore.sh backups/vpsbill-YYYYMMDDTHHMMSSZ.dump --confirm
 ```
 
 脚本校验摘要、停止 API、执行 `pg_restore --clean`，然后重启 API。恢复后检查 `/health/ready`、节点连接和最近账单。

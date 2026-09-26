@@ -7,8 +7,8 @@ import (
 	"log"
 	"os"
 
-	"clicd-billing/internal/security"
 	"github.com/jackc/pgx/v5"
+	"vpsbill/internal/security"
 )
 
 func main() {

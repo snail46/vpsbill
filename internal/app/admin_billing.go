@@ -12,11 +12,11 @@ import (
 	"strconv"
 	"strings"
 
-	"clicd-billing/internal/payment"
-	"clicd-billing/internal/security"
-	"clicd-billing/internal/settings"
-	"clicd-billing/internal/store/postgres"
 	"github.com/jackc/pgx/v5"
+	"vpsbill/internal/payment"
+	"vpsbill/internal/security"
+	"vpsbill/internal/settings"
+	"vpsbill/internal/store/postgres"
 )
 
 type adminBilling struct {

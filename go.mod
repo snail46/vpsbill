@@ -1,4 +1,4 @@
-module clicd-billing
+module vpsbill
 
 go 1.26
 

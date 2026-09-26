@@ -11,11 +11,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"clicd-billing/internal/config"
-	"clicd-billing/internal/security"
-	"clicd-billing/internal/store/postgres"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"vpsbill/internal/config"
+	"vpsbill/internal/security"
+	"vpsbill/internal/store/postgres"
 )
 
 var (

@@ -14,7 +14,7 @@ import (
 	"net/http"
 	"time"
 
-	"clicd-billing/internal/store/postgres"
+	"vpsbill/internal/store/postgres"
 )
 
 type Worker struct {
@@ -89,8 +89,8 @@ func (w *Worker) deliver(ctx context.Context, event postgres.OutboxEvent) error 
 	mac := hmac.New(sha256.New, []byte(secret))
 	_, _ = mac.Write(body)
 	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("X-CLICD-Signature", "sha256="+hex.EncodeToString(mac.Sum(nil)))
-	request.Header.Set("X-CLICD-Event", event.EventType)
+	request.Header.Set("X-VPSBill-Signature", "sha256="+hex.EncodeToString(mac.Sum(nil)))
+	request.Header.Set("X-VPSBill-Event", event.EventType)
 	request.Header.Set("Idempotency-Key", event.DeduplicationKey)
 	response, err := w.client.Do(request)
 	if err != nil {

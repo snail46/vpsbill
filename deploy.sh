@@ -61,4 +61,4 @@ if [ -n "$DOMAIN" ]; then
 else
   docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d --build
 fi
-echo "CLICD Billing is starting. Open the server address and complete the Web installer."
+echo "VPSBill is starting. Open the server address and complete the Web installer."

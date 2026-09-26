@@ -41,11 +41,11 @@ sudo -i
 
 ```sh
 install -d -m 700 /root/.ssh
-ssh-keygen -t ed25519 -C "clicd-nat-production" -f /root/.ssh/clicd-nat-deploy -N ""
-cat /root/.ssh/clicd-nat-deploy.pub
+ssh-keygen -t ed25519 -C "vpsbill-production" -f /root/.ssh/vpsbill-deploy -N ""
+cat /root/.ssh/vpsbill-deploy.pub
 ```
 
-复制输出的整行公钥，进入 GitHub 仓库 `snail468/clicd-nat`：
+复制输出的整行公钥，进入 GitHub 仓库 `snail468/vpsbill`：
 
 1. `Settings` → `Deploy keys` → `Add deploy key`；
 2. Title 填写服务器名称；
@@ -56,14 +56,14 @@ cat /root/.ssh/clicd-nat-deploy.pub
 
 ```sh
 cat >/root/.ssh/config <<'EOF'
-Host github-clicd-nat
+Host github-vpsbill
   HostName github.com
   User git
-  IdentityFile /root/.ssh/clicd-nat-deploy
+  IdentityFile /root/.ssh/vpsbill-deploy
   IdentitiesOnly yes
 EOF
 chmod 600 /root/.ssh/config
-ssh -T git@github-clicd-nat
+ssh -T git@github-vpsbill
 ```
 
 首次连接会要求确认 GitHub 主机指纹。确认指纹与 GitHub 公布的指纹一致后输入 `yes`。Deploy Key 验证成功时，GitHub 会说明认证成功但不提供 Shell，这是正常结果。
@@ -73,8 +73,8 @@ ssh -T git@github-clicd-nat
 ```sh
 mkdir -p /opt
 cd /opt
-git clone git@github-clicd-nat:snail468/clicd-nat.git
-cd /opt/clicd-nat
+git clone git@github-vpsbill:snail468/vpsbill.git
+cd /opt/vpsbill
 chmod +x deploy.sh backup.sh restore.sh rotate-key.sh smoke-test.sh
 ./deploy.sh --init
 nano .env
@@ -117,7 +117,7 @@ ufw enable
 确认域名解析已生效，然后部署：
 
 ```sh
-cd /opt/clicd-nat
+cd /opt/vpsbill
 ./deploy.sh
 ./smoke-test.sh
 docker compose --env-file .env -f deploy/docker-compose.yml ps
@@ -146,9 +146,9 @@ docker compose --env-file .env -f deploy/docker-compose.yml logs -f --tail=200
 首次上线后立即备份：
 
 ```sh
-install -d -m 700 /var/backups/clicd
-cd /opt/clicd-nat
-./backup.sh /var/backups/clicd
+install -d -m 700 /var/backups/vpsbill
+cd /opt/vpsbill
+./backup.sh /var/backups/vpsbill
 ```
 
 数据库备份之外，必须把 `.env` 中的 `ENCRYPTION_KEY` 单独保存到密码管理器或离线保险库；缺少它将无法解密节点 API Key、服务 root 密码和 TOTP 密钥。备份文件和 `.env` 不应只存放在同一台服务器。
@@ -156,8 +156,8 @@ cd /opt/clicd-nat
 更新版本：
 
 ```sh
-cd /opt/clicd-nat
-./backup.sh /var/backups/clicd
+cd /opt/vpsbill
+./backup.sh /var/backups/vpsbill
 git pull --ff-only
 ./deploy.sh
 ./smoke-test.sh
@@ -166,8 +166,8 @@ git pull --ff-only
 恢复数据库：
 
 ```sh
-cd /opt/clicd-nat
-./restore.sh /var/backups/clicd/clicd-billing-YYYYMMDDTHHMMSSZ.dump --confirm
+cd /opt/vpsbill
+./restore.sh /var/backups/vpsbill/vpsbill-YYYYMMDDTHHMMSSZ.dump --confirm
 ./smoke-test.sh
 ```
 

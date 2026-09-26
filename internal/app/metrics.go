@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"strings"
 
-	"clicd-billing/internal/settings"
-	"clicd-billing/internal/store/postgres"
+	"vpsbill/internal/settings"
+	"vpsbill/internal/store/postgres"
 )
 
 type metricsAPI struct {
@@ -34,7 +34,7 @@ func (m *metricsAPI) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
-	_, _ = fmt.Fprintf(w, "# HELP clicd_billing_accounts Active billing accounts.\n# TYPE clicd_billing_accounts gauge\nclicd_billing_accounts %d\n# HELP clicd_billing_open_invoices Open invoices.\n# TYPE clicd_billing_open_invoices gauge\nclicd_billing_open_invoices %d\n# TYPE clicd_billing_provisioning_jobs gauge\nclicd_billing_provisioning_jobs %d\n# TYPE clicd_billing_failed_jobs gauge\nclicd_billing_failed_jobs %d\n# TYPE clicd_billing_active_services gauge\nclicd_billing_active_services %d\n# TYPE clicd_billing_unhealthy_nodes gauge\nclicd_billing_unhealthy_nodes %d\n# TYPE clicd_billing_open_tickets gauge\nclicd_billing_open_tickets %d\n# TYPE clicd_billing_pending_outbox gauge\nclicd_billing_pending_outbox %d\n", snapshot.Accounts, snapshot.OpenInvoices, snapshot.ProvisioningJobs, snapshot.FailedJobs, snapshot.ActiveServices, snapshot.UnhealthyNodes, snapshot.OpenTickets, snapshot.PendingOutbox)
+	_, _ = fmt.Fprintf(w, "# HELP vpsbill_accounts Active billing accounts.\n# TYPE vpsbill_accounts gauge\nvpsbill_accounts %d\n# HELP vpsbill_open_invoices Open invoices.\n# TYPE vpsbill_open_invoices gauge\nvpsbill_open_invoices %d\n# TYPE vpsbill_provisioning_jobs gauge\nvpsbill_provisioning_jobs %d\n# TYPE vpsbill_failed_jobs gauge\nvpsbill_failed_jobs %d\n# TYPE vpsbill_active_services gauge\nvpsbill_active_services %d\n# TYPE vpsbill_unhealthy_nodes gauge\nvpsbill_unhealthy_nodes %d\n# TYPE vpsbill_open_tickets gauge\nvpsbill_open_tickets %d\n# TYPE vpsbill_pending_outbox gauge\nvpsbill_pending_outbox %d\n", snapshot.Accounts, snapshot.OpenInvoices, snapshot.ProvisioningJobs, snapshot.FailedJobs, snapshot.ActiveServices, snapshot.UnhealthyNodes, snapshot.OpenTickets, snapshot.PendingOutbox)
 }
 
 func (m *metricsAPI) overview(w http.ResponseWriter, r *http.Request) {

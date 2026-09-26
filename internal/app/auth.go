@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
-	"clicd-billing/internal/config"
-	"clicd-billing/internal/security"
-	"clicd-billing/internal/settings"
-	"clicd-billing/internal/store/postgres"
+	"vpsbill/internal/config"
+	"vpsbill/internal/security"
+	"vpsbill/internal/settings"
+	"vpsbill/internal/store/postgres"
 )
 
 const (

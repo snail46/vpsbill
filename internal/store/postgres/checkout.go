@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"clicd-billing/internal/security"
 	"github.com/jackc/pgx/v5"
+	"vpsbill/internal/security"
 )
 
 var ErrInvoiceUnavailable = errors.New("invoice is unavailable for checkout")

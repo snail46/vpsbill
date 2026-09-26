@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"strings"
 
-	"clicd-billing/internal/security"
-	"clicd-billing/internal/settings"
+	"vpsbill/internal/security"
+	"vpsbill/internal/settings"
 )
 
 type installer struct {

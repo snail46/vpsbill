@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strings"
 
-	"clicd-billing/internal/store/postgres"
+	"vpsbill/internal/store/postgres"
 )
 
 type operationsAPI struct{ store *postgres.OperationsStore }

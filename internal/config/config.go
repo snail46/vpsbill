@@ -34,7 +34,7 @@ type Config struct {
 
 func Load() (Config, error) {
 	cfg := Config{
-		AppName:                   env("APP_NAME", "CLICD Billing"),
+		AppName:                   env("APP_NAME", "VPSBill"),
 		Environment:               env("APP_ENV", "development"),
 		HTTPAddr:                  env("HTTP_ADDR", ":8080"),
 		DatabaseURL:               strings.TrimSpace(os.Getenv("DATABASE_URL")),
@@ -80,7 +80,7 @@ func Load() (Config, error) {
 		return Config{}, errors.New("SESSION_SECRET must contain at least 32 characters in production")
 	}
 	if cfg.EncryptionKey == "" && cfg.Environment != "production" {
-		hash := sha256.Sum256([]byte("clicd-billing-development-encryption-key"))
+		hash := sha256.Sum256([]byte("vpsbill-development-encryption-key"))
 		cfg.EncryptionKey = hex.EncodeToString(hash[:])
 	}
 	if len(cfg.EncryptionKey) != 64 {

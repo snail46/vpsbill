@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"clicd-billing/internal/security"
+	"vpsbill/internal/security"
 )
 
 func TestBillingLifecycleIntegration(t *testing.T) {
@@ -18,8 +18,8 @@ func TestBillingLifecycleIntegration(t *testing.T) {
 	if databaseURL == "" {
 		t.Skip("TEST_DATABASE_URL is not set")
 	}
-	if !strings.Contains(databaseURL, "clicd_billing_test") {
-		t.Fatal("refusing to reset database without clicd_billing_test in TEST_DATABASE_URL")
+	if !strings.Contains(databaseURL, "vpsbill_test") {
+		t.Fatal("refusing to reset database without vpsbill_test in TEST_DATABASE_URL")
 	}
 	ctx := context.Background()
 	db, err := Open(ctx, databaseURL)

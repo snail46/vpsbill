@@ -4,8 +4,8 @@ import (
 	"errors"
 	"net/http"
 
-	"clicd-billing/internal/store/postgres"
 	"github.com/jackc/pgx/v5"
+	"vpsbill/internal/store/postgres"
 )
 
 type adminAutomation struct{ store *postgres.ProvisioningStore }

@@ -14,7 +14,7 @@ if command -v docker >/dev/null 2>&1; then
   docker compose --env-file "$COMPOSE_ENV" -f deploy/docker-compose.yml config >/dev/null
   docker compose --env-file "$COMPOSE_ENV" -f deploy/docker-compose.yml --profile tls config >/dev/null
   "$ROOT_DIR/integration-test.sh"
-  docker build -t clicd-billing-api:verify .
-  docker build -t clicd-billing-web:verify web
+  docker build -t vpsbill-api:verify .
+  docker build -t vpsbill-web:verify web
 fi
 echo "All available verification checks passed."

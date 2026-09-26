@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strings"
 
-	"clicd-billing/internal/settings"
+	"vpsbill/internal/settings"
 )
 
 type adminSettings struct{ settings *settings.Manager }

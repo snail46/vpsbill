@@ -3,7 +3,7 @@ package app
 import (
 	"testing"
 
-	"clicd-billing/internal/store/postgres"
+	"vpsbill/internal/store/postgres"
 )
 
 func TestValidatePlanRequiresNetworkPolicy(t *testing.T) {

@@ -9,7 +9,7 @@ BACKUP_DIR=${1:-"$ROOT_DIR/backups"}
 if [ ! -f "$ENV_FILE" ]; then echo "Missing .env; deploy the system first."; exit 1; fi
 mkdir -p "$BACKUP_DIR"
 STAMP=$(date -u +%Y%m%dT%H%M%SZ)
-TARGET="$BACKUP_DIR/clicd-billing-$STAMP.dump"
+TARGET="$BACKUP_DIR/vpsbill-$STAMP.dump"
 SUCCESS=0
 cleanup_partial() {
   if [ "$SUCCESS" -ne 1 ]; then rm -f "$TARGET" "$TARGET.sha256"; fi

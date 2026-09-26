@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"time"
 
-	"clicd-billing/internal/store/postgres"
+	"vpsbill/internal/store/postgres"
 )
 
 type Worker struct {

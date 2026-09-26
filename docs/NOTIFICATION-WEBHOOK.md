@@ -6,9 +6,9 @@
 
 通知工作器向配置地址发送 `POST application/json`。主要请求头：
 
-- `X-CLICD-Event`：事件类型，如 `order.created`、`ticket.created`、`ticket.customer_replied`。
+- `X-VPSBill-Event`：事件类型，如 `order.created`、`ticket.created`、`ticket.customer_replied`。
 - `Idempotency-Key`：全局唯一去重键，接收端必须据此幂等处理。
-- `X-CLICD-Signature`：`sha256=<hex-hmac>`，对原始 JSON 请求体使用 HMAC-SHA256 计算。
+- `X-VPSBill-Signature`：`sha256=<hex-hmac>`，对原始 JSON 请求体使用 HMAC-SHA256 计算。
 
 请求体包含 `id`、`aggregate_type`、`aggregate_id`、`event_type`、`deduplication_key`、`payload`、`attempts` 和 `created_at`。
 
