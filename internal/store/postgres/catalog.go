@@ -334,6 +334,11 @@ func (s *CatalogStore) UpdatePlan(ctx context.Context, id string, input Plan) (P
 }
 
 func withPlanNetworkDefaults(input Plan) Plan {
+	// Plans predating provider binding, and callers that omit it, sell CLICD
+	// nodes; an empty value would match no node in the scheduler.
+	if input.ProviderType = strings.TrimSpace(input.ProviderType); input.ProviderType == "" {
+		input.ProviderType = "clicd"
+	}
 	if input.IPv4Count < 1 {
 		input.IPv4Count = 1
 	}
