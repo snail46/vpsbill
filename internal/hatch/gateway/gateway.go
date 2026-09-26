@@ -39,8 +39,9 @@ var ErrOffline = errors.New("agent is not connected")
 type KnownFunc func(ctx context.Context, endpoint string) bool
 
 type Hub struct {
-	logger *slog.Logger
-	known  KnownFunc
+	logger  *slog.Logger
+	known   KnownFunc
+	cluster *Cluster
 
 	mu       sync.Mutex
 	sessions map[string]*Session
@@ -111,6 +112,7 @@ func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	session := &Session{endpoint: endpoint, conn: conn, hello: hello, known: known, pending: map[string]chan protocol.Frame{}, streams: map[string]*Stream{}, lastSeen: time.Now(), done: make(chan struct{})}
 	h.attach(session)
 	defer h.detach(session)
+	h.register(r.Context(), endpoint)
 	h.logger.Info("hatch agent connected", "endpoint", endpoint, "hostname", hello.Hostname, "version", hello.AgentVersion, "registered", known)
 
 	ctx, cancel := context.WithCancel(r.Context())
@@ -171,6 +173,7 @@ func (h *Hub) detach(session *Session) {
 	h.mu.Lock()
 	if h.sessions[session.endpoint] == session {
 		delete(h.sessions, session.endpoint)
+		go h.unregister(session.endpoint)
 	}
 	h.mu.Unlock()
 	session.close()
@@ -193,6 +196,7 @@ func (h *Hub) keepalive(ctx context.Context, session *Session) {
 			_ = session.conn.Close(websocket.StatusGoingAway, "ping timeout")
 			return
 		}
+		h.register(ctx, session.endpoint)
 		if !session.known && time.Since(started) > unknownSessionTTL {
 			if !h.known(ctx, session.endpoint) {
 				_ = session.conn.Close(websocket.StatusPolicyViolation, "token is not registered to any node")

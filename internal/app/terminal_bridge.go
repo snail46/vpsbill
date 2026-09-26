@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"strings"
 	"time"
@@ -11,6 +10,7 @@ import (
 
 	"vpsbill/internal/provider"
 	"vpsbill/internal/store/postgres"
+	"vpsbill/internal/wsterm"
 )
 
 // ticketProtocolPrefix is the WebSocket subprotocol that carries the console
@@ -55,48 +55,5 @@ func (p *customerPortal) bridgeTerminal(w http.ResponseWriter, r *http.Request, 
 	defer session.Close()
 	identity := customerPrincipalFromContext(r.Context())
 	_ = p.store.RecordServiceOperation(r.Context(), identity.UserID, access.ServiceID, "service.console.open", remoteIP(r), r.UserAgent(), map[string]any{"kind": "ssh"})
-	pumpTerminal(ctx, conn, session)
-}
-
-// pumpTerminal copies terminal output to the browser and browser input (or
-// resize messages) to the terminal until either side closes.
-func pumpTerminal(ctx context.Context, conn *websocket.Conn, session provider.TerminalSession) {
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	go func() {
-		defer cancel()
-		buffer := make([]byte, 32<<10)
-		for {
-			n, err := session.Read(buffer)
-			if n > 0 {
-				if writeErr := conn.Write(ctx, websocket.MessageBinary, buffer[:n]); writeErr != nil {
-					return
-				}
-			}
-			if err != nil {
-				_ = conn.Close(websocket.StatusNormalClosure, "session ended")
-				return
-			}
-		}
-	}()
-	for {
-		kind, data, err := conn.Read(ctx)
-		if err != nil {
-			return
-		}
-		if kind == websocket.MessageText {
-			var message struct {
-				Type string `json:"type"`
-				Cols int    `json:"cols"`
-				Rows int    `json:"rows"`
-			}
-			if json.Unmarshal(data, &message) == nil && message.Type == "resize" && message.Cols > 0 && message.Rows > 0 {
-				_ = session.Resize(message.Cols, message.Rows)
-			}
-			continue
-		}
-		if _, err := session.Write(data); err != nil {
-			return
-		}
-	}
+	wsterm.Pump(ctx, conn, session)
 }

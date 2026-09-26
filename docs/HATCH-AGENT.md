@@ -18,7 +18,7 @@ Hatch 是 VPSBill 自研的宿主机 Agent。它运行在母鸡上，驱动本�
 - **协议**：WebSocket + JSON 帧，定义在 `internal/hatch/protocol`。服务端只发送类型化请求（开通、电源、重装、改密、端口映射、用量、流量等），Agent 不执行任意命令。计费站点即使被攻破，也无法在宿主机上执行 shell。
 - **身份**：Agent 令牌是 64 位十六进制随机数，只保存在 Agent 的 `/etc/hatch/agent.json`（0600）和计费库中（AES-256-GCM 加密）。节点的 `base_url` 存的是 `agent://<令牌 SHA-256 前 16 位>`，用于匹配会话，不暴露令牌。
 - **未登记令牌**：尚未接入节点的 Agent 最多同时保持 8 个连接，15 分钟内未被接入即断开。已登记节点的 Agent 不受该上限影响。
-- **单实例限制**：会话保存在 API 进程内存中。当前部署只有一个 API 容器；以后若水平扩展 API，需要把 Agent 请求路由到持有会话的实例。
+- **多实例**：Agent 会话保存在它所连接的 API 进程中。部署多个 API 实例时设置 `INTERNAL_URL=auto`（或每个实例可互访的内部地址），实例会把持有的 Agent 登记到 `agent_sessions` 表并每 30 秒续期；其他实例收到针对该 Agent 的请求（含 WebSSH）时，通过内部端点 `/internal/v1/agent/` 转发给持有者。内部请求用由 `SESSION_SECRET`+`ENCRYPTION_KEY` 派生的 HMAC 签名，时间窗 60 秒，公网代理不转发 `/internal/`。单实例部署留空即可。
 
 ## Agent 负责的事情
 

@@ -59,10 +59,24 @@ func main() {
 	}
 	provisioningStore := postgres.NewProvisioningStore(db)
 	catalogStore := postgres.NewCatalogStore(db)
-	agentHub := gateway.NewHub(logger, catalogStore.NodeExistsByEndpoint)
-	hatchprovider.Register(agentHub)
 	hostname, _ := os.Hostname()
 	workerID := hostname + ":" + fmt.Sprint(os.Getpid())
+	agentHub := gateway.NewHub(logger, catalogStore.NodeExistsByEndpoint)
+	hatchprovider.Register(agentHub)
+	var agentInternal http.Handler
+	if cfg.InternalURL != "" {
+		internalURL, err := cfg.ResolveInternalURL()
+		if err != nil {
+			logger.Error("resolve INTERNAL_URL", "error", err)
+			os.Exit(1)
+		}
+		agentHub.EnableCluster(&gateway.Cluster{
+			InstanceID: workerID, InternalURL: internalURL,
+			Key: gateway.ClusterKey(cfg.SessionSecret + cfg.EncryptionKey), Directory: postgres.NewAgentDirectory(db),
+		})
+		agentInternal = agentHub.InternalHandler()
+		logger.Info("agent forwarding enabled", "internal_url", internalURL)
+	}
 	worker := automation.NewDynamicWorker(provisioningStore, secretBox, logger, workerID, func() time.Duration { return runtime.Current().WorkerPollInterval })
 	reconciler := automation.NewDynamicReconciler(provisioningStore, catalogStore, secretBox, logger, func() time.Duration { return runtime.Current().ReconcileInterval })
 	go worker.Run(ctx)
@@ -79,11 +93,12 @@ func main() {
 	go notificationWorker.Run(ctx)
 
 	handler, err := app.NewHandler(app.Dependencies{
-		Config:       cfg,
-		DB:           db,
-		Logger:       logger,
-		Settings:     runtime,
-		AgentGateway: agentHub,
+		Config:        cfg,
+		DB:            db,
+		Logger:        logger,
+		Settings:      runtime,
+		AgentGateway:  agentHub,
+		AgentInternal: agentInternal,
 	})
 	if err != nil {
 		logger.Error("initialize application", "error", err)

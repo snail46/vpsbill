@@ -23,6 +23,8 @@ type Dependencies struct {
 	Settings *settings.Manager
 	// AgentGateway serves Hatch agent connections; nil disables the endpoint.
 	AgentGateway http.Handler
+	// AgentInternal serves agent requests forwarded by other API instances.
+	AgentInternal http.Handler
 }
 
 func NewHandler(deps Dependencies) (http.Handler, error) {
@@ -114,6 +116,11 @@ func NewHandler(deps Dependencies) (http.Handler, error) {
 	if deps.AgentGateway != nil {
 		// Authenticated by the agent bearer token inside the gateway.
 		mux.Handle("GET /api/v1/agent/connect", deps.AgentGateway)
+	}
+	if deps.AgentInternal != nil {
+		// Authenticated by the cluster HMAC inside the handler; the public
+		// proxies only route /api, /health and /metrics.
+		mux.Handle("/internal/v1/agent/", deps.AgentInternal)
 	}
 	mux.Handle("GET /api/v1/admin/nodes", auth.require("nodes:read", http.HandlerFunc(admin.listNodes)))
 	mux.Handle("GET /api/v1/admin/provider-types", auth.require("nodes:read", http.HandlerFunc(admin.listProviderTypes)))

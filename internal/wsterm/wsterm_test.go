@@ -1,4 +1,4 @@
-package app
+package wsterm
 
 import (
 	"context"
@@ -13,7 +13,7 @@ import (
 	"vpsbill/internal/hatch/agent/agenttest"
 )
 
-func TestPumpTerminalUsesBrowserFraming(t *testing.T) {
+func TestPumpUsesBrowserFraming(t *testing.T) {
 	terminal := agenttest.NewRuntime("lxc")
 	terminal.Instances["svc"] = &agenttest.Instance{Status: "running"}
 	session, err := terminal.Terminal(context.Background(), "svc", 80, 24)
@@ -27,7 +27,7 @@ func TestPumpTerminalUsesBrowserFraming(t *testing.T) {
 			return
 		}
 		defer conn.CloseNow()
-		pumpTerminal(r.Context(), conn, session)
+		Pump(r.Context(), conn, session)
 	}))
 	defer server.Close()
 
@@ -63,5 +63,39 @@ func TestPumpTerminalUsesBrowserFraming(t *testing.T) {
 	echo.Close()
 	if _, _, err := browser.Read(ctx); websocket.CloseStatus(err) != websocket.StatusNormalClosure {
 		t.Fatalf("closing the terminal must close the socket normally, got %v", err)
+	}
+}
+
+func TestClientRoundTrip(t *testing.T) {
+	terminal := agenttest.NewRuntime("lxc")
+	terminal.Instances["svc"] = &agenttest.Instance{Status: "running"}
+	session, _ := terminal.Terminal(context.Background(), "svc", 80, 24)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.CloseNow()
+		Pump(r.Context(), conn, session)
+	}))
+	defer server.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	conn, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := NewClient(conn)
+	defer client.Close()
+	buffer := make([]byte, 64)
+	if n, _ := client.Read(buffer); string(buffer[:n]) != "hatch$ " {
+		t.Fatalf("unexpected prompt %q", buffer[:n])
+	}
+	if err := client.Resize(90, 20); err != nil {
+		t.Fatal(err)
+	}
+	_, _ = client.Write([]byte("w\r"))
+	if n, _ := client.Read(buffer); string(buffer[:n]) != "echo:w\r" {
+		t.Fatalf("unexpected echo %q", buffer[:n])
 	}
 }

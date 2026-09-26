@@ -40,6 +40,7 @@ services:
       OVERDUE_GRACE_PERIOD: ${OVERDUE_GRACE_PERIOD:-72h}
       TERMINATION_RETENTION: ${TERMINATION_RETENTION:-168h}
       PUBLIC_URL: ${PUBLIC_URL:-http://localhost:8080}
+      INTERNAL_URL: ${INTERNAL_URL:-}
     depends_on:
       postgres:
         condition: service_healthy

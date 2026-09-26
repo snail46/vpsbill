@@ -4,6 +4,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"strings"
@@ -24,12 +26,16 @@ type Config struct {
 	NotificationWebhookSecret string
 	MetricsToken              string
 	PublicURL                 string
-	WorkerPollInterval        time.Duration
-	ReconcileInterval         time.Duration
-	LifecycleInterval         time.Duration
-	RenewalLeadTime           time.Duration
-	OverdueGracePeriod        time.Duration
-	TerminationRetention      time.Duration
+	// InternalURL is how other API instances reach this one to forward Hatch
+	// agent requests. Empty disables forwarding (single instance); "auto"
+	// uses this host's first private IPv4 and the HTTP port.
+	InternalURL          string
+	WorkerPollInterval   time.Duration
+	ReconcileInterval    time.Duration
+	LifecycleInterval    time.Duration
+	RenewalLeadTime      time.Duration
+	OverdueGracePeriod   time.Duration
+	TerminationRetention time.Duration
 }
 
 func Load() (Config, error) {
@@ -47,6 +53,7 @@ func Load() (Config, error) {
 		NotificationWebhookSecret: strings.TrimSpace(os.Getenv("NOTIFICATION_WEBHOOK_SECRET")),
 		MetricsToken:              strings.TrimSpace(os.Getenv("METRICS_TOKEN")),
 		PublicURL:                 env("PUBLIC_URL", "http://localhost:8080"),
+		InternalURL:               strings.TrimSpace(os.Getenv("INTERNAL_URL")),
 	}
 	var err error
 	cfg.WorkerPollInterval, err = durationEnv("WORKER_POLL_INTERVAL", 3*time.Second)
@@ -124,4 +131,25 @@ func env(key, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+// ResolveInternalURL expands INTERNAL_URL=auto to http://<private IPv4>:<port>.
+func (c Config) ResolveInternalURL() (string, error) {
+	if c.InternalURL != "auto" {
+		return strings.TrimRight(c.InternalURL, "/"), nil
+	}
+	_, port, err := net.SplitHostPort(c.HTTPAddr)
+	if err != nil {
+		return "", fmt.Errorf("HTTP_ADDR: %w", err)
+	}
+	addresses, err := net.InterfaceAddrs()
+	if err != nil {
+		return "", err
+	}
+	for _, address := range addresses {
+		if network, ok := address.(*net.IPNet); ok && network.IP.To4() != nil && !network.IP.IsLoopback() {
+			return "http://" + net.JoinHostPort(network.IP.String(), port), nil
+		}
+	}
+	return "", errors.New("INTERNAL_URL=auto found no IPv4 address")
 }
