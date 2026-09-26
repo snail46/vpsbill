@@ -34,8 +34,8 @@ chmod +x deploy.sh
 `main` 分支每次通过完整 CI 后，GitHub Actions 会构建并推送以下多架构镜像（`linux/amd64`、`linux/arm64`）：
 
 ```text
-ghcr.io/snail468/vpsbill-api:latest
-ghcr.io/snail468/vpsbill-web:latest
+ghcr.io/snail46/vpsbill-api:latest
+ghcr.io/snail46/vpsbill-web:latest
 ```
 
 同时发布不可变的提交标签 `sha-<完整提交哈希>`。生产环境建议在 `.env` 中固定该标签，需要升级时再明确修改：
@@ -59,7 +59,7 @@ docker-compose.yml   # 使用 deploy/docker-compose.image.yml 的内容
 
 ```sh
 export CR_PAT='粘贴只读Token'
-printf '%s' "$CR_PAT" | docker login ghcr.io -u snail468 --password-stdin
+printf '%s' "$CR_PAT" | docker login ghcr.io -u snail46 --password-stdin
 unset CR_PAT
 ```
 

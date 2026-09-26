@@ -17,7 +17,7 @@ services:
       retries: 20
 
   api:
-    image: ghcr.io/snail468/vpsbill-api:${IMAGE_TAG:-latest}
+    image: ghcr.io/snail46/vpsbill-api:${IMAGE_TAG:-latest}
     restart: unless-stopped
     environment:
       # Optional mappings preserve settings during upgrades from pre-installer releases.
@@ -51,7 +51,7 @@ services:
       retries: 12
 
   web:
-    image: ghcr.io/snail468/vpsbill-web:${IMAGE_TAG:-latest}
+    image: ghcr.io/snail46/vpsbill-web:${IMAGE_TAG:-latest}
     restart: unless-stopped
     ports:
       - "${APP_PORT:-8080}:80"

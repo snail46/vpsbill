@@ -45,7 +45,7 @@ ssh-keygen -t ed25519 -C "vpsbill-production" -f /root/.ssh/vpsbill-deploy -N ""
 cat /root/.ssh/vpsbill-deploy.pub
 ```
 
-复制输出的整行公钥，进入 GitHub 仓库 `snail468/vpsbill`：
+复制输出的整行公钥，进入 GitHub 仓库 `snail46/vpsbill`：
 
 1. `Settings` → `Deploy keys` → `Add deploy key`；
 2. Title 填写服务器名称；
@@ -73,7 +73,7 @@ ssh -T git@github-vpsbill
 ```sh
 mkdir -p /opt
 cd /opt
-git clone git@github-vpsbill:snail468/vpsbill.git
+git clone git@github-vpsbill:snail46/vpsbill.git
 cd /opt/vpsbill
 chmod +x deploy.sh backup.sh restore.sh rotate-key.sh smoke-test.sh
 ./deploy.sh --init
