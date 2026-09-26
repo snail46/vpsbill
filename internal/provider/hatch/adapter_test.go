@@ -169,3 +169,50 @@ func TestGatewayRejectsBadTokensAndLimitsUnknownAgents(t *testing.T) {
 		t.Fatalf("ninth unknown agent must be refused, got %v", err)
 	}
 }
+
+func TestTerminalThroughAgent(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	driver, err := provider.Open(hatchprovider.Type, provider.Config{Credential: token})
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec := provider.CreateSpec{Name: "svc-term", Virtualization: "lxc", TemplateID: "debian12", VCPU: 1, RAMMB: 512, DiskGB: 10, AssignNAT: true}
+	if _, err := driver.EnsureInstance(ctx, spec); err != nil {
+		t.Fatal(err)
+	}
+	defer driver.DeleteInstance(ctx, "svc-term")
+	if capabilities := provider.CapabilitiesOf(driver); len(capabilities.Console) != 1 || capabilities.Console[0] != "ssh" {
+		t.Fatalf("hatch must advertise an ssh console: %+v", capabilities)
+	}
+	session, err := driver.(provider.Terminal).OpenTerminal(ctx, "svc-term", 100, 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	read := func() string {
+		buffer := make([]byte, 64)
+		n, err := session.Read(buffer)
+		if err != nil {
+			t.Fatalf("read: %v", err)
+		}
+		return string(buffer[:n])
+	}
+	if prompt := read(); prompt != "hatch$ " {
+		t.Fatalf("unexpected prompt %q", prompt)
+	}
+	if _, err := session.Write([]byte("uptime\r")); err != nil {
+		t.Fatal(err)
+	}
+	if echoed := read(); echoed != "echo:uptime\r" {
+		t.Fatalf("unexpected echo %q", echoed)
+	}
+	if err := session.Resize(120, 40); err != nil {
+		t.Fatal(err)
+	}
+	if err := session.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := driver.(provider.Terminal).OpenTerminal(ctx, "missing", 80, 24); !errors.Is(err, provider.ErrNotFound) {
+		t.Fatalf("expected not found for a missing instance, got %v", err)
+	}
+}

@@ -22,10 +22,11 @@ type customerPortal struct {
 	catalog  *postgres.CatalogStore
 	settings *settings.Manager
 	box      *security.SecretBox
+	tickets  consoleTickets
 }
 
-func newCustomerPortal(runtime *settings.Manager, store *postgres.PortalStore, billing *postgres.BillingStore, catalog *postgres.CatalogStore, box *security.SecretBox) *customerPortal {
-	return &customerPortal{store: store, billing: billing, catalog: catalog, settings: runtime, box: box}
+func newCustomerPortal(runtime *settings.Manager, store *postgres.PortalStore, billing *postgres.BillingStore, catalog *postgres.CatalogStore, box *security.SecretBox, tickets consoleTickets) *customerPortal {
+	return &customerPortal{store: store, billing: billing, catalog: catalog, settings: runtime, box: box, tickets: tickets}
 }
 
 func (p *customerPortal) listServices(w http.ResponseWriter, r *http.Request) {
@@ -380,6 +381,13 @@ func (p *customerPortal) consoleTicket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	kind := r.PathValue("kind")
+	path := fmt.Sprintf("/api/v1/customer/services/%s/console/%s", access.ServiceID, kind)
+	if _, bridged := driver.(provider.Terminal); bridged && kind == "ssh" {
+		if _, native := driver.(provider.Console); !native {
+			writeJSON(w, http.StatusOK, map[string]any{"data": map[string]string{"ticket": p.tickets.issue(access.ServiceID, kind), "websocket_path": path}})
+			return
+		}
+	}
 	console, ok := driver.(provider.Console)
 	if !ok || !containsString(console.ConsoleKinds(), kind) {
 		p.writeServiceError(w, provider.ErrUnsupported)
@@ -394,7 +402,7 @@ func (p *customerPortal) consoleTicket(w http.ResponseWriter, r *http.Request) {
 		p.writeServiceError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": map[string]string{"ticket": ticket, "websocket_path": fmt.Sprintf("/api/v1/customer/services/%s/console/%s", access.ServiceID, kind)}})
+	writeJSON(w, http.StatusOK, map[string]any{"data": map[string]string{"ticket": ticket, "websocket_path": path}})
 }
 
 func (p *customerPortal) consoleProxy(w http.ResponseWriter, r *http.Request) {
@@ -404,6 +412,10 @@ func (p *customerPortal) consoleProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	console, ok := driver.(provider.Console)
+	if terminal, bridged := driver.(provider.Terminal); !ok && bridged && r.PathValue("kind") == "ssh" {
+		p.bridgeTerminal(w, r, access, terminal)
+		return
+	}
 	if !ok {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "console_unavailable"})
 		return

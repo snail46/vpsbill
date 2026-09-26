@@ -59,6 +59,7 @@ type Session struct {
 
 	mu       sync.Mutex
 	pending  map[string]chan protocol.Frame
+	streams  map[string]*Stream
 	lastSeen time.Time
 	done     chan struct{}
 	closed   bool
@@ -107,7 +108,7 @@ func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_ = conn.Close(websocket.StatusPolicyViolation, err.Error())
 		return
 	}
-	session := &Session{endpoint: endpoint, conn: conn, hello: hello, known: known, pending: map[string]chan protocol.Frame{}, lastSeen: time.Now(), done: make(chan struct{})}
+	session := &Session{endpoint: endpoint, conn: conn, hello: hello, known: known, pending: map[string]chan protocol.Frame{}, streams: map[string]*Stream{}, lastSeen: time.Now(), done: make(chan struct{})}
 	h.attach(session)
 	defer h.detach(session)
 	h.logger.Info("hatch agent connected", "endpoint", endpoint, "hostname", hello.Hostname, "version", hello.AgentVersion, "registered", known)
@@ -217,8 +218,11 @@ func (s *Session) readLoop(ctx context.Context) {
 		reply := s.pending[frame.ID]
 		delete(s.pending, frame.ID)
 		s.mu.Unlock()
-		if frame.Type == protocol.TypeResponse && reply != nil {
+		switch {
+		case frame.Type == protocol.TypeResponse && reply != nil:
 			reply <- frame
+		case frame.Type == protocol.TypeStream:
+			s.deliver(frame)
 		}
 	}
 }

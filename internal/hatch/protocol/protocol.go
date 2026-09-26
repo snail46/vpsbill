@@ -26,6 +26,9 @@ const (
 	TypeRequest  = "request"
 	TypeResponse = "response"
 	TypeEvent    = "event"
+	// TypeStream frames carry an open terminal: ID is the stream, Method is
+	// "data" (Params: base64 bytes), "resize" (Params: TerminalSize) or "close".
+	TypeStream = "stream"
 )
 
 // Request methods. Params and results are the structs named in comments.
@@ -46,7 +49,15 @@ const (
 	MethodAddPortMapping    = "portmap.add"        // PortMappingParams -> []PortMapping
 	MethodUpdatePortMapping = "portmap.update"     // PortMappingParams -> []PortMapping
 	MethodDeletePortMapping = "portmap.delete"     // PortMappingParams -> []PortMapping
+	MethodConsoleOpen       = "console.open"       // ConsoleOpenParams; output then flows as stream frames
 	EventHeartbeat          = "heartbeat"          // Heartbeat
+)
+
+// Stream methods.
+const (
+	StreamData   = "data"
+	StreamResize = "resize"
+	StreamClose  = "close"
 )
 
 // Error codes carried in Error.Code.
@@ -185,4 +196,16 @@ type PortMappingParams struct {
 	Name    string      `json:"name"`
 	Index   int         `json:"index"`
 	Mapping PortMapping `json:"mapping"`
+}
+
+type ConsoleOpenParams struct {
+	Name   string `json:"name"`
+	Stream string `json:"stream"`
+	Cols   int    `json:"cols"`
+	Rows   int    `json:"rows"`
+}
+
+type TerminalSize struct {
+	Cols int `json:"cols"`
+	Rows int `json:"rows"`
 }

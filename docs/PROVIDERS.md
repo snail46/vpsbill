@@ -12,8 +12,11 @@
 | `PortMapper` | 可选 | NAT 端口映射增删改 |
 | `Metrics` | 可选 | 实例用量、流量、历史曲线 |
 | `Console` | 可选 | WebSSH / VNC 票据与同源反代目标 |
+| `Terminal` | 可选 | 交互式 root shell，由本站桥接为 WebSSH |
 | `HostProbe` | 可选 | 后台宿主机探针详情 |
 | `Suspender` | 可选 | 欠费暂停 / 恢复（不关机） |
+
+没有浏览器兼容 WebSocket 的后端实现 `Terminal`，由本站终止客户的 WebSocket 并桥接（同一套帧格式：二进制为按键、文本 JSON 为 resize），控制台票据为 HMAC 签名、60 秒有效、绑定服务与类型。
 
 可选能力通过类型断言发现，`provider.CapabilitiesOf` 由同一断言生成能力标志，随客户实例运行时接口返回（`capabilities` 字段），前端据此显示或隐藏操作。
 
@@ -32,8 +35,8 @@
 | 类型 | 后端 | 虚拟化 | 可选能力 |
 |---|---|---|---|
 | `clicd` | [CLICD](https://cli.cd) `/api/v1`，`X-API-Key` | LXC / KVM | 重装、重置密码、端口映射、监控、WebSSH/VNC、宿主机探针 |
-| `lxdapi` | [xkatld/lxdapi-web-server](https://github.com/xkatld/lxdapi-web-server) 系统接口 `/api/system`，`X-API-Hash` | LXC | 重装、重置密码、端口映射、监控（无历史曲线）、暂停/恢复 |
-| `hatch` | 自研 [Hatch Agent](HATCH-AGENT.md)，Agent 主动 WebSocket 连入 | LXC（LXD）/ Podman | 重装、重置密码、端口映射、监控（无历史曲线）、暂停/恢复 |
+| `lxdapi` | [xkatld/lxdapi-web-server](https://github.com/xkatld/lxdapi-web-server) 系统接口 `/api/system`，`X-API-Hash` | LXC | 重装、重置密码、端口映射、监控（无历史曲线）、暂停/恢复、WebSSH、IPv6 |
+| `hatch` | 自研 [Hatch Agent](HATCH-AGENT.md)，Agent 主动 WebSocket 连入 | LXC（LXD）/ Podman | 重装、重置密码、端口映射、监控（无历史曲线）、暂停/恢复、WebSSH、IPv6 |
 
 ### LXDAPI 说明
 
@@ -49,6 +52,7 @@
   openssl s_client -connect 节点IP:8443 </dev/null 2>/dev/null | openssl x509 -noout -fingerprint -sha256
   ```
 
-- 暂不支持：WebSSH/VNC（LXDAPI 控制台是其自带页面，无法经本站同源代理）、历史监控曲线、宿主机探针详情。
+- WebSSH：通过 `/api/system/console/create-token` 取一次性令牌，由本站桥接到 LXDAPI 的 `/ws/console`（LXDAPI 不支持终端尺寸调整）。
+- 暂不支持：VNC、历史监控曲线、宿主机探针详情。
 - 欠费暂停使用 `pause`，付款后 `resume`。
 

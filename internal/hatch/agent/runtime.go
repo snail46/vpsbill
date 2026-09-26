@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"io"
 	"net/netip"
 
 	"vpsbill/internal/hatch/protocol"
@@ -32,6 +33,8 @@ type Runtime interface {
 	// Exec runs a shell script inside the instance and fails on a non-zero
 	// exit status. Secrets are passed through env, never the command line.
 	Exec(ctx context.Context, name, script string, env map[string]string) error
+	// Terminal starts an interactive root login shell with a PTY.
+	Terminal(ctx context.Context, name string, cols, rows int) (TerminalSession, error)
 }
 
 type RuntimeSpec struct {
@@ -46,6 +49,16 @@ type RuntimeSpec struct {
 	NetworkDownMbps int
 	NetworkUpMbps   int
 }
+
+// TerminalSession is an interactive shell: Read returns output and Write
+// sends keystrokes.
+type TerminalSession interface {
+	io.ReadWriteCloser
+	Resize(cols, rows int) error
+}
+
+// shellCommand prefers a bash login shell and falls back to sh.
+var shellCommand = []string{"/bin/sh", "-c", "cd /root 2>/dev/null; if command -v bash >/dev/null 2>&1; then exec bash -l; else exec sh -l; fi"}
 
 // NetworkInfo is a runtime bridge. IPv6 is optional; when it is a routed
 // public prefix the instances' IPv6 addresses are directly reachable.

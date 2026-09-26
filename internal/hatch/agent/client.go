@@ -105,6 +105,8 @@ func (c *Client) session(ctx context.Context) error {
 	sessionCtx, stop := context.WithCancel(ctx)
 	defer stop()
 	go c.heartbeat(sessionCtx, conn)
+	streams := newStreamTable()
+	defer streams.closeAll()
 	slots := make(chan struct{}, maxConcurrent)
 	for {
 		_, data, err := conn.Read(sessionCtx)
@@ -112,7 +114,14 @@ func (c *Client) session(ctx context.Context) error {
 			return err
 		}
 		var frame protocol.Frame
-		if err := json.Unmarshal(data, &frame); err != nil || frame.Type != protocol.TypeRequest || frame.ID == "" {
+		if err := json.Unmarshal(data, &frame); err != nil || frame.ID == "" {
+			continue
+		}
+		if frame.Type == protocol.TypeStream {
+			streams.dispatch(frame)
+			continue
+		}
+		if frame.Type != protocol.TypeRequest {
 			continue
 		}
 		select {
@@ -122,15 +131,21 @@ func (c *Client) session(ctx context.Context) error {
 		}
 		go func() {
 			defer func() { <-slots }()
-			c.respond(sessionCtx, conn, frame)
+			c.respond(sessionCtx, conn, streams, frame)
 		}()
 	}
 }
 
-func (c *Client) respond(ctx context.Context, conn *websocket.Conn, request protocol.Frame) {
+func (c *Client) respond(ctx context.Context, conn *websocket.Conn, streams *streamTable, request protocol.Frame) {
 	requestCtx, cancel := context.WithTimeout(ctx, requestTimeout)
 	defer cancel()
-	result, err := c.service.Handle(requestCtx, request.Method, request.Params)
+	var result any
+	var err error
+	if request.Method == protocol.MethodConsoleOpen {
+		err = c.openStream(requestCtx, ctx, conn, streams, request.Params)
+	} else {
+		result, err = c.service.Handle(requestCtx, request.Method, request.Params)
+	}
 	response := protocol.Frame{Type: protocol.TypeResponse, ID: request.ID}
 	if err != nil {
 		var protocolErr *protocol.Error

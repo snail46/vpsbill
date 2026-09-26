@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/url"
 	"strings"
 	"time"
@@ -106,6 +107,19 @@ type Console interface {
 	ConsoleKinds() []string
 	ConsoleTicket(ctx context.Context, name, kind, userAgent string) (string, error)
 	ConsoleTarget(name, kind string) (*url.URL, error)
+}
+
+// Terminal opens an interactive root shell for backends whose console is not
+// browser-compatible. The billing server bridges it to the customer's
+// WebSocket using the same framing as the CLICD WebSSH proxy.
+type Terminal interface {
+	OpenTerminal(ctx context.Context, name string, cols, rows int) (TerminalSession, error)
+}
+
+// TerminalSession is a live shell: Read returns output, Write sends input.
+type TerminalSession interface {
+	io.ReadWriteCloser
+	Resize(cols, rows int) error
 }
 
 // HostProbe returns detailed host diagnostics keyed by section name, shown
@@ -243,6 +257,8 @@ func CapabilitiesOf(driver Driver) Capabilities {
 	_, result.Suspend = driver.(Suspender)
 	if console, ok := driver.(Console); ok {
 		result.Console = console.ConsoleKinds()
+	} else if _, ok := driver.(Terminal); ok {
+		result.Console = []string{"ssh"}
 	}
 	if result.Console == nil {
 		result.Console = []string{}

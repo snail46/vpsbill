@@ -32,7 +32,7 @@ Hatch 是 VPSBill 自研的宿主机 Agent。它运行在母鸡上，驱动本�
 | NAT 端口映射（TCP/UDP） | ✅ nftables | ✅ nftables |
 | 实时用量（CPU/内存/网络/磁盘 IO） | ✅ | ✅（磁盘占用为 0） |
 | 月流量累计（跨重启、按自然月清零） | ✅ | ✅ |
-| WebSSH / VNC | ❌ 规划中 | ❌ 规划中 |
+| WebSSH（客户中心网页终端） | ✅ 交互式 exec，经 Agent 连接复用传输 | ✅ TTY exec，经 Agent 连接复用传输 |
 | IPv6（每实例一个独立地址） | ✅ 网桥 `ipv6.address` 子网内静态分配 | ✅ Podman 网络 IPv6 子网内静态分配 |
 
 ### 幂等与恢复

@@ -845,3 +845,20 @@ func randomPassword() (string, error) {
 		}
 	}
 }
+
+// OpenTerminal starts an interactive shell in a managed instance.
+func (s *Service) OpenTerminal(ctx context.Context, name string, cols, rows int) (TerminalSession, error) {
+	record, ok := s.store.Get(name)
+	if !ok {
+		return nil, errorf(protocol.CodeNotFound, "instance %s not found", name)
+	}
+	runtime, err := s.runtime(record.Virtualization)
+	if err != nil {
+		return nil, err
+	}
+	terminal, err := runtime.Terminal(ctx, name, max(cols, 1), max(rows, 1))
+	if errors.Is(err, ErrInstanceNotFound) {
+		return nil, errorf(protocol.CodeNotFound, "instance %s is missing", name)
+	}
+	return terminal, err
+}

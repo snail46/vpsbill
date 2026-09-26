@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/coder/websocket"
+
 	"vpsbill/internal/provider"
 )
 
@@ -41,7 +43,7 @@ func (f *fakeNode) reply(w http.ResponseWriter, code int, msg string, data any) 
 func (f *fakeNode) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if r.Header.Get("X-API-Hash") != "hash" {
+	if r.Header.Get("X-API-Hash") != "hash" && r.URL.Path != "/ws/console" {
 		f.reply(w, 401, "系统级认证失败", nil)
 		return
 	}
@@ -67,6 +69,30 @@ func (f *fakeNode) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			f.mu.Unlock()
 		}()
 		f.reply(w, 200, "success", map[string]any{"name": name, "task_id": id})
+	case r.Method == http.MethodPost && path == "/api/system/console/create-token":
+		f.reply(w, 200, "success", map[string]string{"token": "tok-1"})
+	case path == "/ws/console":
+		if r.URL.Query().Get("token") != "tok-1" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		f.mu.Unlock()
+		defer f.mu.Lock()
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.CloseNow()
+		_ = conn.Write(r.Context(), websocket.MessageText, []byte("prompt> "))
+		for {
+			_, data, err := conn.Read(r.Context())
+			if err != nil {
+				return
+			}
+			var input struct{ Type, Data string }
+			_ = json.Unmarshal(data, &input)
+			_ = conn.Write(r.Context(), websocket.MessageText, []byte(input.Type+":"+input.Data))
+		}
 	case r.Method == http.MethodGet && path == "/api/system/ip":
 		f.reply(w, 200, "success", map[string]any{"ipv4": []string{}, "ipv6": f.ipv6[r.URL.Query().Get("container")]})
 	case r.Method == http.MethodPost && path == "/api/system/ip/allocate":
@@ -265,7 +291,7 @@ func TestPortMappingLifecycle(t *testing.T) {
 func TestCapabilities(t *testing.T) {
 	driver := openDriver(t, newFakeNode())
 	capabilities := provider.CapabilitiesOf(driver)
-	if !capabilities.Suspend || !capabilities.PortMapping || capabilities.HostProbe || len(capabilities.Console) != 0 {
+	if !capabilities.Suspend || !capabilities.PortMapping || capabilities.HostProbe || len(capabilities.Console) != 1 || capabilities.Console[0] != "ssh" {
 		t.Fatalf("unexpected LXDAPI capabilities %+v", capabilities)
 	}
 	info, err := driver.HostInfo(context.Background())
@@ -288,5 +314,28 @@ func TestEnsureTopsUpMissingIPv6(t *testing.T) {
 	}
 	if node.lastCreate["ipv6_pool_limit"] != float64(1) {
 		t.Fatalf("pool limit not requested: %v", node.lastCreate)
+	}
+}
+
+func TestTerminalBridgesLXDAPIConsole(t *testing.T) {
+	driver := openDriver(t, newFakeNode())
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	session, err := driver.(provider.Terminal).OpenTerminal(ctx, "svc-1", 80, 24)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+	buffer := make([]byte, 64)
+	n, err := session.Read(buffer)
+	if err != nil || string(buffer[:n]) != "prompt> " {
+		t.Fatalf("unexpected prompt %q, %v", buffer[:n], err)
+	}
+	if _, err := session.Write([]byte("ls\r")); err != nil {
+		t.Fatal(err)
+	}
+	n, err = session.Read(buffer)
+	if err != nil || string(buffer[:n]) != "input:ls\r" {
+		t.Fatalf("input not framed as LXDAPI expects: %q, %v", buffer[:n], err)
 	}
 }

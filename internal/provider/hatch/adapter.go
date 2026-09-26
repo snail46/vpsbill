@@ -39,6 +39,7 @@ var (
 	_ provider.PortMapper       = (*Driver)(nil)
 	_ provider.Metrics          = (*Driver)(nil)
 	_ provider.Suspender        = (*Driver)(nil)
+	_ provider.Terminal         = (*Driver)(nil)
 )
 
 func (d *Driver) call(ctx context.Context, method string, params, result any) error {
@@ -46,7 +47,11 @@ func (d *Driver) call(ctx context.Context, method string, params, result any) er
 	if !ok {
 		return &provider.Error{Provider: Type, StatusCode: http.StatusServiceUnavailable, Message: "Agent 未连接"}
 	}
-	err := session.Call(ctx, method, params, result)
+	return d.translate(session.Call(ctx, method, params, result))
+}
+
+// translate maps gateway and agent errors onto the provider contract.
+func (d *Driver) translate(err error) error {
 	var agentErr *protocol.Error
 	switch {
 	case err == nil:
@@ -210,4 +215,18 @@ func portMappings(values []protocol.PortMapping, hostIP string) []provider.PortM
 		result = append(result, provider.PortMapping{ContainerPort: value.ContainerPort, HostPort: value.PublicPort, HostIP: hostIP, Protocol: value.Protocol, Description: value.Description})
 	}
 	return result
+}
+
+// OpenTerminal starts a root shell in the instance, carried as a stream over
+// the agent's connection.
+func (d *Driver) OpenTerminal(ctx context.Context, name string, cols, rows int) (provider.TerminalSession, error) {
+	session, ok := d.hub.Session(d.endpoint)
+	if !ok {
+		return nil, &provider.Error{Provider: Type, StatusCode: http.StatusServiceUnavailable, Message: "Agent 未连接"}
+	}
+	stream, err := session.OpenStream(ctx, name, cols, rows)
+	if err != nil {
+		return nil, d.translate(err)
+	}
+	return stream, nil
 }

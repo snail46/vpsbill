@@ -4,6 +4,7 @@ package agenttest
 import (
 	"context"
 	"errors"
+	"io"
 	"net/netip"
 	"sync"
 
@@ -145,4 +146,62 @@ func (n *NAT) Last() string {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	return n.Ruleset
+}
+
+// Terminal returns an echo shell: it prints a prompt and echoes input back.
+func (r *Runtime) Terminal(_ context.Context, name string, cols, rows int) (agent.TerminalSession, error) {
+	r.mu.Lock()
+	_, ok := r.Instances[name]
+	r.mu.Unlock()
+	if !ok {
+		return nil, agent.ErrInstanceNotFound
+	}
+	terminal := &EchoTerminal{output: make(chan []byte, 64), done: make(chan struct{}), Cols: cols, Rows: rows}
+	terminal.output <- []byte("hatch$ ")
+	return terminal, nil
+}
+
+type EchoTerminal struct {
+	mu      sync.Mutex
+	output  chan []byte
+	done    chan struct{}
+	once    sync.Once
+	pending []byte
+	Cols    int
+	Rows    int
+}
+
+func (t *EchoTerminal) Read(p []byte) (int, error) {
+	for len(t.pending) == 0 {
+		select {
+		case data := <-t.output:
+			t.pending = data
+		case <-t.done:
+			return 0, io.EOF
+		}
+	}
+	n := copy(p, t.pending)
+	t.pending = t.pending[n:]
+	return n, nil
+}
+
+func (t *EchoTerminal) Write(p []byte) (int, error) {
+	select {
+	case t.output <- append([]byte("echo:"), p...):
+		return len(p), nil
+	case <-t.done:
+		return 0, io.ErrClosedPipe
+	}
+}
+
+func (t *EchoTerminal) Resize(cols, rows int) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.Cols, t.Rows = cols, rows
+	return nil
+}
+
+func (t *EchoTerminal) Close() error {
+	t.once.Do(func() { close(t.done) })
+	return nil
 }

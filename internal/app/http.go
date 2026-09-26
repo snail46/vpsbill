@@ -45,7 +45,7 @@ func NewHandler(deps Dependencies) (http.Handler, error) {
 	billing := newAdminBilling(deps.Settings, billingStore)
 	adminSettings := adminSettings{settings: deps.Settings}
 	automation := newAdminAutomation(provisioningStore)
-	portal := newCustomerPortal(deps.Settings, portalStore, billingStore, catalogStore, secretBox)
+	portal := newCustomerPortal(deps.Settings, portalStore, billingStore, catalogStore, secretBox, newConsoleTickets(deps.Config.SessionSecret+deps.Config.EncryptionKey))
 	operations := newOperationsAPI(operationsStore)
 	metrics := newMetricsAPI(monitoringStore, deps.Settings)
 	install := &installer{settings: deps.Settings, auth: auth, logger: deps.Logger}
