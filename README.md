@@ -25,7 +25,7 @@ chmod +x deploy.sh
 
 在线支付默认关闭。登录商家后台后可交互式启用支付宝当面付（官方 `alipay.trade.precreate` / RSA2）、兼容彩虹易支付协议的易支付，或通用 HMAC 外部收银台；密钥留空会保留已有值且永不回显。启用后页面会显示对应异步回调地址，正式收款必须使用公开 HTTPS 地址。未配置时仅允许后台人工确认到账。
 
-「节点对接」目前提供 CLICD 适配器，数据模型已按对接方式隔离，便于后续增加 Proxmox VE、Virtualizor 等适配器。「宿主机探针」一级页展示在线状态与调度容量；CLICD 详情页把 dashboard、host-info、host-history、host-report 四个接口完整转换为资源摘要、历史曲线、硬件/网络表格和结构化字段。「运营概览」展示 30 天实收、待收账款、客户、VPS、工单、自动化任务和宿主机健康数据。
+「节点对接」支持三种母鸡后端：CLICD、LXDAPI（xkatld/lxdapi-web-server）和自研的 Hatch Agent（LXD / Podman，Agent 主动连入，母鸡无需开放管理端口）。新增节点表单按对接方式动态生成，客户中心按节点能力显示可用操作。「宿主机探针」一级页展示在线状态与调度容量；CLICD 详情页把 dashboard、host-info、host-history、host-report 四个接口完整转换为资源摘要、历史曲线、硬件/网络表格和结构化字段。「运营概览」展示 30 天实收、待收账款、客户、VPS、工单、自动化任务和宿主机健康数据。
 
 商品套餐支持二次编辑和版本递增。可售系统模板从在线 CLICD 节点中已启用、已下载的镜像聚合，后台按系统版本勾选；NAT、公网 IPv4、IPv6 及数量由套餐统一设置，客户下单不能覆盖网络策略。前后台每个菜单均有独立 URL，刷新和浏览器前进/后退会保留当前位置。
 
@@ -168,7 +168,7 @@ chmod +x verify.sh integration-test.sh
 
 收银台跳转和签名约定见 [在线收银台对接协议](docs/PAYMENT-CHECKOUT.md)。
 
-母鸡对接层契约与各后端接入计划见 [母鸡对接层](docs/PROVIDERS.md)；CLICD 节点权限和接口约定见 [CLICD 集成说明](docs/CLICD-INTEGRATION.md)。
+母鸡对接层契约与各后端接入计划见 [母鸡对接层](docs/PROVIDERS.md)；Hatch Agent 安装与宿主机准备见 [Hatch Agent](docs/HATCH-AGENT.md)；CLICD 节点权限和接口约定见 [CLICD 集成说明](docs/CLICD-INTEGRATION.md)。
 
 邮件、短信或即时通讯适配器可接入 [通知事件 Webhook](docs/NOTIFICATION-WEBHOOK.md)。
 

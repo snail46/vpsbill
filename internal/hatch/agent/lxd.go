@@ -1,0 +1,269 @@
+package agent
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	"net/netip"
+	"net/url"
+	"sort"
+	"strconv"
+	"strings"
+
+	"vpsbill/internal/hatch/protocol"
+)
+
+// LXD drives system containers through the LXD REST API (/1.0).
+type LXD struct {
+	client *unixClient
+	config LXDConfig
+}
+
+func NewLXD(config LXDConfig) *LXD {
+	return &LXD{client: newUnixClient(config.Socket), config: config}
+}
+
+func (l *LXD) Virtualization() string { return "lxc" }
+
+type lxdResponse struct {
+	Type      string          `json:"type"`
+	Operation string          `json:"operation"`
+	Metadata  json.RawMessage `json:"metadata"`
+}
+
+// request performs a call and, for asynchronous responses, waits for the
+// background operation to finish. It returns the (final) metadata.
+func (l *LXD) request(ctx context.Context, method, path string, body any) (json.RawMessage, error) {
+	data, err := l.client.do(ctx, method, path, body)
+	if err != nil {
+		var apiErr *apiError
+		if errors.As(err, &apiErr) && apiErr.Status == http.StatusNotFound {
+			return nil, ErrInstanceNotFound
+		}
+		return nil, err
+	}
+	var response lxdResponse
+	if err := json.Unmarshal(data, &response); err != nil {
+		return nil, fmt.Errorf("decode LXD response: %w", err)
+	}
+	if response.Type != "async" {
+		return response.Metadata, nil
+	}
+	waited, err := l.client.do(ctx, http.MethodGet, response.Operation+"/wait?timeout=600", nil)
+	if err != nil {
+		return nil, fmt.Errorf("wait for %s: %w", response.Operation, err)
+	}
+	var operation struct {
+		Metadata struct {
+			Status   string          `json:"status"`
+			Err      string          `json:"err"`
+			Metadata json.RawMessage `json:"metadata"`
+		} `json:"metadata"`
+	}
+	if err := json.Unmarshal(waited, &operation); err != nil {
+		return nil, fmt.Errorf("decode LXD operation: %w", err)
+	}
+	if operation.Metadata.Status != "Success" {
+		return nil, fmt.Errorf("LXD operation %s: %s", strings.ToLower(operation.Metadata.Status), operation.Metadata.Err)
+	}
+	return operation.Metadata.Metadata, nil
+}
+
+func instancePath(name string) string { return "/1.0/instances/" + url.PathEscape(name) }
+
+func (l *LXD) Images(ctx context.Context) ([]protocol.Image, error) {
+	metadata, err := l.request(ctx, http.MethodGet, "/1.0/images?recursion=1", nil)
+	if err != nil {
+		return nil, err
+	}
+	var images []struct {
+		Type       string                  `json:"type"`
+		Aliases    []struct{ Name string } `json:"aliases"`
+		Properties map[string]string       `json:"properties"`
+	}
+	if err := json.Unmarshal(metadata, &images); err != nil {
+		return nil, err
+	}
+	result := []protocol.Image{}
+	for _, image := range images {
+		if image.Type != "" && image.Type != "container" {
+			continue
+		}
+		for _, alias := range image.Aliases {
+			result = append(result, protocol.Image{ID: alias.Name, Name: alias.Name, Virtualization: "lxc", Description: image.Properties["description"]})
+		}
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
+	return result, nil
+}
+
+func (l *LXD) Network(ctx context.Context) (netip.Prefix, netip.Addr, error) {
+	metadata, err := l.request(ctx, http.MethodGet, "/1.0/networks/"+url.PathEscape(l.config.Network), nil)
+	if err != nil {
+		return netip.Prefix{}, netip.Addr{}, err
+	}
+	var network struct {
+		Config map[string]string `json:"config"`
+	}
+	if err := json.Unmarshal(metadata, &network); err != nil {
+		return netip.Prefix{}, netip.Addr{}, err
+	}
+	// ipv4.address is the bridge address in CIDR form, e.g. 10.20.30.1/24.
+	gateway, err := netip.ParsePrefix(network.Config["ipv4.address"])
+	if err != nil {
+		return netip.Prefix{}, netip.Addr{}, fmt.Errorf("network %s has no static ipv4.address: %w", l.config.Network, err)
+	}
+	return gateway.Masked(), gateway.Addr(), nil
+}
+
+func (l *LXD) Create(ctx context.Context, spec RuntimeSpec) error {
+	nic := map[string]string{"type": "nic", "network": l.config.Network, "name": "eth0", "ipv4.address": spec.IPv4.String()}
+	if spec.NetworkDownMbps > 0 {
+		nic["limits.ingress"] = strconv.Itoa(spec.NetworkDownMbps) + "Mbit"
+	}
+	if spec.NetworkUpMbps > 0 {
+		nic["limits.egress"] = strconv.Itoa(spec.NetworkUpMbps) + "Mbit"
+	}
+	body := map[string]any{
+		"name": spec.Name, "type": "container",
+		"source": map[string]string{"type": "image", "alias": spec.Image},
+		"config": map[string]string{
+			"limits.cpu": strconv.Itoa(spec.VCPU), "limits.memory": strconv.Itoa(spec.RAMMB) + "MB",
+			"security.nesting": "false", "boot.autostart": "true",
+		},
+		"devices": map[string]any{
+			"root": map[string]string{"type": "disk", "path": "/", "pool": l.config.StoragePool, "size": strconv.Itoa(spec.DiskGB) + "GB"},
+			"eth0": nic,
+		},
+	}
+	if _, err := l.request(ctx, http.MethodPost, "/1.0/instances", body); err != nil {
+		return err
+	}
+	return l.Start(ctx, spec.Name)
+}
+
+func (l *LXD) State(ctx context.Context, name string) (RuntimeState, error) {
+	metadata, err := l.request(ctx, http.MethodGet, instancePath(name)+"/state", nil)
+	if err != nil {
+		return RuntimeState{}, err
+	}
+	var state struct {
+		Status string `json:"status"`
+		CPU    struct {
+			Usage int64 `json:"usage"`
+		} `json:"cpu"`
+		Memory struct {
+			Usage int64 `json:"usage"`
+		} `json:"memory"`
+		Disk map[string]struct {
+			Usage int64 `json:"usage"`
+		} `json:"disk"`
+		Network map[string]struct {
+			Addresses []struct {
+				Family  string `json:"family"`
+				Address string `json:"address"`
+				Scope   string `json:"scope"`
+			} `json:"addresses"`
+			Counters struct {
+				BytesReceived int64 `json:"bytes_received"`
+				BytesSent     int64 `json:"bytes_sent"`
+			} `json:"counters"`
+		} `json:"network"`
+	}
+	if err := json.Unmarshal(metadata, &state); err != nil {
+		return RuntimeState{}, err
+	}
+	result := RuntimeState{Status: lxdStatus(state.Status), CPUNanos: state.CPU.Usage, MemoryBytes: state.Memory.Usage, DiskBytes: state.Disk["root"].Usage}
+	if eth0, ok := state.Network["eth0"]; ok {
+		// LXD reports the counters from the instance's point of view.
+		result.RXBytes, result.TXBytes = eth0.Counters.BytesReceived, eth0.Counters.BytesSent
+		for _, address := range eth0.Addresses {
+			if address.Family == "inet" && address.Scope == "global" {
+				result.IPv4 = address.Address
+				break
+			}
+		}
+	}
+	return result, nil
+}
+
+func lxdStatus(status string) string {
+	switch strings.ToLower(status) {
+	case "running":
+		return "running"
+	case "stopped":
+		return "stopped"
+	case "frozen":
+		return "paused"
+	default:
+		return "unknown"
+	}
+}
+
+func (l *LXD) setState(ctx context.Context, name, action string, force bool) error {
+	_, err := l.request(ctx, http.MethodPut, instancePath(name)+"/state", map[string]any{"action": action, "timeout": 30, "force": force})
+	return err
+}
+
+func (l *LXD) Start(ctx context.Context, name string) error {
+	return l.setState(ctx, name, "start", false)
+}
+func (l *LXD) Stop(ctx context.Context, name string) error {
+	return l.setState(ctx, name, "stop", true)
+}
+func (l *LXD) Restart(ctx context.Context, name string) error {
+	return l.setState(ctx, name, "restart", true)
+}
+func (l *LXD) Pause(ctx context.Context, name string) error {
+	return l.setState(ctx, name, "freeze", false)
+}
+func (l *LXD) Resume(ctx context.Context, name string) error {
+	return l.setState(ctx, name, "unfreeze", false)
+}
+
+func (l *LXD) Delete(ctx context.Context, name string) error {
+	state, err := l.State(ctx, name)
+	if errors.Is(err, ErrInstanceNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if state.Status == "paused" {
+		if err := l.Resume(ctx, name); err != nil {
+			return err
+		}
+	}
+	if state.Status != "stopped" {
+		if err := l.Stop(ctx, name); err != nil {
+			return err
+		}
+	}
+	_, err = l.request(ctx, http.MethodDelete, instancePath(name), nil)
+	if errors.Is(err, ErrInstanceNotFound) {
+		return nil
+	}
+	return err
+}
+
+func (l *LXD) Exec(ctx context.Context, name, script string, env map[string]string) error {
+	metadata, err := l.request(ctx, http.MethodPost, instancePath(name)+"/exec", map[string]any{
+		"command": []string{"/bin/sh", "-c", script}, "environment": env,
+		"wait-for-websocket": false, "interactive": false, "record-output": false,
+	})
+	if err != nil {
+		return err
+	}
+	var result struct {
+		Return int `json:"return"`
+	}
+	if err := json.Unmarshal(metadata, &result); err != nil {
+		return err
+	}
+	if result.Return != 0 {
+		return fmt.Errorf("command exited with status %d", result.Return)
+	}
+	return nil
+}

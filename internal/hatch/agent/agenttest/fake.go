@@ -1,0 +1,145 @@
+// Package agenttest provides in-memory runtime and NAT fakes for tests.
+package agenttest
+
+import (
+	"context"
+	"errors"
+	"net/netip"
+	"sync"
+
+	"vpsbill/internal/hatch/agent"
+	"vpsbill/internal/hatch/protocol"
+)
+
+type Instance struct {
+	Spec     agent.RuntimeSpec
+	Status   string
+	Password string
+	RXBytes  int64
+	TXBytes  int64
+}
+
+// Runtime is an in-memory agent.Runtime.
+type Runtime struct {
+	Kind string
+
+	mu        sync.Mutex
+	Instances map[string]*Instance
+	Creates   int
+	// FailExec makes the next n Exec calls fail, as while an instance boots.
+	FailExec int
+}
+
+func NewRuntime(kind string) *Runtime {
+	return &Runtime{Kind: kind, Instances: map[string]*Instance{}}
+}
+
+func (r *Runtime) Virtualization() string { return r.Kind }
+
+func (r *Runtime) Images(context.Context) ([]protocol.Image, error) {
+	return []protocol.Image{{ID: "debian12", Name: "debian12", Virtualization: r.Kind}}, nil
+}
+
+func (r *Runtime) Network(context.Context) (netip.Prefix, netip.Addr, error) {
+	return netip.MustParsePrefix("10.20.30.0/24"), netip.MustParseAddr("10.20.30.1"), nil
+}
+
+func (r *Runtime) Create(_ context.Context, spec agent.RuntimeSpec) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, exists := r.Instances[spec.Name]; exists {
+		return errors.New("already exists")
+	}
+	r.Creates++
+	r.Instances[spec.Name] = &Instance{Spec: spec, Status: "running"}
+	return nil
+}
+
+func (r *Runtime) State(_ context.Context, name string) (agent.RuntimeState, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	instance, ok := r.Instances[name]
+	if !ok {
+		return agent.RuntimeState{}, agent.ErrInstanceNotFound
+	}
+	return agent.RuntimeState{Status: instance.Status, IPv4: instance.Spec.IPv4.String(), RXBytes: instance.RXBytes, TXBytes: instance.TXBytes}, nil
+}
+
+func (r *Runtime) setStatus(name, status string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	instance, ok := r.Instances[name]
+	if !ok {
+		return agent.ErrInstanceNotFound
+	}
+	instance.Status = status
+	return nil
+}
+
+func (r *Runtime) Start(_ context.Context, name string) error   { return r.setStatus(name, "running") }
+func (r *Runtime) Stop(_ context.Context, name string) error    { return r.setStatus(name, "stopped") }
+func (r *Runtime) Restart(_ context.Context, name string) error { return r.setStatus(name, "running") }
+func (r *Runtime) Pause(_ context.Context, name string) error   { return r.setStatus(name, "paused") }
+func (r *Runtime) Resume(_ context.Context, name string) error  { return r.setStatus(name, "running") }
+
+func (r *Runtime) Delete(_ context.Context, name string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.Instances, name)
+	return nil
+}
+
+func (r *Runtime) Exec(_ context.Context, name, _ string, env map[string]string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	instance, ok := r.Instances[name]
+	if !ok {
+		return agent.ErrInstanceNotFound
+	}
+	if r.FailExec > 0 {
+		r.FailExec--
+		return errors.New("instance still booting")
+	}
+	instance.Password = env["HATCH_PASSWORD"]
+	return nil
+}
+
+// SetCounters sets the interface counters reported by State.
+func (r *Runtime) SetCounters(name string, rx, tx int64) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.Instances[name].RXBytes, r.Instances[name].TXBytes = rx, tx
+}
+
+func (r *Runtime) Get(name string) (Instance, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	instance, ok := r.Instances[name]
+	if !ok {
+		return Instance{}, false
+	}
+	return *instance, true
+}
+
+// NAT records the last applied ruleset and can be told to fail.
+type NAT struct {
+	mu      sync.Mutex
+	Ruleset string
+	Fail    bool
+}
+
+func (n *NAT) Apply(_ context.Context, ruleset string) error {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if n.Fail {
+		return errors.New("nft rejected the ruleset")
+	}
+	n.Ruleset = ruleset
+	return nil
+}
+
+func (n *NAT) Last() string {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return n.Ruleset
+}

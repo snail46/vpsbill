@@ -33,6 +33,7 @@
 |---|---|---|---|
 | `clicd` | [CLICD](https://cli.cd) `/api/v1`，`X-API-Key` | LXC / KVM | 重装、重置密码、端口映射、监控、WebSSH/VNC、宿主机探针 |
 | `lxdapi` | [xkatld/lxdapi-web-server](https://github.com/xkatld/lxdapi-web-server) 系统接口 `/api/system`，`X-API-Hash` | LXC | 重装、重置密码、端口映射、监控（无历史曲线）、暂停/恢复 |
+| `hatch` | 自研 [Hatch Agent](HATCH-AGENT.md)，Agent 主动 WebSocket 连入 | LXC（LXD）/ Podman | 重装、重置密码、端口映射、监控（无历史曲线）、暂停/恢复 |
 
 ### LXDAPI 说明
 
@@ -51,8 +52,3 @@
 - 暂不支持：WebSSH/VNC（LXDAPI 控制台是其自带页面，无法经本站同源代理）、历史监控曲线、宿主机探针详情。
 - `Suspender`（pause/resume）已实现，但欠费流程目前仍使用关机，接入暂停需要另行调整生命周期。
 
-## 规划
-
-### `hatch` — 自研 Agent
-
-参见 [Hatch Agent](HATCH-AGENT.md)。

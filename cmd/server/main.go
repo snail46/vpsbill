@@ -15,8 +15,10 @@ import (
 	"vpsbill/internal/automation"
 	"vpsbill/internal/billing"
 	"vpsbill/internal/config"
+	"vpsbill/internal/hatch/gateway"
 	"vpsbill/internal/notifications"
-	_ "vpsbill/internal/provider/clicd"  // registers the CLICD node driver
+	_ "vpsbill/internal/provider/clicd" // registers the CLICD node driver
+	hatchprovider "vpsbill/internal/provider/hatch"
 	_ "vpsbill/internal/provider/lxdapi" // registers the LXDAPI node driver
 	"vpsbill/internal/security"
 	"vpsbill/internal/settings"
@@ -57,6 +59,8 @@ func main() {
 	}
 	provisioningStore := postgres.NewProvisioningStore(db)
 	catalogStore := postgres.NewCatalogStore(db)
+	agentHub := gateway.NewHub(logger, catalogStore.NodeExistsByEndpoint)
+	hatchprovider.Register(agentHub)
 	hostname, _ := os.Hostname()
 	workerID := hostname + ":" + fmt.Sprint(os.Getpid())
 	worker := automation.NewDynamicWorker(provisioningStore, secretBox, logger, workerID, func() time.Duration { return runtime.Current().WorkerPollInterval })
@@ -75,10 +79,11 @@ func main() {
 	go notificationWorker.Run(ctx)
 
 	handler, err := app.NewHandler(app.Dependencies{
-		Config:   cfg,
-		DB:       db,
-		Logger:   logger,
-		Settings: runtime,
+		Config:       cfg,
+		DB:           db,
+		Logger:       logger,
+		Settings:     runtime,
+		AgentGateway: agentHub,
 	})
 	if err != nil {
 		logger.Error("initialize application", "error", err)

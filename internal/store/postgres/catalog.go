@@ -356,3 +356,11 @@ func (s *CatalogStore) SetPlanEnabled(ctx context.Context, id string, enabled bo
 	}
 	return nil
 }
+
+// NodeExistsByEndpoint reports whether a node is registered with the given
+// provider base URL (for agent-managed nodes, the agent endpoint).
+func (s *CatalogStore) NodeExistsByEndpoint(ctx context.Context, baseURL string) bool {
+	var exists bool
+	err := s.db.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM nodes WHERE base_url=$1)", baseURL).Scan(&exists)
+	return err == nil && exists
+}

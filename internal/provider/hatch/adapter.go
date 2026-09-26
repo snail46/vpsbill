@@ -1,0 +1,213 @@
+// Package hatchprovider drives nodes through a connected Hatch agent.
+package hatchprovider
+
+import (
+	"context"
+	"errors"
+	"net/http"
+
+	"vpsbill/internal/hatch/gateway"
+	"vpsbill/internal/hatch/protocol"
+	"vpsbill/internal/provider"
+)
+
+const Type = "hatch"
+
+// Register makes the hatch provider available. It is called from main
+// because drivers need the process's gateway hub.
+func Register(hub *gateway.Hub) {
+	provider.Register(provider.Descriptor{
+		Type: Type, Name: "Hatch Agent", CredentialLabel: "Agent 令牌",
+		VirtualizationTypes: []string{"lxc", "podman"}, AgentManaged: true,
+	}, func(config provider.Config) (provider.Driver, error) {
+		if len(config.Credential) < 32 {
+			return nil, errors.New("Agent 令牌无效")
+		}
+		return &Driver{hub: hub, endpoint: provider.AgentEndpoint(config.Credential)}, nil
+	})
+}
+
+type Driver struct {
+	hub      *gateway.Hub
+	endpoint string
+}
+
+var (
+	_ provider.Driver           = (*Driver)(nil)
+	_ provider.Reinstaller      = (*Driver)(nil)
+	_ provider.PasswordResetter = (*Driver)(nil)
+	_ provider.PortMapper       = (*Driver)(nil)
+	_ provider.Metrics          = (*Driver)(nil)
+	_ provider.Suspender        = (*Driver)(nil)
+)
+
+func (d *Driver) call(ctx context.Context, method string, params, result any) error {
+	session, ok := d.hub.Session(d.endpoint)
+	if !ok {
+		return &provider.Error{Provider: Type, StatusCode: http.StatusServiceUnavailable, Message: "Agent 未连接"}
+	}
+	err := session.Call(ctx, method, params, result)
+	var agentErr *protocol.Error
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, gateway.ErrOffline):
+		return &provider.Error{Provider: Type, StatusCode: http.StatusServiceUnavailable, Message: "Agent 连接已断开"}
+	case !errors.As(err, &agentErr):
+		return err
+	case agentErr.Code == protocol.CodeNotFound:
+		return errors.Join(provider.ErrNotFound, &provider.Error{Provider: Type, StatusCode: http.StatusNotFound, Message: agentErr.Message})
+	case agentErr.Code == protocol.CodeUnsupported:
+		return errors.Join(provider.ErrUnsupported, &provider.Error{Provider: Type, StatusCode: http.StatusNotImplemented, Message: agentErr.Message})
+	case agentErr.Code == protocol.CodeInvalid || agentErr.Code == protocol.CodeConflict:
+		return &provider.Error{Provider: Type, StatusCode: http.StatusUnprocessableEntity, Message: agentErr.Message}
+	default:
+		return &provider.Error{Provider: Type, StatusCode: http.StatusBadGateway, Message: agentErr.Message}
+	}
+}
+
+func (d *Driver) HostInfo(ctx context.Context) (provider.HostInfo, error) {
+	var info protocol.HostInfo
+	if err := d.call(ctx, protocol.MethodHostInfo, struct{}{}, &info); err != nil {
+		return provider.HostInfo{}, err
+	}
+	raw := map[string]any{
+		"hostname": info.Hostname, "agent_version": info.AgentVersion, "runtimes": info.Runtimes,
+		"public_ipv4": info.PublicIPv4, "details": info.Details,
+	}
+	return provider.HostInfo{Raw: raw, Capacity: provider.Capacity{VCPU: info.Capacity.VCPU, RAMMB: info.Capacity.RAMMB, DiskGB: info.Capacity.DiskGB}}, nil
+}
+
+func (d *Driver) Images(ctx context.Context) ([]provider.Image, error) {
+	var images []protocol.Image
+	if err := d.call(ctx, protocol.MethodImages, struct{}{}, &images); err != nil {
+		return nil, err
+	}
+	result := make([]provider.Image, 0, len(images))
+	for _, image := range images {
+		result = append(result, provider.Image{ID: image.ID, Name: image.Name, Virtualization: image.Virtualization, Description: image.Description, Enabled: true, Downloaded: true})
+	}
+	return result, nil
+}
+
+func (d *Driver) EnsureInstance(ctx context.Context, spec provider.CreateSpec) (provider.EnsureResult, error) {
+	password := ""
+	if spec.SSHAuthMode == "password" {
+		password = spec.SSHPassword
+	}
+	var result protocol.EnsureResult
+	err := d.call(ctx, protocol.MethodEnsure, protocol.CreateSpec{
+		Name: spec.Name, Virtualization: spec.Virtualization, TemplateID: spec.TemplateID,
+		VCPU: spec.VCPU, RAMMB: spec.RAMMB, DiskGB: spec.DiskGB, AssignNAT: spec.AssignNAT,
+		PortMappingCount: spec.PortMappingCount, Password: password,
+		NetworkDownMbps: spec.NetworkDownMbps, NetworkUpMbps: spec.NetworkUpMbps, MonthlyTrafficGB: spec.MonthlyTrafficGB,
+	}, &result)
+	if err != nil {
+		return provider.EnsureResult{}, err
+	}
+	return provider.EnsureResult{Instance: instance(result.Instance), Created: result.Created}, nil
+}
+
+func (d *Driver) GetInstance(ctx context.Context, name string) (provider.Instance, error) {
+	var value protocol.Instance
+	if err := d.call(ctx, protocol.MethodGet, protocol.NameParams{Name: name}, &value); err != nil {
+		return provider.Instance{}, err
+	}
+	return instance(value), nil
+}
+
+func (d *Driver) PowerAction(ctx context.Context, name, action string) (string, error) {
+	return "", d.call(ctx, protocol.MethodPower, protocol.PowerParams{Name: name, Action: action}, nil)
+}
+
+func (d *Driver) DeleteInstance(ctx context.Context, name string) error {
+	err := d.call(ctx, protocol.MethodDelete, protocol.NameParams{Name: name}, nil)
+	if errors.Is(err, provider.ErrNotFound) {
+		return nil
+	}
+	return err
+}
+
+func (d *Driver) Reinstall(ctx context.Context, name string, spec provider.ReinstallSpec) (string, error) {
+	return "", d.call(ctx, protocol.MethodReinstall, protocol.ReinstallParams{Name: name, TemplateID: spec.TemplateID, Password: spec.Password}, nil)
+}
+
+func (d *Driver) ResetPassword(ctx context.Context, name, password string) (string, error) {
+	var result protocol.PasswordParams
+	err := d.call(ctx, protocol.MethodResetPassword, protocol.PasswordParams{Name: name, Password: password}, &result)
+	return result.Password, err
+}
+
+func (d *Driver) Suspend(ctx context.Context, name string) error {
+	return d.call(ctx, protocol.MethodSuspend, protocol.NameParams{Name: name}, nil)
+}
+
+func (d *Driver) Resume(ctx context.Context, name string) error {
+	return d.call(ctx, protocol.MethodResume, protocol.NameParams{Name: name}, nil)
+}
+
+func (d *Driver) FreePort(ctx context.Context, name string) (int, error) {
+	var result protocol.PortParams
+	err := d.call(ctx, protocol.MethodFreePort, protocol.NameParams{Name: name}, &result)
+	return result.Port, err
+}
+
+func (d *Driver) AddPortMapping(ctx context.Context, name string, mapping provider.PortMapping) ([]provider.PortMapping, error) {
+	return d.mutate(ctx, protocol.MethodAddPortMapping, name, -1, mapping)
+}
+
+func (d *Driver) UpdatePortMapping(ctx context.Context, name string, index int, mapping provider.PortMapping) ([]provider.PortMapping, error) {
+	return d.mutate(ctx, protocol.MethodUpdatePortMapping, name, index, mapping)
+}
+
+func (d *Driver) DeletePortMapping(ctx context.Context, name string, index int) ([]provider.PortMapping, error) {
+	return d.mutate(ctx, protocol.MethodDeletePortMapping, name, index, provider.PortMapping{})
+}
+
+func (d *Driver) mutate(ctx context.Context, method, name string, index int, mapping provider.PortMapping) ([]provider.PortMapping, error) {
+	var result []protocol.PortMapping
+	err := d.call(ctx, method, protocol.PortMappingParams{Name: name, Index: index, Mapping: protocol.PortMapping{
+		PublicPort: mapping.HostPort, ContainerPort: mapping.ContainerPort, Protocol: mapping.Protocol, Description: mapping.Description,
+	}}, &result)
+	if err != nil {
+		return nil, err
+	}
+	return portMappings(result, ""), nil
+}
+
+func (d *Driver) InstanceUsage(ctx context.Context, name string) (any, error) {
+	var usage map[string]any
+	err := d.call(ctx, protocol.MethodUsage, protocol.NameParams{Name: name}, &usage)
+	return usage, err
+}
+
+func (d *Driver) InstanceTraffic(ctx context.Context, name string) (any, error) {
+	var traffic map[string]any
+	err := d.call(ctx, protocol.MethodTraffic, protocol.NameParams{Name: name}, &traffic)
+	return traffic, err
+}
+
+// InstanceHistory is not collected by the agent yet.
+func (d *Driver) InstanceHistory(context.Context, string) (any, error) { return nil, nil }
+
+func instance(value protocol.Instance) provider.Instance {
+	ip := value.PublicIPv4
+	if ip == "" {
+		ip = value.PrivateIPv4
+	}
+	return provider.Instance{
+		ExternalID: value.Name, Name: value.Name, Virtualization: value.Virtualization, Status: value.Status,
+		Template: value.Template, IP: ip, IPv6: value.IPv6, VCPU: value.VCPU, RAMMB: value.RAMMB, DiskGB: value.DiskGB,
+		SSHPort: value.SSHPort, PortMappings: portMappings(value.PortMappings, value.PublicIPv4), PortMappingLimit: value.PortMappingLimit,
+		MonthlyTrafficGB: value.MonthlyTrafficGB, NetworkDownMbps: value.NetworkDownMbps, NetworkUpMbps: value.NetworkUpMbps,
+		InitialPassword: value.Password,
+	}
+}
+
+func portMappings(values []protocol.PortMapping, hostIP string) []provider.PortMapping {
+	result := make([]provider.PortMapping, 0, len(values))
+	for _, value := range values {
+		result = append(result, provider.PortMapping{ContainerPort: value.ContainerPort, HostPort: value.PublicPort, HostIP: hostIP, Protocol: value.Protocol, Description: value.Description})
+	}
+	return result
+}

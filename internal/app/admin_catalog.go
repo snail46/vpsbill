@@ -61,6 +61,10 @@ func (a *adminCatalog) createNode(w http.ResponseWriter, r *http.Request) {
 	}
 	if descriptor.AgentManaged {
 		input.BaseURL = provider.AgentEndpoint(input.APIKey)
+		if a.store.NodeExistsByEndpoint(r.Context(), input.BaseURL) {
+			writeJSON(w, http.StatusConflict, map[string]any{"error": "node_create_failed", "message": "该 Agent 令牌已接入其他节点"})
+			return
+		}
 	}
 	options, err := provider.NormalizeOptions(descriptor, input.ProviderOptions)
 	if err != nil {
@@ -261,7 +265,7 @@ func (a *adminCatalog) listTemplates(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		for _, image := range response.images {
-			if !image.Enabled || !image.Downloaded || (image.Virtualization != "lxc" && image.Virtualization != "kvm") {
+			if !image.Enabled || !image.Downloaded || !validVirtualization(image.Virtualization) {
 				continue
 			}
 			key := image.Virtualization + "\x00" + image.ID
@@ -355,8 +359,8 @@ func validatePlan(plan postgres.Plan) string {
 	if strings.TrimSpace(plan.Code) == "" || strings.TrimSpace(plan.Name) == "" {
 		return "套餐编码和名称不能为空"
 	}
-	if plan.Virtualization != "lxc" && plan.Virtualization != "kvm" {
-		return "虚拟化类型必须为 lxc 或 kvm"
+	if !validVirtualization(plan.Virtualization) {
+		return "虚拟化类型必须为 lxc、kvm 或 podman"
 	}
 	if plan.VCPU < 1 || plan.RAMMB < 128 || plan.DiskGB < 1 {
 		return "CPU、内存和磁盘参数无效"
@@ -398,4 +402,8 @@ func validatePlan(plan postgres.Plan) string {
 		}
 	}
 	return ""
+}
+
+func validVirtualization(value string) bool {
+	return value == "lxc" || value == "kvm" || value == "podman"
 }

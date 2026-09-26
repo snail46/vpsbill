@@ -3416,7 +3416,7 @@ function PlanForm({
   const [templates, setTemplates] = useState<AvailableTemplateRecord[]>([])
   const [loadingTemplates, setLoadingTemplates] = useState(true)
 
-  const [virtualization, setVirtualization] = useState<'lxc' | 'kvm'>(plan?.virtualization || 'lxc')
+  const [virtualization, setVirtualization] = useState<'lxc' | 'kvm' | 'podman'>(plan?.virtualization || 'lxc')
   const [allowed, setAllowed] = useState<string[]>(plan?.allowed_template_ids || [])
   const [defaultTemplate, setDefaultTemplate] = useState(plan?.default_template_id || '')
 
@@ -3518,7 +3518,7 @@ function PlanForm({
             name="virtualization"
             value={virtualization}
             onChange={event => {
-              const value = event.target.value as 'lxc' | 'kvm'
+              const value = event.target.value as 'lxc' | 'kvm' | 'podman'
               setVirtualization(value)
               setAllowed([])
               setDefaultTemplate('')
@@ -3526,6 +3526,7 @@ function PlanForm({
           >
             <option value="lxc">LXC 容器</option>
             <option value="kvm">KVM 硬件虚拟化</option>
+            <option value="podman">Podman 容器</option>
           </select>
         </label>
         <label>

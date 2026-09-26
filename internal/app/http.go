@@ -21,6 +21,8 @@ type Dependencies struct {
 	DB       *pgxpool.Pool
 	Logger   *slog.Logger
 	Settings *settings.Manager
+	// AgentGateway serves Hatch agent connections; nil disables the endpoint.
+	AgentGateway http.Handler
 }
 
 func NewHandler(deps Dependencies) (http.Handler, error) {
@@ -109,6 +111,10 @@ func NewHandler(deps Dependencies) (http.Handler, error) {
 	mux.Handle("POST /api/v1/customer/tickets", auth.requireCustomer(http.HandlerFunc(operations.customerCreateTicket)))
 	mux.Handle("GET /api/v1/customer/tickets/{id}", auth.requireCustomer(http.HandlerFunc(operations.customerTicketDetail)))
 	mux.Handle("POST /api/v1/customer/tickets/{id}/messages", auth.requireCustomer(http.HandlerFunc(operations.customerReplyTicket)))
+	if deps.AgentGateway != nil {
+		// Authenticated by the agent bearer token inside the gateway.
+		mux.Handle("GET /api/v1/agent/connect", deps.AgentGateway)
+	}
 	mux.Handle("GET /api/v1/admin/nodes", auth.require("nodes:read", http.HandlerFunc(admin.listNodes)))
 	mux.Handle("GET /api/v1/admin/provider-types", auth.require("nodes:read", http.HandlerFunc(admin.listProviderTypes)))
 	mux.Handle("GET /api/v1/admin/hosts", auth.require("nodes:read", http.HandlerFunc(metrics.hosts)))

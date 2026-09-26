@@ -413,6 +413,10 @@ func (p *customerPortal) consoleProxy(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "console_unavailable"})
 		return
 	}
+	// Console sessions outlive the server's read/write timeouts.
+	controller := http.NewResponseController(w)
+	_ = controller.SetReadDeadline(time.Time{})
+	_ = controller.SetWriteDeadline(time.Time{})
 	proxy := httputil.NewSingleHostReverseProxy(target)
 	proxy.FlushInterval = -1
 	proxy.Director = func(request *http.Request) {

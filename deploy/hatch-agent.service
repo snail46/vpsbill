@@ -1,0 +1,21 @@
+[Unit]
+Description=VPSBill Hatch agent
+Documentation=https://github.com/snail468/vpsbill/blob/main/docs/HATCH-AGENT.md
+Wants=network-online.target
+After=network-online.target snap.lxd.daemon.service lxd.service podman.socket
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/hatch-agent run --config /etc/hatch/agent.json
+Restart=always
+RestartSec=5
+# The agent drives the root LXD/Podman sockets and nftables, so it runs as
+# root; the file system outside its state directory stays read-only.
+ProtectSystem=strict
+ReadWritePaths=/var/lib/hatch
+ProtectHome=true
+PrivateTmp=true
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

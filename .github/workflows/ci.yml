@@ -45,10 +45,23 @@ jobs:
           node-version: '24'
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
-      - run: sh -n deploy.sh backup.sh restore.sh rotate-key.sh smoke-test.sh verify.sh integration-test.sh
+      - run: sh -n deploy.sh backup.sh restore.sh rotate-key.sh smoke-test.sh verify.sh integration-test.sh deploy/install-hatch-agent.sh
       - run: go test ./...
       - run: go vet ./...
       - run: go build ./cmd/server ./cmd/keyrotate
+      - name: Build Hatch agent binaries
+        run: |
+          for arch in amd64 arm64; do
+            CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath \
+              -ldflags "-s -w -X main.version=${GITHUB_SHA::12}" \
+              -o dist/hatch-agent-linux-$arch ./cmd/hatch-agent
+          done
+          (cd dist && sha256sum hatch-agent-linux-* > SHA256SUMS)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hatch-agent
+          path: dist/
+          retention-days: 30
       - run: pnpm install --frozen-lockfile
         working-directory: web
       - run: pnpm run build
