@@ -9,11 +9,11 @@ import (
 	"strings"
 	"time"
 
-	"clicd-billing/internal/clicd"
-	"clicd-billing/internal/payment"
-	"clicd-billing/internal/security"
-	"clicd-billing/internal/settings"
-	"clicd-billing/internal/store/postgres"
+	"vpsbill/internal/payment"
+	"vpsbill/internal/provider"
+	"vpsbill/internal/security"
+	"vpsbill/internal/settings"
+	"vpsbill/internal/store/postgres"
 )
 
 type customerPortal struct {
@@ -72,76 +72,75 @@ func (p *customerPortal) serviceAction(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (p *customerPortal) serviceClient(r *http.Request) (postgres.CustomerServiceAccess, *clicd.Client, error) {
+func (p *customerPortal) serviceDriver(r *http.Request) (postgres.CustomerServiceAccess, provider.Driver, error) {
 	identity := customerPrincipalFromContext(r.Context())
 	access, err := p.store.ServiceAccess(r.Context(), identity.AccountID, r.PathValue("id"))
 	if err != nil {
 		return access, nil, err
 	}
-	if access.Status != "active" || access.ProviderType != "clicd" {
+	if _, registered := provider.Lookup(access.ProviderType); access.Status != "active" || !registered {
 		return access, nil, postgres.ErrServiceActionUnavailable
 	}
-	apiKey, err := p.box.Open(access.APIKeyCiphertext)
-	if err != nil {
-		return access, nil, fmt.Errorf("decrypt node credential: %w", err)
-	}
-	client, err := clicd.NewClient(access.BaseURL, apiKey, 20*time.Second)
-	return access, client, err
+	driver, err := provider.OpenSealed(p.box, access.ProviderType, access.BaseURL, access.APIKeyCiphertext, 20*time.Second)
+	return access, driver, err
 }
 
 func (p *customerPortal) serviceRuntime(w http.ResponseWriter, r *http.Request) {
-	access, client, err := p.serviceClient(r)
+	access, driver, err := p.serviceDriver(r)
 	if err != nil {
 		p.writeServiceError(w, err)
 		return
+	}
+	type source struct {
+		name string
+		load func() (any, error)
 	}
 	type result struct {
 		name  string
 		value any
 		err   error
 	}
+	ctx, name := r.Context(), access.InstanceName
 	brief := r.URL.Query().Get("brief") == "1"
-	count := 3
-	results := make(chan result, 5)
-	go func() {
-		value, callErr := client.GetContainer(r.Context(), access.InstanceName)
-		results <- result{"container", value, callErr}
-	}()
-	go func() {
-		value, callErr := client.ContainerUsage(r.Context(), access.InstanceName)
-		results <- result{"usage", value, callErr}
-	}()
-	go func() {
-		value, callErr := client.ContainerTraffic(r.Context(), access.InstanceName)
-		results <- result{"traffic", value, callErr}
-	}()
-	if !brief {
-		count += 2
-		go func() {
-			value, callErr := client.ContainerHistory(r.Context(), access.InstanceName)
-			results <- result{"history", value, callErr}
-		}()
-		go func() { value, callErr := client.Images(r.Context()); results <- result{"images", value, callErr} }()
+	sources := []source{{"container", func() (any, error) { return driver.GetInstance(ctx, name) }}}
+	metrics, hasMetrics := driver.(provider.Metrics)
+	if hasMetrics {
+		sources = append(sources,
+			source{"usage", func() (any, error) { return metrics.InstanceUsage(ctx, name) }},
+			source{"traffic", func() (any, error) { return metrics.InstanceTraffic(ctx, name) }})
 	}
-	sources := map[string]any{}
+	if !brief {
+		if hasMetrics {
+			sources = append(sources, source{"history", func() (any, error) { return metrics.InstanceHistory(ctx, name) }})
+		}
+		sources = append(sources, source{"images", func() (any, error) { return driver.Images(ctx) }})
+	}
+	results := make(chan result, len(sources))
+	for _, source := range sources {
+		go func() {
+			value, callErr := source.load()
+			results <- result{source.name, value, callErr}
+		}()
+	}
+	values := map[string]any{}
 	errorsBySource := map[string]string{}
-	var container clicd.Container
-	var images []clicd.Image
-	for range count {
+	var instance provider.Instance
+	var images []provider.Image
+	for range sources {
 		row := <-results
 		if row.err != nil {
 			errorsBySource[row.name] = row.err.Error()
 			continue
 		}
-		sources[row.name] = row.value
+		values[row.name] = row.value
 		switch value := row.value.(type) {
-		case clicd.Container:
-			container = value
-		case []clicd.Image:
+		case provider.Instance:
+			instance = value
+		case []provider.Image:
 			images = value
 		}
 	}
-	if container.Name == "" {
+	if instance.Name == "" {
 		p.writeServiceError(w, errors.New(errorsBySource["container"]))
 		return
 	}
@@ -149,23 +148,22 @@ func (p *customerPortal) serviceRuntime(w http.ResponseWriter, r *http.Request) 
 	for _, id := range access.AllowedTemplateIDs {
 		allowed[id] = true
 	}
-	templates := make([]clicd.Image, 0)
+	templates := make([]provider.Image, 0)
 	for _, image := range images {
-		if allowed[image.ID] && image.Enabled && image.Downloaded && (image.Type == "" || image.Type == access.Virtualization) {
+		if allowed[image.ID] && image.Sellable(access.Virtualization) {
 			templates = append(templates, image)
 		}
 	}
-	delete(sources, "images")
 	writeJSON(w, http.StatusOK, map[string]any{"data": map[string]any{
-		"container": container, "usage": sources["usage"], "history": sources["history"], "traffic": sources["traffic"],
-		"templates": templates, "errors": errorsBySource,
+		"container": instance, "usage": values["usage"], "history": values["history"], "traffic": values["traffic"],
+		"templates": templates, "errors": errorsBySource, "capabilities": provider.CapabilitiesOf(driver),
 	}})
 }
 
 func (p *customerPortal) serviceCredential(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Pragma", "no-cache")
-	access, _, err := p.serviceClient(r)
+	access, _, err := p.serviceDriver(r)
 	if err != nil {
 		p.writeServiceError(w, err)
 		return
@@ -207,12 +205,17 @@ func (p *customerPortal) resetServicePassword(w http.ResponseWriter, r *http.Req
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "invalid_password", "message": "密码需为 8-64 位并同时包含字母和数字"})
 		return
 	}
-	access, client, err := p.serviceClient(r)
+	access, driver, err := p.serviceDriver(r)
 	if err != nil {
 		p.writeServiceError(w, err)
 		return
 	}
-	password, err := client.ResetPassword(r.Context(), access.InstanceName, input.Password)
+	resetter, ok := driver.(provider.PasswordResetter)
+	if !ok {
+		p.writeServiceError(w, provider.ErrUnsupported)
+		return
+	}
+	password, err := resetter.ResetPassword(r.Context(), access.InstanceName, input.Password)
 	if err != nil {
 		p.writeServiceError(w, err)
 		return
@@ -248,9 +251,14 @@ func (p *customerPortal) reinstallService(w http.ResponseWriter, r *http.Request
 	}
 	input.TemplateID = strings.TrimSpace(input.TemplateID)
 	input.Password = strings.TrimSpace(input.Password)
-	access, client, err := p.serviceClient(r)
+	access, driver, err := p.serviceDriver(r)
 	if err != nil {
 		p.writeServiceError(w, err)
+		return
+	}
+	reinstaller, ok := driver.(provider.Reinstaller)
+	if !ok {
+		p.writeServiceError(w, provider.ErrUnsupported)
 		return
 	}
 	if !containsString(access.AllowedTemplateIDs, input.TemplateID) {
@@ -261,7 +269,7 @@ func (p *customerPortal) reinstallService(w http.ResponseWriter, r *http.Request
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "invalid_password", "message": "请设置 8-64 位且同时包含字母和数字的新 root 密码"})
 		return
 	}
-	taskID, err := client.Reinstall(r.Context(), access.InstanceName, clicd.ReinstallSpec{TemplateID: input.TemplateID, SSHAuthMode: "password", SSHPassword: input.Password})
+	taskID, err := reinstaller.Reinstall(r.Context(), access.InstanceName, provider.ReinstallSpec{TemplateID: input.TemplateID, Password: input.Password})
 	if err != nil {
 		p.writeServiceError(w, err)
 		return
@@ -292,9 +300,14 @@ func (p *customerPortal) deletePortMapping(w http.ResponseWriter, r *http.Reques
 }
 
 func (p *customerPortal) mutatePortMapping(w http.ResponseWriter, r *http.Request, action string) {
-	access, client, err := p.serviceClient(r)
+	access, driver, err := p.serviceDriver(r)
 	if err != nil {
 		p.writeServiceError(w, err)
+		return
+	}
+	mapper, ok := driver.(provider.PortMapper)
+	if !ok {
+		p.writeServiceError(w, provider.ErrUnsupported)
 		return
 	}
 	index := -1
@@ -305,14 +318,14 @@ func (p *customerPortal) mutatePortMapping(w http.ResponseWriter, r *http.Reques
 			return
 		}
 	}
-	var mappings []clicd.PortMapping
+	var mappings []provider.PortMapping
 	if action == "delete" {
-		container, callErr := client.GetContainer(r.Context(), access.InstanceName)
-		if callErr != nil || index >= len(container.PortMappings) || strings.EqualFold(container.PortMappings[index].Description, "SSH") {
+		instance, callErr := driver.GetInstance(r.Context(), access.InstanceName)
+		if callErr != nil || index >= len(instance.PortMappings) || strings.EqualFold(instance.PortMappings[index].Description, "SSH") {
 			writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "mapping_protected", "message": "SSH 管理端口不能删除"})
 			return
 		}
-		mappings, err = client.DeletePortMapping(r.Context(), access.InstanceName, index)
+		mappings, err = mapper.DeletePortMapping(r.Context(), access.InstanceName, index)
 	} else {
 		var input struct {
 			ContainerPort int    `json:"container_port"`
@@ -328,27 +341,27 @@ func (p *customerPortal) mutatePortMapping(w http.ResponseWriter, r *http.Reques
 			writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "invalid_mapping", "message": "端口需为 1-65535，协议仅支持 TCP/UDP，备注最多 80 字符"})
 			return
 		}
-		mapping := clicd.PortMapping{ContainerPort: input.ContainerPort, Protocol: input.Protocol, Description: input.Description}
+		mapping := provider.PortMapping{ContainerPort: input.ContainerPort, Protocol: input.Protocol, Description: input.Description}
 		if action == "add" {
-			mapping.HostPort, err = client.RandomPort(r.Context(), access.InstanceName)
+			mapping.HostPort, err = mapper.FreePort(r.Context(), access.InstanceName)
 			if err == nil && mapping.HostPort == 0 {
 				err = errors.New("节点没有可用的 NAT 端口")
 			}
 			if err == nil {
-				mappings, err = client.AddPortMapping(r.Context(), access.InstanceName, mapping)
+				mappings, err = mapper.AddPortMapping(r.Context(), access.InstanceName, mapping)
 			}
 		} else {
-			container, callErr := client.GetContainer(r.Context(), access.InstanceName)
-			if callErr != nil || index >= len(container.PortMappings) {
+			instance, callErr := driver.GetInstance(r.Context(), access.InstanceName)
+			if callErr != nil || index >= len(instance.PortMappings) {
 				writeJSON(w, http.StatusNotFound, map[string]any{"error": "mapping_not_found"})
 				return
 			}
-			existing := container.PortMappings[index]
+			existing := instance.PortMappings[index]
 			mapping.HostPort, mapping.HostIP = existing.HostPort, existing.HostIP
 			if strings.EqualFold(existing.Description, "SSH") {
 				mapping.Protocol, mapping.Description = existing.Protocol, "SSH"
 			}
-			mappings, err = client.UpdatePortMapping(r.Context(), access.InstanceName, index, mapping)
+			mappings, err = mapper.UpdatePortMapping(r.Context(), access.InstanceName, index, mapping)
 		}
 	}
 	if err != nil {
@@ -361,17 +374,22 @@ func (p *customerPortal) mutatePortMapping(w http.ResponseWriter, r *http.Reques
 }
 
 func (p *customerPortal) consoleTicket(w http.ResponseWriter, r *http.Request) {
-	access, client, err := p.serviceClient(r)
+	access, driver, err := p.serviceDriver(r)
 	if err != nil {
 		p.writeServiceError(w, err)
 		return
 	}
 	kind := r.PathValue("kind")
+	console, ok := driver.(provider.Console)
+	if !ok || !containsString(console.ConsoleKinds(), kind) {
+		p.writeServiceError(w, provider.ErrUnsupported)
+		return
+	}
 	if kind == "vnc" && access.Virtualization != "kvm" {
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "console_unavailable", "message": "VNC 控制台仅适用于 KVM 实例"})
 		return
 	}
-	ticket, err := client.ConsoleTicket(r.Context(), access.InstanceName, kind, r.UserAgent())
+	ticket, err := console.ConsoleTicket(r.Context(), access.InstanceName, kind, r.UserAgent())
 	if err != nil {
 		p.writeServiceError(w, err)
 		return
@@ -380,12 +398,17 @@ func (p *customerPortal) consoleTicket(w http.ResponseWriter, r *http.Request) {
 }
 
 func (p *customerPortal) consoleProxy(w http.ResponseWriter, r *http.Request) {
-	access, client, err := p.serviceClient(r)
+	access, driver, err := p.serviceDriver(r)
 	if err != nil {
 		p.writeServiceError(w, err)
 		return
 	}
-	target, err := client.ConsoleTarget(access.InstanceName, r.PathValue("kind"))
+	console, ok := driver.(provider.Console)
+	if !ok {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "console_unavailable"})
+		return
+	}
+	target, err := console.ConsoleTarget(access.InstanceName, r.PathValue("kind"))
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "console_unavailable"})
 		return
@@ -415,8 +438,10 @@ func (p *customerPortal) writeServiceError(w http.ResponseWriter, err error) {
 		writeJSON(w, http.StatusNotFound, map[string]any{"error": "service_not_found"})
 	case errors.Is(err, postgres.ErrServiceActionUnavailable):
 		writeJSON(w, http.StatusConflict, map[string]any{"error": "action_unavailable", "message": "当前服务状态不允许此操作"})
+	case errors.Is(err, provider.ErrUnsupported):
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "feature_unsupported", "message": "该实例所在节点不支持此功能"})
 	default:
-		var apiErr *clicd.APIError
+		var apiErr *provider.Error
 		if errors.As(err, &apiErr) {
 			writeJSON(w, http.StatusBadGateway, map[string]any{"error": "node_request_failed", "message": apiErr.Message})
 			return

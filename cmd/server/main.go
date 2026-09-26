@@ -11,14 +11,15 @@ import (
 	"syscall"
 	"time"
 
-	"clicd-billing/internal/app"
-	"clicd-billing/internal/automation"
-	"clicd-billing/internal/billing"
-	"clicd-billing/internal/config"
-	"clicd-billing/internal/notifications"
-	"clicd-billing/internal/security"
-	"clicd-billing/internal/settings"
-	"clicd-billing/internal/store/postgres"
+	"vpsbill/internal/app"
+	"vpsbill/internal/automation"
+	"vpsbill/internal/billing"
+	"vpsbill/internal/config"
+	"vpsbill/internal/notifications"
+	_ "vpsbill/internal/provider/clicd" // registers the CLICD node driver
+	"vpsbill/internal/security"
+	"vpsbill/internal/settings"
+	"vpsbill/internal/store/postgres"
 )
 
 func main() {

@@ -8,10 +8,10 @@ import (
 	"net/http"
 	"time"
 
-	"clicd-billing/internal/config"
-	"clicd-billing/internal/security"
-	"clicd-billing/internal/settings"
-	"clicd-billing/internal/store/postgres"
+	"vpsbill/internal/config"
+	"vpsbill/internal/security"
+	"vpsbill/internal/settings"
+	"vpsbill/internal/store/postgres"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -110,6 +110,7 @@ func NewHandler(deps Dependencies) (http.Handler, error) {
 	mux.Handle("GET /api/v1/customer/tickets/{id}", auth.requireCustomer(http.HandlerFunc(operations.customerTicketDetail)))
 	mux.Handle("POST /api/v1/customer/tickets/{id}/messages", auth.requireCustomer(http.HandlerFunc(operations.customerReplyTicket)))
 	mux.Handle("GET /api/v1/admin/nodes", auth.require("nodes:read", http.HandlerFunc(admin.listNodes)))
+	mux.Handle("GET /api/v1/admin/provider-types", auth.require("nodes:read", http.HandlerFunc(admin.listProviderTypes)))
 	mux.Handle("GET /api/v1/admin/hosts", auth.require("nodes:read", http.HandlerFunc(metrics.hosts)))
 	mux.Handle("GET /api/v1/admin/hosts/{id}/probe", auth.require("nodes:read", http.HandlerFunc(admin.hostProbe)))
 	mux.Handle("GET /api/v1/admin/overview", auth.require("customers:read", http.HandlerFunc(metrics.overview)))

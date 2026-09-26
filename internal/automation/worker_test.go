@@ -1,8 +1,8 @@
 package automation
 
 import (
-	"clicd-billing/internal/store/postgres"
 	"testing"
+	"vpsbill/internal/store/postgres"
 )
 
 func TestBuildCreateSpec(t *testing.T) {
@@ -12,12 +12,6 @@ func TestBuildCreateSpec(t *testing.T) {
 	}
 	if spec.SSHAuthMode != "auto_password" {
 		t.Fatalf("expected auto-generated SSH password, got %q", spec.SSHAuthMode)
-	}
-}
-
-func TestNormalizeRuntimeStatus(t *testing.T) {
-	if normalizeRuntimeStatus("started") != "running" || normalizeRuntimeStatus("surprise") != "unknown" {
-		t.Fatal("runtime status normalization failed")
 	}
 }
 

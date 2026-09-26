@@ -8,9 +8,9 @@ import (
 	"sync"
 	"time"
 
-	"clicd-billing/internal/clicd"
-	"clicd-billing/internal/security"
-	"clicd-billing/internal/store/postgres"
+	"vpsbill/internal/provider"
+	"vpsbill/internal/security"
+	"vpsbill/internal/store/postgres"
 )
 
 type adminCatalog struct {
@@ -48,36 +48,38 @@ func (a *adminCatalog) createNode(w http.ResponseWriter, r *http.Request) {
 	if input.ProviderType == "" {
 		input.ProviderType = "clicd"
 	}
-	if input.ProviderType != "clicd" {
-		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "provider_unsupported", "message": "当前版本仅支持 CLICD 对接方式"})
+	descriptor, ok := provider.Lookup(input.ProviderType)
+	if !ok {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "provider_unsupported", "message": "不支持的对接方式"})
 		return
 	}
 	if strings.TrimSpace(input.RegionCode) == "" || strings.TrimSpace(input.RegionName) == "" || strings.TrimSpace(input.Name) == "" || strings.TrimSpace(input.APIKey) == "" || len(input.VirtualizationTypes) == 0 {
-		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "validation_error", "message": "节点名称、地区、API 地址、API Key 和虚拟化类型不能为空"})
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "validation_error", "message": "节点名称、地区、API 地址、" + descriptor.CredentialLabel + " 和虚拟化类型不能为空"})
 		return
 	}
 	for _, virtualization := range input.VirtualizationTypes {
-		if virtualization != "lxc" && virtualization != "kvm" {
-			writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "validation_error", "message": "虚拟化类型只能为 lxc 或 kvm"})
+		if !containsString(descriptor.VirtualizationTypes, virtualization) {
+			writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "validation_error", "message": descriptor.Name + " 支持的虚拟化类型为 " + strings.Join(descriptor.VirtualizationTypes, " / ")})
 			return
 		}
 	}
-	client, err := clicd.NewClient(input.BaseURL, input.APIKey, 12*time.Second)
+	driver, err := provider.Open(input.ProviderType, provider.Config{BaseURL: input.BaseURL, Credential: input.APIKey, Timeout: 12 * time.Second})
 	if err != nil {
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "validation_error", "message": err.Error()})
 		return
 	}
-	hostInfo, err := client.HostInfo(r.Context())
+	info, err := driver.HostInfo(r.Context())
 	if err != nil {
-		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "node_unreachable", "message": "无法验证 CLICD 节点连接"})
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "node_unreachable", "message": "无法验证 " + descriptor.Name + " 节点连接"})
 		return
 	}
+	hostInfo := info.Raw
 	ciphertext, err := a.box.Seal(input.APIKey)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "internal_error"})
 		return
 	}
-	totals := clicd.CapacityFromHostInfo(hostInfo)
+	totals := info.Capacity
 	node, err := a.store.CreateNode(r.Context(), postgres.CreateNode{
 		ProviderType:        input.ProviderType,
 		RegionCode:          input.RegionCode,
@@ -105,32 +107,41 @@ func (a *adminCatalog) testNode(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]any{"error": "node_not_found"})
 		return
 	}
-	if node.ProviderType != "clicd" {
-		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "provider_unsupported", "message": "此对接方式暂不支持连接测试"})
+	driver, ok := a.openNode(w, node)
+	if !ok {
 		return
 	}
-	apiKey, err := a.box.Open(node.APIKeyCiphertext)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "secret_unavailable"})
-		return
-	}
-	client, err := clicd.NewClient(node.BaseURL, apiKey, 12*time.Second)
-	if err != nil {
-		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "invalid_node"})
-		return
-	}
-	hostInfo, err := client.HostInfo(r.Context())
+	info, err := driver.HostInfo(r.Context())
 	if err != nil {
 		_ = a.store.UpdateNodeHealth(r.Context(), id, "offline", map[string]any{})
-		writeJSON(w, http.StatusBadGateway, map[string]any{"error": "node_unreachable", "message": "CLICD 节点无响应"})
+		writeJSON(w, http.StatusBadGateway, map[string]any{"error": "node_unreachable", "message": "节点无响应"})
 		return
 	}
-	totals := clicd.CapacityFromHostInfo(hostInfo)
-	if err := a.store.UpdateNodeHealth(r.Context(), id, "online", hostInfo, int64(totals.VCPU), totals.RAMMB, totals.DiskGB); err != nil {
+	totals := info.Capacity
+	if err := a.store.UpdateNodeHealth(r.Context(), id, "online", info.Raw, int64(totals.VCPU), totals.RAMMB, totals.DiskGB); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "internal_error"})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": hostInfo})
+	writeJSON(w, http.StatusOK, map[string]any{"data": info.Raw})
+}
+
+// openNode decrypts the node credential and opens its driver, writing the
+// error response itself when that is not possible.
+func (a *adminCatalog) openNode(w http.ResponseWriter, node postgres.Node) (provider.Driver, bool) {
+	if _, registered := provider.Lookup(node.ProviderType); !registered {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "provider_unsupported", "message": "此对接方式在当前版本中不可用"})
+		return nil, false
+	}
+	driver, err := provider.OpenSealed(a.box, node.ProviderType, node.BaseURL, node.APIKeyCiphertext, 15*time.Second)
+	if err != nil {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "invalid_node"})
+		return nil, false
+	}
+	return driver, true
+}
+
+func (a *adminCatalog) listProviderTypes(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"data": provider.Types()})
 }
 
 func (a *adminCatalog) hostProbe(w http.ResponseWriter, r *http.Request) {
@@ -139,18 +150,13 @@ func (a *adminCatalog) hostProbe(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]any{"error": "node_not_found"})
 		return
 	}
-	if node.ProviderType != "clicd" {
-		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "provider_unsupported", "message": "该节点对接方式没有 CLICD 探针详情"})
+	driver, ok := a.openNode(w, node)
+	if !ok {
 		return
 	}
-	apiKey, err := a.box.Open(node.APIKeyCiphertext)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "secret_unavailable"})
-		return
-	}
-	client, err := clicd.NewClient(node.BaseURL, apiKey, 15*time.Second)
-	if err != nil {
-		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "invalid_node"})
+	probe, ok := driver.(provider.HostProbe)
+	if !ok {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "provider_unsupported", "message": "该节点对接方式没有探针详情"})
 		return
 	}
 	type sourceResult struct {
@@ -158,25 +164,14 @@ func (a *adminCatalog) hostProbe(w http.ResponseWriter, r *http.Request) {
 		value any
 		err   error
 	}
-	requests := []struct {
-		name string
-		load func(context.Context) (any, error)
-	}{
-		{name: "dashboard", load: client.Dashboard},
-		{name: "host_info", load: func(ctx context.Context) (any, error) { return client.HostInfo(ctx) }},
-		{name: "host_history", load: client.HostHistory},
-		{name: "host_report", load: client.HostReport},
-	}
+	requests := probe.ProbeSections()
 	results := make(chan sourceResult, len(requests))
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
 	for _, request := range requests {
-		go func(request struct {
-			name string
-			load func(context.Context) (any, error)
-		}) {
-			value, loadErr := request.load(ctx)
-			results <- sourceResult{name: request.name, value: value, err: loadErr}
+		go func(request provider.ProbeSection) {
+			value, loadErr := request.Load(ctx)
+			results <- sourceResult{name: request.Name, value: value, err: loadErr}
 		}(request)
 	}
 	sources := make(map[string]any, len(requests))
@@ -223,31 +218,26 @@ func (a *adminCatalog) listTemplates(w http.ResponseWriter, r *http.Request) {
 	}
 	type result struct {
 		node   postgres.Node
-		images []clicd.Image
+		images []provider.Image
 		err    error
 	}
 	results := make(chan result, len(nodes))
 	var wait sync.WaitGroup
 	for _, node := range nodes {
-		if node.ProviderType != "clicd" || node.Status != "online" {
+		if _, registered := provider.Lookup(node.ProviderType); !registered || node.Status != "online" {
 			continue
 		}
 		wait.Add(1)
 		go func(node postgres.Node) {
 			defer wait.Done()
-			apiKey, openErr := a.box.Open(node.APIKeyCiphertext)
+			driver, openErr := provider.OpenSealed(a.box, node.ProviderType, node.BaseURL, node.APIKeyCiphertext, 12*time.Second)
 			if openErr != nil {
 				results <- result{node: node, err: openErr}
 				return
 			}
-			client, clientErr := clicd.NewClient(node.BaseURL, apiKey, 12*time.Second)
-			if clientErr != nil {
-				results <- result{node: node, err: clientErr}
-				return
-			}
 			ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 			defer cancel()
-			images, imageErr := client.Images(ctx)
+			images, imageErr := driver.Images(ctx)
 			results <- result{node: node, images: images, err: imageErr}
 		}(node)
 	}
@@ -260,13 +250,13 @@ func (a *adminCatalog) listTemplates(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		for _, image := range response.images {
-			if !image.Enabled || !image.Downloaded || (image.Type != "lxc" && image.Type != "kvm") {
+			if !image.Enabled || !image.Downloaded || (image.Virtualization != "lxc" && image.Virtualization != "kvm") {
 				continue
 			}
-			key := image.Type + "\x00" + image.ID
+			key := image.Virtualization + "\x00" + image.ID
 			item := byKey[key]
 			if item == nil {
-				item = &availableTemplate{ID: image.ID, Name: image.Name, Virtualization: image.Type, Distro: image.Distro, Release: image.Release, Arch: image.Arch, Description: image.Description}
+				item = &availableTemplate{ID: image.ID, Name: image.Name, Virtualization: image.Virtualization, Distro: image.Distro, Release: image.Release, Arch: image.Arch, Description: image.Description}
 				byKey[key] = item
 			}
 			item.NodeIDs = append(item.NodeIDs, response.node.ID)
@@ -278,7 +268,7 @@ func (a *adminCatalog) listTemplates(w http.ResponseWriter, r *http.Request) {
 		templates = append(templates, *item)
 	}
 	if len(templates) == 0 && len(warnings) > 0 {
-		writeJSON(w, http.StatusBadGateway, map[string]any{"error": "template_catalog_unavailable", "message": "无法从在线 CLICD 节点读取模板：" + strings.Join(warnings, "；")})
+		writeJSON(w, http.StatusBadGateway, map[string]any{"error": "template_catalog_unavailable", "message": "无法从在线节点读取模板：" + strings.Join(warnings, "；")})
 		return
 	}
 	sort.Slice(templates, func(i, j int) bool {

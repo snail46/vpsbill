@@ -4,13 +4,12 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"strconv"
 	"strings"
 	"time"
 
-	"clicd-billing/internal/clicd"
-	"clicd-billing/internal/security"
-	"clicd-billing/internal/store/postgres"
+	"vpsbill/internal/provider"
+	"vpsbill/internal/security"
+	"vpsbill/internal/store/postgres"
 )
 
 const maxProvisionAttempts = 8
@@ -92,17 +91,13 @@ func (w *Worker) executeTerminate(parent context.Context, job postgres.Provision
 	if err != nil {
 		return fmt.Errorf("load termination context: %w", err)
 	}
-	apiKey, err := w.box.Open(action.APIKeyCiphertext)
-	if err != nil {
-		return fmt.Errorf("decrypt node API key: %w", err)
-	}
-	client, err := clicd.NewClient(action.BaseURL, apiKey, 45*time.Second)
+	driver, err := provider.OpenSealed(w.box, action.ProviderType, action.BaseURL, action.APIKeyCiphertext, 45*time.Second)
 	if err != nil {
 		return err
 	}
 	requestCtx, cancel := context.WithTimeout(parent, 90*time.Second)
 	defer cancel()
-	if err = client.DeleteContainer(requestCtx, action.InstanceName); err != nil {
+	if err = driver.DeleteInstance(requestCtx, action.InstanceName); err != nil {
 		return err
 	}
 	return w.store.CompleteTermination(parent, job.ID, w.workerID)
@@ -116,30 +111,26 @@ func (w *Worker) executeProvision(parent context.Context, job postgres.Provision
 	if err != nil {
 		return fmt.Errorf("load provision context: %w", err)
 	}
-	apiKey, err := w.box.Open(provision.APIKeyCiphertext)
-	if err != nil {
-		return fmt.Errorf("decrypt node API key: %w", err)
-	}
-	client, err := clicd.NewClient(provision.BaseURL, apiKey, 90*time.Second)
+	driver, err := provider.OpenSealed(w.box, provision.ProviderType, provision.BaseURL, provision.APIKeyCiphertext, 90*time.Second)
 	if err != nil {
 		return err
 	}
 	requestCtx, cancel := context.WithTimeout(parent, 2*time.Minute)
 	defer cancel()
-	result, err := client.EnsureContainer(requestCtx, buildCreateSpec(provision))
+	result, err := driver.EnsureInstance(requestCtx, buildCreateSpec(provision))
 	if err != nil {
 		return err
 	}
-	runtimeStatus := normalizeRuntimeStatus(result.Container.Status)
+	instance := result.Instance
 	var rootPasswordCiphertext []byte
-	if result.Container.SSHPassword != "" {
-		rootPasswordCiphertext, err = w.box.Seal(result.Container.SSHPassword)
+	if instance.InitialPassword != "" {
+		rootPasswordCiphertext, err = w.box.Seal(instance.InitialPassword)
 		if err != nil {
 			return fmt.Errorf("encrypt initial root password: %w", err)
 		}
 	}
-	return w.store.CompleteProvision(parent, job.ID, w.workerID, strconv.Itoa(result.Container.ID), result.Container.UUID,
-		result.Container.IP, result.Container.IPv6, runtimeStatus, rootPasswordCiphertext)
+	return w.store.CompleteProvision(parent, job.ID, w.workerID, instance.ExternalID, instance.UUID,
+		instance.IP, instance.IPv6, provider.NormalizeStatus(instance.Status), rootPasswordCiphertext)
 }
 
 func (w *Worker) executePowerAction(parent context.Context, job postgres.ProvisioningJob) error {
@@ -147,59 +138,36 @@ func (w *Worker) executePowerAction(parent context.Context, job postgres.Provisi
 	if err != nil {
 		return fmt.Errorf("load action context: %w", err)
 	}
-	apiKey, err := w.box.Open(action.APIKeyCiphertext)
-	if err != nil {
-		return fmt.Errorf("decrypt node API key: %w", err)
-	}
-	client, err := clicd.NewClient(action.BaseURL, apiKey, 30*time.Second)
+	driver, err := provider.OpenSealed(w.box, action.ProviderType, action.BaseURL, action.APIKeyCiphertext, 30*time.Second)
 	if err != nil {
 		return err
 	}
 	requestCtx, cancel := context.WithTimeout(parent, 45*time.Second)
 	defer cancel()
-	taskID, err := client.PowerAction(requestCtx, action.InstanceName, job.Action)
+	taskID, err := driver.PowerAction(requestCtx, action.InstanceName, job.Action)
 	if err != nil {
 		return err
 	}
 	return w.store.CompleteAction(parent, job.ID, w.workerID, taskID)
 }
 
-func buildCreateSpec(value postgres.ProvisionContext) clicd.CreateSpec {
-	expiresAt := ""
-	if value.ExpiresAt != nil {
-		expiresAt = value.ExpiresAt.UTC().Format(time.RFC3339)
-	}
+func buildCreateSpec(value postgres.ProvisionContext) provider.CreateSpec {
 	assignNAT := boolValue(value.Configuration, "assign_nat", true)
 	sshMode := stringValueDefault(value.Configuration, "ssh_auth_mode", "auto_password")
 	sshPassword := stringValue(value.Configuration, "ssh_password")
 	if sshMode == "password" && sshPassword == "" {
 		sshMode = "auto_password"
 	}
-	return clicd.CreateSpec{
+	return provider.CreateSpec{
 		Name: value.InstanceName, Virtualization: value.Virtualization, TemplateID: stringValue(value.Configuration, "template_id"),
 		VCPU: value.VCPU, RAMMB: value.RAMMB, DiskGB: value.DiskGB, AssignNAT: assignNAT,
 		PortMappingCount: intValue(value.Configuration, "port_mapping_count"), AssignIPv4: boolValue(value.Configuration, "assign_ipv4", !assignNAT),
 		IPv4Count: intValueDefault(value.Configuration, "ipv4_count", 1), AssignIPv6: boolValue(value.Configuration, "assign_ipv6", false),
 		IPv6Count: intValueDefault(value.Configuration, "ipv6_count", 1), SSHAuthMode: sshMode,
 		SSHPassword:  sshPassword,
-		SSHPublicKey: stringValue(value.Configuration, "ssh_public_key"), ExpiresAt: expiresAt,
+		SSHPublicKey: stringValue(value.Configuration, "ssh_public_key"), ExpiresAt: value.ExpiresAt,
 		NetworkDownMbps: value.NetworkDownMbps, NetworkUpMbps: value.NetworkUpMbps,
 		MonthlyTrafficGB: value.TrafficGB, SnapshotLimit: value.SnapshotLimit,
-	}
-}
-
-func normalizeRuntimeStatus(status string) string {
-	switch strings.ToLower(status) {
-	case "running", "started":
-		return "running"
-	case "stopped", "stopping":
-		return "stopped"
-	case "suspended", "paused":
-		return "suspended"
-	case "creating", "pending":
-		return "creating"
-	default:
-		return "unknown"
 	}
 }
 

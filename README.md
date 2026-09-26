@@ -1,6 +1,6 @@
-# CLICD Billing
+# VPSBill
 
-面向 CLICD LXC/KVM 节点的 VPS 商家财务、客户服务与自动化控制系统。
+面向 VPS 商家的财务计费、客户服务与自动化控制系统，通过统一的母鸡对接层（Provider）接入 CLICD 等 LXC/KVM 节点后端。
 
 ## 当前状态
 
@@ -34,8 +34,8 @@ chmod +x deploy.sh
 `main` 分支每次通过完整 CI 后，GitHub Actions 会构建并推送以下多架构镜像（`linux/amd64`、`linux/arm64`）：
 
 ```text
-ghcr.io/snail468/clicd-nat-api:latest
-ghcr.io/snail468/clicd-nat-web:latest
+ghcr.io/snail468/vpsbill-api:latest
+ghcr.io/snail468/vpsbill-web:latest
 ```
 
 同时发布不可变的提交标签 `sha-<完整提交哈希>`。生产环境建议在 `.env` 中固定该标签，需要升级时再明确修改：
@@ -73,8 +73,8 @@ unset CR_PAT
 IMAGE_TAG=latest
 APP_PORT=127.0.0.1:8080
 DOMAIN=billing.example.com
-POSTGRES_DB=clicd_billing
-POSTGRES_USER=clicd
+POSTGRES_DB=vpsbill
+POSTGRES_USER=vpsbill
 POSTGRES_PASSWORD=随机长密码
 SESSION_SECRET=64位十六进制随机值
 ENCRYPTION_KEY=64位十六进制随机值
@@ -88,8 +88,8 @@ cat >.env <<EOF
 IMAGE_TAG=latest
 APP_PORT=127.0.0.1:8080
 DOMAIN=billing.example.com
-POSTGRES_DB=clicd_billing
-POSTGRES_USER=clicd
+POSTGRES_DB=vpsbill
+POSTGRES_USER=vpsbill
 POSTGRES_PASSWORD=$(openssl rand -hex 24)
 SESSION_SECRET=$(openssl rand -hex 32)
 ENCRYPTION_KEY=$(openssl rand -hex 32)
@@ -118,7 +118,7 @@ curl --fail https://billing.example.com/health/ready
 API 需要 PostgreSQL：
 
 ```sh
-export DATABASE_URL='postgres://clicd:password@localhost:5432/clicd_billing?sslmode=disable'
+export DATABASE_URL='postgres://vpsbill:password@localhost:5432/vpsbill?sslmode=disable'
 export SESSION_SECRET='development-only-secret'
 go run ./cmd/server
 ```
@@ -168,7 +168,7 @@ chmod +x verify.sh integration-test.sh
 
 收银台跳转和签名约定见 [在线收银台对接协议](docs/PAYMENT-CHECKOUT.md)。
 
-节点权限和接口约定见 [CLICD 集成说明](docs/CLICD-INTEGRATION.md)。
+母鸡对接层契约与各后端接入计划见 [母鸡对接层](docs/PROVIDERS.md)；CLICD 节点权限和接口约定见 [CLICD 集成说明](docs/CLICD-INTEGRATION.md)。
 
 邮件、短信或即时通讯适配器可接入 [通知事件 Webhook](docs/NOTIFICATION-WEBHOOK.md)。
 
