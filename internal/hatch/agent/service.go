@@ -32,6 +32,8 @@ type Service struct {
 	// passwordRetry is the wait between root password attempts while a new
 	// instance boots.
 	passwordRetry time.Duration
+	// run executes host commands (ip -6 neigh); replaced in tests.
+	run CommandRunner
 
 	locksMu sync.Mutex
 	locks   map[string]*sync.Mutex
@@ -53,13 +55,40 @@ func NewService(config Config, version string, store *Store, runtimes []Runtime,
 	}
 	return &Service{
 		config: config, version: version, store: store, runtimes: byKind, nat: nat, logger: logger,
-		now: time.Now, passwordRetry: 3 * time.Second, locks: map[string]*sync.Mutex{}, samples: map[string]sample{},
+		now: time.Now, passwordRetry: 3 * time.Second, run: runCommand, locks: map[string]*sync.Mutex{}, samples: map[string]sample{},
 	}
 }
 
-// Init restores NAT rules after an agent or host restart.
+// Init restores NAT rules and IPv6 neighbour proxies after an agent or
+// host restart.
 func (s *Service) Init(ctx context.Context) error {
+	if iface := s.config.IPv6NDPInterface; iface != "" {
+		if err := os.WriteFile("/proc/sys/net/ipv6/conf/"+iface+"/proxy_ndp", []byte("1"), 0o644); err != nil {
+			return fmt.Errorf("enable proxy_ndp on %s: %w", iface, err)
+		}
+		for _, record := range s.store.List() {
+			if err := s.proxyNDP(ctx, record.IPv6, true); err != nil {
+				return err
+			}
+		}
+	}
 	return s.applyNAT(ctx)
+}
+
+// proxyNDP publishes (or withdraws) an instance IPv6 address on the uplink.
+func (s *Service) proxyNDP(ctx context.Context, address string, publish bool) error {
+	iface := s.config.IPv6NDPInterface
+	if iface == "" || address == "" {
+		return nil
+	}
+	if !publish {
+		_, _ = s.run(ctx, "ip", "-6", "neigh", "del", "proxy", address, "dev", iface)
+		return nil
+	}
+	if _, err := s.run(ctx, "ip", "-6", "neigh", "replace", "proxy", address, "dev", iface); err != nil {
+		return fmt.Errorf("publish IPv6 %s: %w", address, err)
+	}
+	return nil
 }
 
 func errorf(code, format string, args ...any) *protocol.Error {
@@ -169,8 +198,11 @@ func (s *Service) hostInfo(ctx context.Context) (protocol.HostInfo, error) {
 	}
 	details := map[string]any{"instances": len(s.store.List()), "port_range": []int{s.config.PortRangeStart, s.config.PortRangeEnd}}
 	for kind, runtime := range s.runtimes {
-		if prefix, _, err := runtime.Network(ctx); err == nil {
-			details[kind+"_network"] = prefix.String()
+		if network, err := runtime.Network(ctx); err == nil {
+			details[kind+"_network"] = network.IPv4.String()
+			if network.IPv6.IsValid() {
+				details[kind+"_network_ipv6"] = network.IPv6.String()
+			}
 		} else {
 			details[kind+"_error"] = err.Error()
 		}
@@ -249,6 +281,11 @@ func (s *Service) ensure(ctx context.Context, spec protocol.CreateSpec) (protoco
 		}
 		created = true
 	}
+	if current, _ := s.store.Get(spec.Name); current.IPv6 != "" {
+		if err := s.proxyNDP(ctx, current.IPv6, true); err != nil {
+			return protocol.EnsureResult{}, err
+		}
+	}
 	if spec.AssignNAT {
 		if err := s.ensureSSHMapping(ctx, spec.Name); err != nil {
 			return protocol.EnsureResult{}, err
@@ -263,9 +300,24 @@ func (s *Service) ensure(ctx context.Context, spec protocol.CreateSpec) (protoco
 }
 
 func (s *Service) newRecord(ctx context.Context, runtime Runtime, spec protocol.CreateSpec) (InstanceRecord, error) {
-	address, err := s.allocateAddress(ctx, runtime)
+	network, err := runtime.Network(ctx)
+	if err != nil {
+		return InstanceRecord{}, fmt.Errorf("read %s network: %w", runtime.Virtualization(), err)
+	}
+	address, err := s.allocateAddress(network)
 	if err != nil {
 		return InstanceRecord{}, err
+	}
+	var ipv6 string
+	if spec.AssignIPv6 {
+		if !network.IPv6.IsValid() {
+			return InstanceRecord{}, errorf(protocol.CodeInvalid, "%s network has no IPv6 subnet", runtime.Virtualization())
+		}
+		allocated, err := s.allocateIPv6(network)
+		if err != nil {
+			return InstanceRecord{}, err
+		}
+		ipv6 = allocated.String()
 	}
 	limit := 0
 	if spec.AssignNAT {
@@ -274,7 +326,7 @@ func (s *Service) newRecord(ctx context.Context, runtime Runtime, spec protocol.
 	record := InstanceRecord{
 		Name: spec.Name, Virtualization: spec.Virtualization, Template: spec.TemplateID, VCPU: spec.VCPU, RAMMB: spec.RAMMB,
 		DiskGB: spec.DiskGB, NetworkDownMbps: spec.NetworkDownMbps, NetworkUpMbps: spec.NetworkUpMbps,
-		MonthlyTrafficGB: spec.MonthlyTrafficGB, PortMappingLimit: limit, PrivateIPv4: address.String(),
+		MonthlyTrafficGB: spec.MonthlyTrafficGB, PortMappingLimit: limit, PrivateIPv4: address.String(), IPv6: ipv6,
 		Mappings: []protocol.PortMapping{}, CreatedAt: s.now().UTC(),
 	}
 	err = s.store.Update(spec.Name, func(*InstanceRecord) (*InstanceRecord, error) { return &record, nil })
@@ -283,12 +335,9 @@ func (s *Service) newRecord(ctx context.Context, runtime Runtime, spec protocol.
 
 // allocateAddress picks the highest free address in the runtime's bridge
 // subnet, leaving the low range to the bridge's own DHCP pool.
-func (s *Service) allocateAddress(ctx context.Context, runtime Runtime) (netip.Addr, error) {
-	prefix, gateway, err := runtime.Network(ctx)
-	if err != nil {
-		return netip.Addr{}, fmt.Errorf("read %s network: %w", runtime.Virtualization(), err)
-	}
-	used := map[netip.Addr]bool{gateway: true}
+func (s *Service) allocateAddress(network NetworkInfo) (netip.Addr, error) {
+	prefix := network.IPv4
+	used := map[netip.Addr]bool{network.IPv4Gateway: true}
 	for _, record := range s.store.List() {
 		if address, err := netip.ParseAddr(record.PrivateIPv4); err == nil {
 			used[address] = true
@@ -306,6 +355,40 @@ func (s *Service) allocateAddress(ctx context.Context, runtime Runtime) (netip.A
 	return netip.Addr{}, errorf(protocol.CodeConflict, "no free address in %s", prefix)
 }
 
+// allocateIPv6 picks a random unused address in the IPv6 subnet, so
+// neighbouring customers cannot be found by counting up.
+func (s *Service) allocateIPv6(network NetworkInfo) (netip.Addr, error) {
+	used := map[netip.Addr]bool{network.IPv6Gateway: true}
+	for _, record := range s.store.List() {
+		if address, err := netip.ParseAddr(record.IPv6); err == nil {
+			used[address] = true
+		}
+	}
+	hostBits := min(128-network.IPv6.Bits(), 64)
+	if hostBits < 8 {
+		return netip.Addr{}, errorf(protocol.CodeConflict, "IPv6 subnet %s is too small", network.IPv6)
+	}
+	base := network.IPv6.Masked().Addr().As16()
+	for range 64 {
+		suffix, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), uint(hostBits)))
+		if err != nil {
+			return netip.Addr{}, err
+		}
+		value := suffix.Uint64()
+		if value < 2 {
+			continue
+		}
+		bytes := base
+		for i := range 8 {
+			bytes[15-i] |= byte(value >> (8 * i))
+		}
+		if candidate := netip.AddrFrom16(bytes); !used[candidate] {
+			return candidate, nil
+		}
+	}
+	return netip.Addr{}, errorf(protocol.CodeConflict, "no free address in %s", network.IPv6)
+}
+
 // lastAddress returns the broadcast address of an IPv4 prefix.
 func lastAddress(prefix netip.Prefix) netip.Addr {
 	bytes := prefix.Masked().Addr().As4()
@@ -317,9 +400,10 @@ func lastAddress(prefix netip.Prefix) netip.Addr {
 
 func runtimeSpec(record InstanceRecord) RuntimeSpec {
 	address, _ := netip.ParseAddr(record.PrivateIPv4)
+	ipv6, _ := netip.ParseAddr(record.IPv6)
 	return RuntimeSpec{
 		Name: record.Name, Image: record.Template, VCPU: record.VCPU, RAMMB: record.RAMMB, DiskGB: record.DiskGB,
-		IPv4: address, NetworkDownMbps: record.NetworkDownMbps, NetworkUpMbps: record.NetworkUpMbps,
+		IPv4: address, IPv6: ipv6, NetworkDownMbps: record.NetworkDownMbps, NetworkUpMbps: record.NetworkUpMbps,
 	}
 }
 
@@ -371,7 +455,7 @@ func (s *Service) get(ctx context.Context, name string) (protocol.Instance, erro
 	s.recordSample(name, state)
 	instance := protocol.Instance{
 		Name: name, Virtualization: record.Virtualization, Status: state.Status, Template: record.Template,
-		PrivateIPv4: record.PrivateIPv4, PublicIPv4: s.config.PublicIPv4, VCPU: record.VCPU, RAMMB: record.RAMMB,
+		PrivateIPv4: record.PrivateIPv4, PublicIPv4: s.config.PublicIPv4, IPv6: record.IPv6, VCPU: record.VCPU, RAMMB: record.RAMMB,
 		DiskGB: record.DiskGB, PortMappings: record.Mappings, PortMappingLimit: record.PortMappingLimit,
 		MonthlyTrafficGB: record.MonthlyTrafficGB, NetworkDownMbps: record.NetworkDownMbps, NetworkUpMbps: record.NetworkUpMbps,
 	}
@@ -431,6 +515,9 @@ func (s *Service) delete(ctx context.Context, name string) error {
 	}
 	if err == nil {
 		err = s.store.Update(name, func(*InstanceRecord) (*InstanceRecord, error) { return nil, nil })
+	}
+	if err == nil {
+		_ = s.proxyNDP(ctx, record.IPv6, false)
 	}
 	unlock()
 	if err != nil {

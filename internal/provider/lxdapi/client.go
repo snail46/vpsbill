@@ -240,3 +240,16 @@ func (c *client) waitTask(ctx context.Context, id uint) error {
 }
 
 var pollInterval = 2 * time.Second
+
+type addressList struct {
+	IPv4 []string `json:"ipv4"`
+	IPv6 []string `json:"ipv6"`
+}
+
+// addresses returns the container's dedicated pool addresses. Errors are
+// ignored because LXDAPI rejects the call when a pool feature is disabled.
+func (c *client) addresses(ctx context.Context, name string) addressList {
+	var result addressList
+	_ = c.do(ctx, http.MethodGet, "/api/system/ip?version=all&container="+url.QueryEscape(name), nil, &result)
+	return result
+}

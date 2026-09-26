@@ -40,8 +40,11 @@ func (r *Runtime) Images(context.Context) ([]protocol.Image, error) {
 	return []protocol.Image{{ID: "debian12", Name: "debian12", Virtualization: r.Kind}}, nil
 }
 
-func (r *Runtime) Network(context.Context) (netip.Prefix, netip.Addr, error) {
-	return netip.MustParsePrefix("10.20.30.0/24"), netip.MustParseAddr("10.20.30.1"), nil
+func (r *Runtime) Network(context.Context) (agent.NetworkInfo, error) {
+	return agent.NetworkInfo{
+		IPv4: netip.MustParsePrefix("10.20.30.0/24"), IPv4Gateway: netip.MustParseAddr("10.20.30.1"),
+		IPv6: netip.MustParsePrefix("2001:db8:1::/64"), IPv6Gateway: netip.MustParseAddr("2001:db8:1::1"),
+	}, nil
 }
 
 func (r *Runtime) Create(_ context.Context, spec agent.RuntimeSpec) error {

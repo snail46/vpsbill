@@ -26,6 +26,7 @@ type InstanceRecord struct {
 	MonthlyTrafficGB int                    `json:"monthly_traffic_gb"`
 	PortMappingLimit int                    `json:"port_mapping_limit"`
 	PrivateIPv4      string                 `json:"private_ipv4"`
+	IPv6             string                 `json:"ipv6,omitempty"`
 	Mappings         []protocol.PortMapping `json:"mappings"`
 	Traffic          TrafficRecord          `json:"traffic"`
 	// PasswordSet is false until the root password of the current install

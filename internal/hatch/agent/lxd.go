@@ -99,27 +99,35 @@ func (l *LXD) Images(ctx context.Context) ([]protocol.Image, error) {
 	return result, nil
 }
 
-func (l *LXD) Network(ctx context.Context) (netip.Prefix, netip.Addr, error) {
+func (l *LXD) Network(ctx context.Context) (NetworkInfo, error) {
 	metadata, err := l.request(ctx, http.MethodGet, "/1.0/networks/"+url.PathEscape(l.config.Network), nil)
 	if err != nil {
-		return netip.Prefix{}, netip.Addr{}, err
+		return NetworkInfo{}, err
 	}
 	var network struct {
 		Config map[string]string `json:"config"`
 	}
 	if err := json.Unmarshal(metadata, &network); err != nil {
-		return netip.Prefix{}, netip.Addr{}, err
+		return NetworkInfo{}, err
 	}
-	// ipv4.address is the bridge address in CIDR form, e.g. 10.20.30.1/24.
-	gateway, err := netip.ParsePrefix(network.Config["ipv4.address"])
+	// ipv4.address and ipv6.address hold the bridge address in CIDR form,
+	// e.g. 10.20.30.1/24; "none" or "auto" means no static subnet.
+	ipv4, err := netip.ParsePrefix(network.Config["ipv4.address"])
 	if err != nil {
-		return netip.Prefix{}, netip.Addr{}, fmt.Errorf("network %s has no static ipv4.address: %w", l.config.Network, err)
+		return NetworkInfo{}, fmt.Errorf("network %s has no static ipv4.address: %w", l.config.Network, err)
 	}
-	return gateway.Masked(), gateway.Addr(), nil
+	info := NetworkInfo{IPv4: ipv4.Masked(), IPv4Gateway: ipv4.Addr()}
+	if ipv6, err := netip.ParsePrefix(network.Config["ipv6.address"]); err == nil && ipv6.Addr().Is6() {
+		info.IPv6, info.IPv6Gateway = ipv6.Masked(), ipv6.Addr()
+	}
+	return info, nil
 }
 
 func (l *LXD) Create(ctx context.Context, spec RuntimeSpec) error {
 	nic := map[string]string{"type": "nic", "network": l.config.Network, "name": "eth0", "ipv4.address": spec.IPv4.String()}
+	if spec.IPv6.IsValid() {
+		nic["ipv6.address"] = spec.IPv6.String()
+	}
 	if spec.NetworkDownMbps > 0 {
 		nic["limits.ingress"] = strconv.Itoa(spec.NetworkDownMbps) + "Mbit"
 	}

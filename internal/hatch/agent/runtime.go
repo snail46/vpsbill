@@ -16,9 +16,9 @@ type Runtime interface {
 	// Virtualization is the plan key this runtime serves: "lxc" or "podman".
 	Virtualization() string
 	Images(ctx context.Context) ([]protocol.Image, error)
-	// Network returns the bridge subnet and gateway that static instance
-	// addresses are allocated from.
-	Network(ctx context.Context) (netip.Prefix, netip.Addr, error)
+	// Network describes the bridge that static instance addresses are
+	// allocated from.
+	Network(ctx context.Context) (NetworkInfo, error)
 	// Create creates and starts the instance with the given static address.
 	Create(ctx context.Context, spec RuntimeSpec) error
 	State(ctx context.Context, name string) (RuntimeState, error)
@@ -35,14 +35,25 @@ type Runtime interface {
 }
 
 type RuntimeSpec struct {
-	Name            string
-	Image           string
-	VCPU            int
-	RAMMB           int
-	DiskGB          int
-	IPv4            netip.Addr
+	Name   string
+	Image  string
+	VCPU   int
+	RAMMB  int
+	DiskGB int
+	IPv4   netip.Addr
+	// IPv6 is the zero Addr when the instance has no IPv6 address.
+	IPv6            netip.Addr
 	NetworkDownMbps int
 	NetworkUpMbps   int
+}
+
+// NetworkInfo is a runtime bridge. IPv6 is optional; when it is a routed
+// public prefix the instances' IPv6 addresses are directly reachable.
+type NetworkInfo struct {
+	IPv4        netip.Prefix
+	IPv4Gateway netip.Addr
+	IPv6        netip.Prefix
+	IPv6Gateway netip.Addr
 }
 
 // RuntimeState is a point-in-time observation. Counters are cumulative

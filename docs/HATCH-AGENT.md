@@ -33,7 +33,7 @@ Hatch 是 VPSBill 自研的宿主机 Agent。它运行在母鸡上，驱动本�
 | 实时用量（CPU/内存/网络/磁盘 IO） | ✅ | ✅（磁盘占用为 0） |
 | 月流量累计（跨重启、按自然月清零） | ✅ | ✅ |
 | WebSSH / VNC | ❌ 规划中 | ❌ 规划中 |
-| IPv6 | ❌ 规划中 | ❌ 规划中 |
+| IPv6（每实例一个独立地址） | ✅ 网桥 `ipv6.address` 子网内静态分配 | ✅ Podman 网络 IPv6 子网内静态分配 |
 
 ### 幂等与恢复
 
@@ -55,6 +55,7 @@ fib daddr type local tcp dport 20022 dnat to 10.20.30.254:22
 - **LXD**：网桥必须设置静态 `ipv4.address`（例如 `lxc network set lxdbr0 ipv4.address 10.20.30.1/24`）。Agent 从子网高位向下分配静态 IP，低位留给网桥 DHCP。在 LXD 中导入可售镜像并设置别名（`lxc image copy images:debian/12 local: --alias debian12`），别名就是套餐里的系统模板 ID。镜像需要带 sshd，推荐 `/cloud` 变体，或自行制作。
 - **Podman**：启用 rootful API 套接字（`systemctl enable --now podman.socket`）和开机拉起（`systemctl enable podman-restart.service`）。网络默认使用 `podman`，也可以用 `podman network create` 另建。镜像需要以 systemd 等 init 为入口并带 sshd，否则无法当作 VPS 使用。
 - 宿主机的 FORWARD 策略需要放行 DNAT 后的流量（Agent 自己的 forward 链已放行 `ct status dnat`）。
+- **IPv6**（可选）：给网桥配置公网 IPv6 前缀，例如 `lxc network set lxdbr0 ipv6.address 2001:db8:1::1/64 ipv6.nat false`，或 `podman network create --ipv6 --subnet 2001:db8:2::/64 vps`。Agent 在前缀内随机分配地址，防止被顺序扫描。前缀最好由服务商路由到宿主机；如果服务商把 /64 直接放在网卡链路上（on-link），在配置里设置 `"ipv6_ndp_interface": "eth0"`，Agent 会开启 `proxy_ndp` 并为每个实例地址发布邻居代理。套餐勾选 IPv6 后，节点网桥必须有 IPv6 子网，否则开通会被拒绝。
 
 ## 安装
 
@@ -90,6 +91,7 @@ fib daddr type local tcp dport 20022 dnat to 10.20.30.254:22
   "public_ipv4": "203.0.113.10",
   "port_range_start": 20000,
   "port_range_end": 60000,
+  "ipv6_ndp_interface": "",
   "capacity": { "vcpu": 16, "ram_mb": 60000, "disk_gb": 900 },
   "lxd": { "socket": "/var/snap/lxd/common/lxd/unix.socket", "network": "lxdbr0", "storage_pool": "default" },
   "podman": { "socket": "/run/podman/podman.sock", "network": "podman", "disk_quota": false }

@@ -99,7 +99,7 @@ func (d *Driver) EnsureInstance(ctx context.Context, spec provider.CreateSpec) (
 	err := d.call(ctx, protocol.MethodEnsure, protocol.CreateSpec{
 		Name: spec.Name, Virtualization: spec.Virtualization, TemplateID: spec.TemplateID,
 		VCPU: spec.VCPU, RAMMB: spec.RAMMB, DiskGB: spec.DiskGB, AssignNAT: spec.AssignNAT,
-		PortMappingCount: spec.PortMappingCount, Password: password,
+		PortMappingCount: spec.PortMappingCount, AssignIPv6: spec.AssignIPv6, Password: password,
 		NetworkDownMbps: spec.NetworkDownMbps, NetworkUpMbps: spec.NetworkUpMbps, MonthlyTrafficGB: spec.MonthlyTrafficGB,
 	}, &result)
 	if err != nil {

@@ -198,3 +198,40 @@ func TestUnsupportedVirtualization(t *testing.T) {
 		t.Fatalf("expected unsupported, got %v", err)
 	}
 }
+
+func TestIPv6AssignmentAndNeighbourProxy(t *testing.T) {
+	dir := t.TempDir()
+	store, err := agent.OpenStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime := agenttest.NewRuntime("lxc")
+	config := agent.Config{PublicIPv4: "203.0.113.10", PortRangeStart: 30000, PortRangeEnd: 30009, StateDir: dir, IPv6NDPInterface: "eth0"}
+	service := agent.NewService(config, "test", store, []agent.Runtime{runtime}, &agenttest.NAT{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	agent.SetPasswordRetry(service, 0)
+	var commands []string
+	agent.SetCommandRunner(service, func(_ context.Context, name string, args ...string) (string, error) {
+		commands = append(commands, name+" "+strings.Join(args, " "))
+		return "", nil
+	})
+	withIPv6 := spec
+	withIPv6.AssignIPv6 = true
+	result, err := call[protocol.EnsureResult](t, service, protocol.MethodEnsure, withIPv6)
+	if err != nil {
+		t.Fatal(err)
+	}
+	address := result.Instance.IPv6
+	created, _ := runtime.Get("svc-1")
+	if !strings.HasPrefix(address, "2001:db8:1:") || created.Spec.IPv6.String() != address {
+		t.Fatalf("IPv6 not assigned: %q vs %v", address, created.Spec.IPv6)
+	}
+	if len(commands) != 1 || commands[0] != "ip -6 neigh replace proxy "+address+" dev eth0" {
+		t.Fatalf("neighbour proxy not published: %v", commands)
+	}
+	if _, err := call[any](t, service, protocol.MethodDelete, protocol.NameParams{Name: "svc-1"}); err != nil {
+		t.Fatal(err)
+	}
+	if commands[len(commands)-1] != "ip -6 neigh del proxy "+address+" dev eth0" {
+		t.Fatalf("neighbour proxy not withdrawn: %v", commands)
+	}
+}

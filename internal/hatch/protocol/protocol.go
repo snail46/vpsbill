@@ -117,6 +117,7 @@ type CreateSpec struct {
 	DiskGB           int    `json:"disk_gb"`
 	AssignNAT        bool   `json:"assign_nat"`
 	PortMappingCount int    `json:"port_mapping_count"`
+	AssignIPv6       bool   `json:"assign_ipv6"`
 	Password         string `json:"password,omitempty"`
 	NetworkDownMbps  int    `json:"network_down_mbps"`
 	NetworkUpMbps    int    `json:"network_up_mbps"`

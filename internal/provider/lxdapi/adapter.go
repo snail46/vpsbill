@@ -137,6 +137,9 @@ func (d *Driver) EnsureInstance(ctx context.Context, spec provider.CreateSpec) (
 	if err := d.client.waitTask(ctx, pending); err != nil {
 		return provider.EnsureResult{}, fmt.Errorf("create container: %w", err)
 	}
+	if err := d.topUpAddresses(ctx, spec); err != nil {
+		return provider.EnsureResult{}, err
+	}
 	instance, err := d.GetInstance(ctx, spec.Name)
 	if err != nil {
 		return provider.EnsureResult{}, fmt.Errorf("container created but lookup failed: %w", err)
@@ -193,13 +196,15 @@ func (d *Driver) GetInstance(ctx context.Context, name string) (provider.Instanc
 	if status == "" {
 		status = value.Status
 	}
-	ip := firstAddress(value.IPv4)
+	addresses := d.client.addresses(ctx, name)
+	ip := firstOf(addresses.IPv4, firstAddress(value.IPv4))
 	if ip == "" {
 		ip = d.options.PublicIPv4
 	}
+	ipv6 := firstOf(addresses.IPv6, firstAddress(value.IPv6))
 	instance := provider.Instance{
 		ExternalID: strconv.FormatUint(uint64(value.ID), 10), Name: value.Name, Virtualization: "lxc", Status: status,
-		Template: value.Image, IP: ip, IPv6: firstAddress(value.IPv6), VCPU: value.CPU, RAMMB: value.Memory,
+		Template: value.Image, IP: ip, IPv6: ipv6, VCPU: value.CPU, RAMMB: value.Memory,
 		DiskGB: value.Disk / 1024, PortMappingLimit: value.IPv4MappingLimit, MonthlyTrafficGB: value.TrafficLimit,
 		NetworkDownMbps: value.Ingress, NetworkUpMbps: value.Egress, InitialPassword: value.Password,
 	}
@@ -452,4 +457,36 @@ func randomPassword() (string, error) {
 			return value, nil
 		}
 	}
+}
+
+// topUpAddresses allocates dedicated IPv4/IPv6 addresses that LXDAPI did not
+// assign during creation (it only logs a warning when its pool is short).
+func (d *Driver) topUpAddresses(ctx context.Context, spec provider.CreateSpec) error {
+	current := d.client.addresses(ctx, spec.Name)
+	wanted := []struct {
+		version string
+		assign  bool
+		count   int
+		have    int
+	}{
+		{"v4", spec.AssignIPv4, max(spec.IPv4Count, 1), len(current.IPv4)},
+		{"v6", spec.AssignIPv6, max(spec.IPv6Count, 1), len(current.IPv6)},
+	}
+	for _, item := range wanted {
+		if !item.assign || item.have >= item.count {
+			continue
+		}
+		body := map[string]any{"name": spec.Name, "user_id": d.options.Username, "count": item.count - item.have}
+		if err := d.client.do(ctx, http.MethodPost, "/api/system/ip/allocate?version="+item.version, body, nil); err != nil {
+			return fmt.Errorf("allocate IP%s addresses: %w", item.version, err)
+		}
+	}
+	return nil
+}
+
+func firstOf(values []string, fallback string) string {
+	if len(values) > 0 && values[0] != "" {
+		return values[0]
+	}
+	return fallback
 }

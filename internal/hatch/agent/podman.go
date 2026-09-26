@@ -85,7 +85,7 @@ func (p *Podman) Images(ctx context.Context) ([]protocol.Image, error) {
 	return result, nil
 }
 
-func (p *Podman) Network(ctx context.Context) (netip.Prefix, netip.Addr, error) {
+func (p *Podman) Network(ctx context.Context) (NetworkInfo, error) {
 	var network struct {
 		Subnets []struct {
 			Subnet  string `json:"subnet"`
@@ -93,20 +93,28 @@ func (p *Podman) Network(ctx context.Context) (netip.Prefix, netip.Addr, error) 
 		} `json:"subnets"`
 	}
 	if err := p.request(ctx, http.MethodGet, "/networks/"+url.PathEscape(p.config.Network)+"/json", nil, &network); err != nil {
-		return netip.Prefix{}, netip.Addr{}, fmt.Errorf("inspect network %s: %w", p.config.Network, err)
+		return NetworkInfo{}, fmt.Errorf("inspect network %s: %w", p.config.Network, err)
 	}
+	var info NetworkInfo
 	for _, subnet := range network.Subnets {
 		prefix, err := netip.ParsePrefix(subnet.Subnet)
-		if err != nil || !prefix.Addr().Is4() {
+		if err != nil {
 			continue
 		}
 		gateway, err := netip.ParseAddr(subnet.Gateway)
 		if err != nil {
 			gateway = prefix.Masked().Addr().Next()
 		}
-		return prefix.Masked(), gateway, nil
+		if prefix.Addr().Is4() && !info.IPv4.IsValid() {
+			info.IPv4, info.IPv4Gateway = prefix.Masked(), gateway
+		} else if prefix.Addr().Is6() && !info.IPv6.IsValid() {
+			info.IPv6, info.IPv6Gateway = prefix.Masked(), gateway
+		}
 	}
-	return netip.Prefix{}, netip.Addr{}, fmt.Errorf("network %s has no IPv4 subnet", p.config.Network)
+	if !info.IPv4.IsValid() {
+		return NetworkInfo{}, fmt.Errorf("network %s has no IPv4 subnet", p.config.Network)
+	}
+	return info, nil
 }
 
 func (p *Podman) Create(ctx context.Context, spec RuntimeSpec) error {
@@ -115,7 +123,7 @@ func (p *Podman) Create(ctx context.Context, spec RuntimeSpec) error {
 		"systemd":        "true",
 		"restart_policy": "always",
 		"netns":          map[string]string{"nsmode": "bridge"},
-		"networks":       map[string]any{p.config.Network: map[string]any{"static_ips": []string{spec.IPv4.String()}}},
+		"networks":       map[string]any{p.config.Network: map[string]any{"static_ips": staticIPs(spec)}},
 		"labels": map[string]string{
 			labelDown: strconv.Itoa(spec.NetworkDownMbps), labelUp: strconv.Itoa(spec.NetworkUpMbps),
 		},
@@ -313,4 +321,12 @@ func (p *Podman) Maintain(ctx context.Context, name string) error {
 	p.shaped[name] = iface
 	p.mu.Unlock()
 	return nil
+}
+
+func staticIPs(spec RuntimeSpec) []string {
+	result := []string{spec.IPv4.String()}
+	if spec.IPv6.IsValid() {
+		result = append(result, spec.IPv6.String())
+	}
+	return result
 }

@@ -26,10 +26,12 @@ type fakeNode struct {
 	nextID     uint
 	creates    int
 	lastCreate map[string]any
+	ipv6       map[string][]string
+	allocated  int
 }
 
 func newFakeNode() *fakeNode {
-	return &fakeNode{containers: map[string]map[string]any{}, tasks: map[uint]map[string]any{}, nextID: 1}
+	return &fakeNode{containers: map[string]map[string]any{}, tasks: map[uint]map[string]any{}, ipv6: map[string][]string{}, nextID: 1}
 }
 
 func (f *fakeNode) reply(w http.ResponseWriter, code int, msg string, data any) {
@@ -65,6 +67,19 @@ func (f *fakeNode) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			f.mu.Unlock()
 		}()
 		f.reply(w, 200, "success", map[string]any{"name": name, "task_id": id})
+	case r.Method == http.MethodGet && path == "/api/system/ip":
+		f.reply(w, 200, "success", map[string]any{"ipv4": []string{}, "ipv6": f.ipv6[r.URL.Query().Get("container")]})
+	case r.Method == http.MethodPost && path == "/api/system/ip/allocate":
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		if r.URL.Query().Get("version") != "v6" {
+			f.reply(w, 500, "IPv4功能未启用", nil)
+			return
+		}
+		f.allocated++
+		name := body["name"].(string)
+		f.ipv6[name] = append(f.ipv6[name], "2001:db8::10")
+		f.reply(w, 200, "success", nil)
 	case r.Method == http.MethodGet && path == "/api/system/tasks":
 		list := []any{}
 		for _, current := range f.tasks {
@@ -256,5 +271,22 @@ func TestCapabilities(t *testing.T) {
 	info, err := driver.HostInfo(context.Background())
 	if err != nil || info.Capacity.VCPU != 8 || info.Capacity.DiskGB != 400 {
 		t.Fatalf("unexpected host info %+v, %v", info, err)
+	}
+}
+
+func TestEnsureTopsUpMissingIPv6(t *testing.T) {
+	node := newFakeNode()
+	driver := openDriver(t, node)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	result, err := driver.EnsureInstance(ctx, provider.CreateSpec{Name: "svc-6", TemplateID: "debian12", VCPU: 1, RAMMB: 512, DiskGB: 10, AssignNAT: true, AssignIPv6: true, IPv6Count: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if node.allocated != 1 || result.Instance.IPv6 != "2001:db8::10" {
+		t.Fatalf("IPv6 not allocated: allocated=%d instance=%+v", node.allocated, result.Instance)
+	}
+	if node.lastCreate["ipv6_pool_limit"] != float64(1) {
+		t.Fatalf("pool limit not requested: %v", node.lastCreate)
 	}
 }

@@ -29,6 +29,10 @@ type Config struct {
 	PublicIPv4     string `json:"public_ipv4"`
 	PortRangeStart int    `json:"port_range_start"`
 	PortRangeEnd   int    `json:"port_range_end"`
+	// IPv6NDPInterface answers neighbour solicitations for instance IPv6
+	// addresses on this uplink. Needed when the provider puts the /64 on-link
+	// instead of routing it to the host; leave empty for a routed prefix.
+	IPv6NDPInterface string `json:"ipv6_ndp_interface,omitempty"`
 	// Capacity overrides detected host capacity when set.
 	Capacity CapacityConfig `json:"capacity"`
 	LXD      *LXDConfig     `json:"lxd,omitempty"`
