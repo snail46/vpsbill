@@ -77,6 +77,7 @@ export type PlanRecord = {
   id: string
   code: string
   name: string
+  provider_type: string
   virtualization: 'lxc' | 'kvm' | 'podman'
   vcpu: number
   ram_mb: number
@@ -100,6 +101,7 @@ export type PlanRecord = {
 
 export type AvailableTemplateRecord = {
   id: string
+  provider_type: string
   name: string
   virtualization: 'lxc' | 'kvm' | 'podman'
   distro: string

@@ -185,6 +185,7 @@ type Plan struct {
 	ID                 string    `json:"id"`
 	Code               string    `json:"code"`
 	Name               string    `json:"name"`
+	ProviderType       string    `json:"provider_type"`
 	Virtualization     string    `json:"virtualization"`
 	VCPU               int       `json:"vcpu"`
 	RAMMB              int       `json:"ram_mb"`
@@ -209,7 +210,7 @@ type Plan struct {
 
 func (s *CatalogStore) ListPlans(ctx context.Context) ([]Plan, error) {
 	rows, err := s.db.Query(ctx, `
-		SELECT id, code, name, virtualization, vcpu, ram_mb, disk_gb, traffic_gb,
+		SELECT id, code, name, provider_type, virtualization, vcpu, ram_mb, disk_gb, traffic_gb,
 		       network_down_mbps, network_up_mbps, snapshot_limit,
 		       assign_nat, port_mapping_count, assign_ipv4, ipv4_count, assign_ipv6, ipv6_count,
 		       default_template_id, allowed_template_ids, enabled, version, created_at
@@ -222,7 +223,7 @@ func (s *CatalogStore) ListPlans(ctx context.Context) ([]Plan, error) {
 	plans := make([]Plan, 0)
 	for rows.Next() {
 		var plan Plan
-		if err := rows.Scan(&plan.ID, &plan.Code, &plan.Name, &plan.Virtualization, &plan.VCPU, &plan.RAMMB, &plan.DiskGB, &plan.TrafficGB, &plan.NetworkDownMbps, &plan.NetworkUpMbps, &plan.SnapshotLimit,
+		if err := rows.Scan(&plan.ID, &plan.Code, &plan.Name, &plan.ProviderType, &plan.Virtualization, &plan.VCPU, &plan.RAMMB, &plan.DiskGB, &plan.TrafficGB, &plan.NetworkDownMbps, &plan.NetworkUpMbps, &plan.SnapshotLimit,
 			&plan.AssignNAT, &plan.PortMappingCount, &plan.AssignIPv4, &plan.IPv4Count, &plan.AssignIPv6, &plan.IPv6Count,
 			&plan.DefaultTemplateID, &plan.AllowedTemplateIDs, &plan.Enabled, &plan.Version, &plan.CreatedAt); err != nil {
 			return nil, err
@@ -266,12 +267,12 @@ func (s *CatalogStore) CreatePlan(ctx context.Context, input Plan) (Plan, error)
 		INSERT INTO plans(code, name, virtualization, vcpu, ram_mb, disk_gb, traffic_gb,
 		                  network_down_mbps, network_up_mbps, snapshot_limit,
 		                  assign_nat, port_mapping_count, assign_ipv4, ipv4_count, assign_ipv6, ipv6_count,
-		                  default_template_id, allowed_template_ids, enabled)
-		VALUES(upper($1), $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+		                  default_template_id, allowed_template_ids, enabled, provider_type)
+		VALUES(upper($1), $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
 		RETURNING id, code, version, created_at
 	`, input.Code, input.Name, input.Virtualization, input.VCPU, input.RAMMB, input.DiskGB, input.TrafficGB, input.NetworkDownMbps, input.NetworkUpMbps, input.SnapshotLimit,
 		input.AssignNAT, input.PortMappingCount, input.AssignIPv4, input.IPv4Count, input.AssignIPv6, input.IPv6Count,
-		input.DefaultTemplateID, input.AllowedTemplateIDs, input.Enabled).Scan(&input.ID, &input.Code, &input.Version, &input.CreatedAt); err != nil {
+		input.DefaultTemplateID, input.AllowedTemplateIDs, input.Enabled, input.ProviderType).Scan(&input.ID, &input.Code, &input.Version, &input.CreatedAt); err != nil {
 		return Plan{}, fmt.Errorf("create plan: %w", err)
 	}
 	for i := range input.Prices {
@@ -302,13 +303,13 @@ func (s *CatalogStore) UpdatePlan(ctx context.Context, id string, input Plan) (P
 		       traffic_gb=$8, network_down_mbps=$9, network_up_mbps=$10, snapshot_limit=$11,
 		       assign_nat=$12, port_mapping_count=$13, assign_ipv4=$14, ipv4_count=$15,
 		       assign_ipv6=$16, ipv6_count=$17, default_template_id=$18, allowed_template_ids=$19,
-		       enabled=$20, version=version+1, updated_at=now()
+		       enabled=$20, provider_type=$21, version=version+1, updated_at=now()
 		WHERE id=$1
 		RETURNING id, code, version, created_at
 	`, id, input.Code, input.Name, input.Virtualization, input.VCPU, input.RAMMB, input.DiskGB, input.TrafficGB,
 		input.NetworkDownMbps, input.NetworkUpMbps, input.SnapshotLimit, input.AssignNAT, input.PortMappingCount,
 		input.AssignIPv4, input.IPv4Count, input.AssignIPv6, input.IPv6Count, input.DefaultTemplateID,
-		input.AllowedTemplateIDs, input.Enabled).Scan(&input.ID, &input.Code, &input.Version, &input.CreatedAt); err != nil {
+		input.AllowedTemplateIDs, input.Enabled, input.ProviderType).Scan(&input.ID, &input.Code, &input.Version, &input.CreatedAt); err != nil {
 		return Plan{}, fmt.Errorf("update plan: %w", err)
 	}
 	now := time.Now().UTC()

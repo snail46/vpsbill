@@ -3,12 +3,13 @@ package app
 import (
 	"testing"
 
+	_ "vpsbill/internal/provider/clicd"
 	"vpsbill/internal/store/postgres"
 )
 
 func TestValidatePlanRequiresNetworkPolicy(t *testing.T) {
 	plan := postgres.Plan{
-		Code: "LXC-TEST", Name: "Test", Virtualization: "lxc", VCPU: 1, RAMMB: 512, DiskGB: 10,
+		Code: "LXC-TEST", Name: "Test", ProviderType: "clicd", Virtualization: "lxc", VCPU: 1, RAMMB: 512, DiskGB: 10,
 		IPv4Count: 1, IPv6Count: 1, DefaultTemplateID: "debian-bookworm",
 		AllowedTemplateIDs: []string{"debian-bookworm"},
 		Prices:             []postgres.Price{{Currency: "CNY", BillingCycle: "monthly", AmountMinor: 100}},

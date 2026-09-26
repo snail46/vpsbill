@@ -147,13 +147,13 @@ func (s *ProvisioningStore) ReserveNode(ctx context.Context, serviceID string) (
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	var currentNode *string
-	var regionID, virtualization string
+	var regionID, virtualization, providerType string
 	var vcpu, ramMB, diskGB int
 	if err := tx.QueryRow(ctx, `
-		SELECT s.node_id, s.region_id, p.virtualization, p.vcpu, p.ram_mb, p.disk_gb
+		SELECT s.node_id, s.region_id, p.virtualization, p.provider_type, p.vcpu, p.ram_mb, p.disk_gb
 		FROM services s JOIN plans p ON p.id=s.plan_id
 		WHERE s.id=$1 FOR UPDATE OF s
-	`, serviceID).Scan(&currentNode, &regionID, &virtualization, &vcpu, &ramMB, &diskGB); err != nil {
+	`, serviceID).Scan(&currentNode, &regionID, &virtualization, &providerType, &vcpu, &ramMB, &diskGB); err != nil {
 		return "", err
 	}
 	if currentNode != nil {
@@ -164,13 +164,13 @@ func (s *ProvisioningStore) ReserveNode(ctx context.Context, serviceID string) (
 	err = tx.QueryRow(ctx, `
 		SELECT n.id
 		FROM nodes n
-		WHERE n.region_id=$1 AND n.status='online' AND $2=ANY(n.virtualization_types)
+		WHERE n.region_id=$1 AND n.status='online' AND $2=ANY(n.virtualization_types) AND n.provider_type=$6
 		  AND n.capacity_vcpu - coalesce((SELECT sum(r.vcpu) FROM inventory_reservations r WHERE r.node_id=n.id AND r.status='reserved'),0) >= $3
 		  AND n.capacity_ram_mb - coalesce((SELECT sum(r.ram_mb) FROM inventory_reservations r WHERE r.node_id=n.id AND r.status='reserved'),0) >= $4
 		  AND n.capacity_disk_gb - coalesce((SELECT sum(r.disk_gb) FROM inventory_reservations r WHERE r.node_id=n.id AND r.status='reserved'),0) >= $5
 		ORDER BY n.capacity_ram_mb - coalesce((SELECT sum(r.ram_mb) FROM inventory_reservations r WHERE r.node_id=n.id AND r.status='reserved'),0)
 		FOR UPDATE OF n SKIP LOCKED LIMIT 1
-	`, regionID, virtualization, vcpu, ramMB, diskGB).Scan(&nodeID)
+	`, regionID, virtualization, vcpu, ramMB, diskGB, providerType).Scan(&nodeID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", ErrNoCapacity
 	}

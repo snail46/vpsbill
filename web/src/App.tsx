@@ -3343,7 +3343,7 @@ function PlansView() {
         {plans.map(plan => (
           <article className={plan.enabled ? 'plan-card' : 'plan-card disabled'} key={plan.id}>
             <div className="plan-card-top">
-              <span className="tag">{plan.virtualization.toUpperCase()}</span>
+              <span className="tag">{plan.provider_type.toUpperCase()} · {plan.virtualization.toUpperCase()}</span>
               <StatusBadge status={plan.enabled ? 'online' : 'disabled'} />
             </div>
             <h3>{plan.name}</h3>
@@ -3416,9 +3416,15 @@ function PlanForm({
   const [templates, setTemplates] = useState<AvailableTemplateRecord[]>([])
   const [loadingTemplates, setLoadingTemplates] = useState(true)
 
+  const [providers, setProviders] = useState<ProviderTypeRecord[]>([])
+  const [providerType, setProviderType] = useState(plan?.provider_type || 'clicd')
   const [virtualization, setVirtualization] = useState<'lxc' | 'kvm' | 'podman'>(plan?.virtualization || 'lxc')
   const [allowed, setAllowed] = useState<string[]>(plan?.allowed_template_ids || [])
   const [defaultTemplate, setDefaultTemplate] = useState(plan?.default_template_id || '')
+
+  useEffect(() => {
+    api<ProviderTypeRecord[]>('/api/v1/admin/provider-types').then(setProviders).catch(err => setError(err.message))
+  }, [])
 
   useEffect(() => {
     api<AvailableTemplateRecord[]>('/api/v1/admin/templates')
@@ -3427,7 +3433,9 @@ function PlanForm({
       .finally(() => setLoadingTemplates(false))
   }, [])
 
-  const visibleTemplates = templates.filter(item => item.virtualization === virtualization)
+  const descriptor = providers.find(item => item.type === providerType)
+  const virtualizations = (descriptor?.virtualization_types ?? [virtualization]) as Array<'lxc' | 'kvm' | 'podman'>
+  const visibleTemplates = templates.filter(item => item.provider_type === providerType && item.virtualization === virtualization)
 
   const templateLabel = (id: string) => {
     const item = templates.find(candidate => candidate.id === id)
@@ -3452,6 +3460,7 @@ function PlanForm({
     const body = {
       code: data.get('code'),
       name: data.get('name'),
+      provider_type: providerType,
       virtualization,
       vcpu: Number(data.get('vcpu')),
       ram_mb: Number(data.get('ram_mb')),
@@ -3498,7 +3507,7 @@ function PlanForm({
       <div className="inline-form-heading">
         <div>
           <h3>{plan ? '编辑' : '创建'} VPS 商品套餐</h3>
-          <p>可用模板直接从当前在线的 CLICD 节点读取；网络分配策略将统一下发给实例。</p>
+          <p>套餐绑定一种对接方式，只会调度到该方式的节点；可用模板从这些在线节点读取，网络分配策略统一下发给实例。</p>
         </div>
         <button className="icon-button" onClick={onClose}><X size={18} /></button>
       </div>
@@ -3513,6 +3522,23 @@ function PlanForm({
           <input name="name" required placeholder="轻量入门型" defaultValue={plan?.name} />
         </label>
         <label>
+          <span>对接方式</span>
+          <select
+            name="provider_type"
+            value={providerType}
+            disabled={!!plan}
+            onChange={event => {
+              const next = providers.find(item => item.type === event.target.value)
+              setProviderType(event.target.value)
+              setVirtualization((next?.virtualization_types[0] ?? 'lxc') as 'lxc' | 'kvm' | 'podman')
+              setAllowed([])
+              setDefaultTemplate('')
+            }}
+          >
+            {providers.map(item => <option key={item.type} value={item.type}>{item.name}</option>)}
+          </select>
+        </label>
+        <label>
           <span>底层虚拟化</span>
           <select
             name="virtualization"
@@ -3524,9 +3550,7 @@ function PlanForm({
               setDefaultTemplate('')
             }}
           >
-            <option value="lxc">LXC 容器</option>
-            <option value="kvm">KVM 硬件虚拟化</option>
-            <option value="podman">Podman 容器</option>
+            {virtualizations.map(kind => <option key={kind} value={kind}>{virtualizationLabel(kind)}</option>)}
           </select>
         </label>
         <label>

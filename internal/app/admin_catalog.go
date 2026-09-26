@@ -215,6 +215,7 @@ func (a *adminCatalog) listPlans(w http.ResponseWriter, r *http.Request) {
 
 type availableTemplate struct {
 	ID             string   `json:"id"`
+	ProviderType   string   `json:"provider_type"`
 	Name           string   `json:"name"`
 	Virtualization string   `json:"virtualization"`
 	Distro         string   `json:"distro"`
@@ -271,7 +272,7 @@ func (a *adminCatalog) listTemplates(w http.ResponseWriter, r *http.Request) {
 			key := image.Virtualization + "\x00" + image.ID
 			item := byKey[key]
 			if item == nil {
-				item = &availableTemplate{ID: image.ID, Name: image.Name, Virtualization: image.Virtualization, Distro: image.Distro, Release: image.Release, Arch: image.Arch, Description: image.Description}
+				item = &availableTemplate{ID: image.ID, ProviderType: response.node.ProviderType, Name: image.Name, Virtualization: image.Virtualization, Distro: image.Distro, Release: image.Release, Arch: image.Arch, Description: image.Description}
 				byKey[key] = item
 			}
 			item.NodeIDs = append(item.NodeIDs, response.node.ID)
@@ -299,6 +300,9 @@ func (a *adminCatalog) createPlan(w http.ResponseWriter, r *http.Request) {
 	var input postgres.Plan
 	if !decodeJSON(w, r, &input) {
 		return
+	}
+	if input.ProviderType = strings.TrimSpace(input.ProviderType); input.ProviderType == "" {
+		input.ProviderType = "clicd"
 	}
 	if message := validatePlan(input); message != "" {
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "validation_error", "message": message})
@@ -339,6 +343,9 @@ func (a *adminCatalog) replacePlan(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &input) {
 		return
 	}
+	if input.ProviderType = strings.TrimSpace(input.ProviderType); input.ProviderType == "" {
+		input.ProviderType = "clicd"
+	}
 	if message := validatePlan(input); message != "" {
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "validation_error", "message": message})
 		return
@@ -359,8 +366,12 @@ func validatePlan(plan postgres.Plan) string {
 	if strings.TrimSpace(plan.Code) == "" || strings.TrimSpace(plan.Name) == "" {
 		return "套餐编码和名称不能为空"
 	}
-	if !validVirtualization(plan.Virtualization) {
-		return "虚拟化类型必须为 lxc、kvm 或 podman"
+	descriptor, ok := provider.Lookup(plan.ProviderType)
+	if !ok {
+		return "对接方式无效"
+	}
+	if !containsString(descriptor.VirtualizationTypes, plan.Virtualization) {
+		return descriptor.Name + " 支持的虚拟化类型为 " + strings.Join(descriptor.VirtualizationTypes, " / ")
 	}
 	if plan.VCPU < 1 || plan.RAMMB < 128 || plan.DiskGB < 1 {
 		return "CPU、内存和磁盘参数无效"
