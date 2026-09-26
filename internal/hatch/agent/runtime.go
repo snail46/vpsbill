@@ -73,3 +73,10 @@ if [ -d /etc/ssh ]; then
   (systemctl restart ssh || systemctl restart sshd || rc-service sshd restart || service ssh restart) >/dev/null 2>&1 || true
 fi
 `
+
+// Maintainer is implemented by runtimes whose host-side settings (such as
+// bandwidth limits on a veth) are lost when an instance restarts without the
+// agent; Maintain re-applies them and is called periodically.
+type Maintainer interface {
+	Maintain(ctx context.Context, name string) error
+}

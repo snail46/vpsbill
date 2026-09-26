@@ -5,11 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/netip"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"vpsbill/internal/hatch/protocol"
@@ -21,12 +24,27 @@ import (
 type Podman struct {
 	client *unixClient
 	config PodmanConfig
+	run    CommandRunner
+	// interfaceName resolves a host ifindex; replaced in tests.
+	interfaceName func(index int) (string, error)
+
+	mu     sync.Mutex
+	shaped map[string]string // instance name -> host veth carrying its limits
 }
 
 const libpod = "/v4.0.0/libpod"
 
 func NewPodman(config PodmanConfig) *Podman {
-	return &Podman{client: newUnixClient(config.Socket), config: config}
+	return &Podman{
+		client: newUnixClient(config.Socket), config: config, run: runCommand, shaped: map[string]string{},
+		interfaceName: func(index int) (string, error) {
+			iface, err := net.InterfaceByIndex(index)
+			if err != nil {
+				return "", err
+			}
+			return iface.Name, nil
+		},
+	}
 }
 
 func (p *Podman) Virtualization() string { return "podman" }
@@ -98,6 +116,9 @@ func (p *Podman) Create(ctx context.Context, spec RuntimeSpec) error {
 		"restart_policy": "always",
 		"netns":          map[string]string{"nsmode": "bridge"},
 		"networks":       map[string]any{p.config.Network: map[string]any{"static_ips": []string{spec.IPv4.String()}}},
+		"labels": map[string]string{
+			labelDown: strconv.Itoa(spec.NetworkDownMbps), labelUp: strconv.Itoa(spec.NetworkUpMbps),
+		},
 		"resource_limits": map[string]any{
 			"cpu":    map[string]int64{"quota": int64(spec.VCPU) * 100000, "period": 100000},
 			"memory": map[string]int64{"limit": int64(spec.RAMMB) << 20},
@@ -167,10 +188,18 @@ func (p *Podman) action(ctx context.Context, name, action string) error {
 	return p.request(ctx, http.MethodPost, containerPath(name)+"/"+action, nil, nil)
 }
 
-func (p *Podman) Start(ctx context.Context, name string) error { return p.action(ctx, name, "start") }
-func (p *Podman) Stop(ctx context.Context, name string) error  { return p.action(ctx, name, "stop") }
+func (p *Podman) Start(ctx context.Context, name string) error {
+	if err := p.action(ctx, name, "start"); err != nil {
+		return err
+	}
+	return p.reshape(ctx, name)
+}
+func (p *Podman) Stop(ctx context.Context, name string) error { return p.action(ctx, name, "stop") }
 func (p *Podman) Restart(ctx context.Context, name string) error {
-	return p.action(ctx, name, "restart")
+	if err := p.action(ctx, name, "restart"); err != nil {
+		return err
+	}
+	return p.reshape(ctx, name)
 }
 func (p *Podman) Pause(ctx context.Context, name string) error { return p.action(ctx, name, "pause") }
 func (p *Podman) Resume(ctx context.Context, name string) error {
@@ -178,6 +207,9 @@ func (p *Podman) Resume(ctx context.Context, name string) error {
 }
 
 func (p *Podman) Delete(ctx context.Context, name string) error {
+	p.mu.Lock()
+	delete(p.shaped, name)
+	p.mu.Unlock()
 	err := p.request(ctx, http.MethodDelete, containerPath(name)+"?force=true&v=true", nil, nil)
 	if errors.Is(err, ErrInstanceNotFound) {
 		return nil
@@ -223,4 +255,62 @@ func (p *Podman) Exec(ctx context.Context, name, script string, env map[string]s
 		case <-time.After(200 * time.Millisecond):
 		}
 	}
+}
+
+const (
+	labelDown = "hatch.down_mbps"
+	labelUp   = "hatch.up_mbps"
+)
+
+// reshape forces bandwidth limits to be re-applied, since a (re)start gives
+// the container a new veth pair.
+func (p *Podman) reshape(ctx context.Context, name string) error {
+	p.mu.Lock()
+	delete(p.shaped, name)
+	p.mu.Unlock()
+	return p.Maintain(ctx, name)
+}
+
+// Maintain applies the container's bandwidth limits when its host veth has
+// changed since they were last applied, e.g. after podman-restart brought it
+// up on boot without the agent.
+func (p *Podman) Maintain(ctx context.Context, name string) error {
+	var inspect struct {
+		State struct {
+			Status string `json:"Status"`
+			Pid    int    `json:"Pid"`
+		} `json:"State"`
+		Config struct {
+			Labels map[string]string `json:"Labels"`
+		} `json:"Config"`
+	}
+	if err := p.request(ctx, http.MethodGet, containerPath(name)+"/json", nil, &inspect); err != nil {
+		return err
+	}
+	down, _ := strconv.Atoi(inspect.Config.Labels[labelDown])
+	up, _ := strconv.Atoi(inspect.Config.Labels[labelUp])
+	if inspect.State.Status != "running" || inspect.State.Pid == 0 || (down <= 0 && up <= 0) {
+		return nil
+	}
+	index, err := hostPeerIndex(ctx, p.run, inspect.State.Pid)
+	if err != nil {
+		return fmt.Errorf("find veth of %s: %w", name, err)
+	}
+	iface, err := p.interfaceName(index)
+	if err != nil {
+		return fmt.Errorf("find veth of %s: %w", name, err)
+	}
+	p.mu.Lock()
+	current := p.shaped[name]
+	p.mu.Unlock()
+	if current == iface {
+		return nil
+	}
+	if err := (TC{Run: p.run}).Apply(ctx, iface, down, up); err != nil {
+		return fmt.Errorf("limit bandwidth of %s: %w", name, err)
+	}
+	p.mu.Lock()
+	p.shaped[name] = iface
+	p.mu.Unlock()
+	return nil
 }

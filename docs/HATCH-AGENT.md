@@ -25,7 +25,7 @@ Hatch 是 VPSBill 自研的宿主机 Agent。它运行在母鸡上，驱动本�
 | 能力 | LXD | Podman |
 |---|---|---|
 | 创建（CPU/内存/磁盘限制、静态内网 IP） | ✅ | ✅（磁盘配额需 XFS pquota，需开启 `disk_quota`） |
-| 带宽限速 | ✅ `limits.ingress/egress` | ❌ 暂不支持 |
+| 带宽限速 | ✅ `limits.ingress/egress` | ✅ `tc`（宿主机 veth 上 tbf 限下行、ingress police 限上行） |
 | 开关机、重启、暂停/恢复 | ✅ | ✅ |
 | 重装（保留内网 IP 与端口映射） | ✅ | ✅ |
 | root 密码设置 / 重置 | ✅ exec `chpasswd` | ✅ exec `chpasswd` |
@@ -51,7 +51,7 @@ fib daddr type local tcp dport 20022 dnat to 10.20.30.254:22
 
 ## 宿主机准备
 
-- Linux + systemd + nftables（`nft` 命令）。
+- Linux + systemd + nftables（`nft` 命令）。Podman 限速还需要 `tc` 和 `nsenter`（iproute2、util-linux）。
 - **LXD**：网桥必须设置静态 `ipv4.address`（例如 `lxc network set lxdbr0 ipv4.address 10.20.30.1/24`）。Agent 从子网高位向下分配静态 IP，低位留给网桥 DHCP。在 LXD 中导入可售镜像并设置别名（`lxc image copy images:debian/12 local: --alias debian12`），别名就是套餐里的系统模板 ID。镜像需要带 sshd，推荐 `/cloud` 变体，或自行制作。
 - **Podman**：启用 rootful API 套接字（`systemctl enable --now podman.socket`）和开机拉起（`systemctl enable podman-restart.service`）。网络默认使用 `podman`，也可以用 `podman network create` 另建。镜像需要以 systemd 等 init 为入口并带 sshd，否则无法当作 VPS 使用。
 - 宿主机的 FORWARD 策略需要放行 DNAT 后的流量（Agent 自己的 forward 链已放行 `ct status dnat`）。

@@ -676,6 +676,11 @@ func (s *Service) Meter(ctx context.Context, interval time.Duration) {
 			if err := s.meterInstance(ctx, record.Name); err != nil && !isNotFound(err) {
 				s.logger.Warn("meter traffic", "instance", record.Name, "error", err)
 			}
+			if maintainer, ok := s.runtimes[record.Virtualization].(Maintainer); ok {
+				if err := maintainer.Maintain(ctx, record.Name); err != nil && !errors.Is(err, ErrInstanceNotFound) {
+					s.logger.Warn("maintain instance", "instance", record.Name, "error", err)
+				}
+			}
 		}
 		select {
 		case <-ctx.Done():
