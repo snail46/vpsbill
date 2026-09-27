@@ -30,13 +30,16 @@ type Podman struct {
 
 	mu     sync.Mutex
 	shaped map[string]string // instance name -> host veth carrying its limits
+
+	diskMu sync.Mutex
+	disk   map[string]diskSample // instance name -> last measured root fs size
 }
 
 const libpod = "/v4.0.0/libpod"
 
 func NewPodman(config PodmanConfig) *Podman {
 	return &Podman{
-		client: newUnixClient(config.Socket), config: config, run: runCommand, shaped: map[string]string{},
+		client: newUnixClient(config.Socket), config: config, run: runCommand, shaped: map[string]string{}, disk: map[string]diskSample{},
 		interfaceName: func(index int) (string, error) {
 			iface, err := net.InterfaceByIndex(index)
 			if err != nil {
@@ -176,6 +179,7 @@ func (p *Podman) State(ctx context.Context, name string) (RuntimeState, error) {
 		result.RXBytes, result.TXBytes = current.NetInput, current.NetOutput
 		result.DiskReadBytes, result.DiskWriteBytes = current.BlockInput, current.BlockOutput
 	}
+	result.DiskBytes = p.diskUsage(ctx, name)
 	return result, nil
 }
 
@@ -218,6 +222,9 @@ func (p *Podman) Delete(ctx context.Context, name string) error {
 	p.mu.Lock()
 	delete(p.shaped, name)
 	p.mu.Unlock()
+	p.diskMu.Lock()
+	delete(p.disk, name)
+	p.diskMu.Unlock()
 	err := p.request(ctx, http.MethodDelete, containerPath(name)+"?force=true&v=true", nil, nil)
 	if errors.Is(err, ErrInstanceNotFound) {
 		return nil
@@ -332,4 +339,42 @@ func staticIPs(spec RuntimeSpec) []string {
 		result = append(result, spec.IPv6.String())
 	}
 	return result
+}
+
+// diskUsageTTL bounds how often the root file system is measured; libpod
+// walks the container's layer to size it.
+const diskUsageTTL = time.Minute
+
+type diskSample struct {
+	bytes int64
+	at    time.Time
+}
+
+// diskUsage reports the container's root file system size (image plus
+// changes), the figure `df /` shows inside it when a quota is set. It is
+// measured at most once per diskUsageTTL; failures keep the last value.
+func (p *Podman) diskUsage(ctx context.Context, name string) int64 {
+	p.diskMu.Lock()
+	sample, ok := p.disk[name]
+	p.diskMu.Unlock()
+	if ok && time.Since(sample.at) < diskUsageTTL {
+		return sample.bytes
+	}
+	var inspect struct {
+		SizeRw     int64 `json:"SizeRw"`
+		SizeRootFs int64 `json:"SizeRootFs"`
+	}
+	measureCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	if err := p.request(measureCtx, http.MethodGet, containerPath(name)+"/json?size=true", nil, &inspect); err != nil {
+		return sample.bytes
+	}
+	size := inspect.SizeRootFs
+	if size <= 0 {
+		size = inspect.SizeRw
+	}
+	p.diskMu.Lock()
+	p.disk[name] = diskSample{bytes: size, at: time.Now()}
+	p.diskMu.Unlock()
+	return size
 }

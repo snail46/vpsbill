@@ -52,7 +52,7 @@ curl -fsS http://127.0.0.1:8088/health/ready
 - 时区选 `Asia/Shanghai`；
 - 填写初始超级管理员的邮箱和密码。
 
-提交后，商家后台在 `/admin`，站点根路径是客户中心。登录后台后建议先在「安全中心」开启 TOTP 二步验证。
+提交后，商家后台在 `/admin`，站点根路径是客户中心。登录后台后建议先在「安全中心」开启 TOTP 二步验证；站点名称、公开地址、时区、续费周期和发信邮箱以后都可以在「站点设置」里修改。
 
 ## 4. 准备母鸡（任选一种或几种）
 
@@ -169,22 +169,21 @@ curl -fsSL http://127.0.0.1:8088/api/v1/agent/download/install.sh | sh -s -- --s
 
 第二条命令用来同步升级 Hatch Agent，已有配置会保留。
 
-改用域名 HTTPS：把域名解析到服务器，`.env` 改为 `APP_PORT=127.0.0.1:8088`、`DOMAIN=billing.example.com`，然后更新站点的公开 URL（后台暂时没有修改入口）并重启：
-
-```sh
-cd /opt/vpsbill
-docker compose exec postgres psql -U vpsbill -d vpsbill -c \
-  "UPDATE system_settings SET public_url='https://billing.example.com' WHERE singleton"
-docker compose --profile tls up -d
-docker compose restart api
-```
+改用域名 HTTPS：把域名解析到服务器，`.env` 改为 `APP_PORT=127.0.0.1:8088`、`DOMAIN=billing.example.com`，执行 `docker compose --profile tls up -d`，再到后台「站点设置」把公开访问地址改成 `https://billing.example.com` 并保存，立即生效。
 
 备份、恢复和主密钥轮换见 [运维手册](OPERATIONS.md)。
 
+## 客户找回密码
+
+两种方式，可以同时用：
+
+- **邮件自助找回**：后台「站点设置 → 发信邮箱（SMTP）」填写服务器、端口、加密方式、发件人和账号密码，保存后点「发送测试邮件」确认能收到。之后客户登录页的「忘记密码？」会发送 30 分钟内有效的一次性重置链接。没配置 SMTP 时，这个页面会提示客户联系客服。
+- **管理员生成链接**：后台「客户管理」对客户点「重置密码链接」，得到 24 小时内有效的一次性链接，通过工单等可信渠道发给客户本人。
+
+重置成功后，该客户所有已登录的会话都会退出；同一客户新生成链接后，旧链接自动失效。
+
 ## 已知限制
 
-- Podman 实例的磁盘占用显示为 0，磁盘配额需要 XFS pquota 并开启 `disk_quota`；
-- 客户暂时没有「忘记密码」自助找回，需要管理员处理；
-- 安装后站点名称、公开 URL、时区没有后台修改入口，需要按上面的 SQL 修改；
+- Podman 实例磁盘占用每分钟测量一次；磁盘配额需要 XFS pquota 并开启 `disk_quota`；
 - LXDAPI 和 Hatch 没有历史监控曲线和 VNC；
 - 在线支付未接入时只能后台人工确认到账；正式收款必须使用 HTTPS。

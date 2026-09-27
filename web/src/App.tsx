@@ -23,6 +23,7 @@ import {
   Send,
   ServerCog,
   Settings,
+  SlidersHorizontal,
   ShieldCheck,
   ShoppingCart,
   Square,
@@ -62,7 +63,7 @@ import {
 import CustomerServicesPanel from './CustomerServices'
 import HostDetailPanel from './HostDetail'
 
-type Meta = { name: string; environment: string; installed: boolean; capabilities: string[] }
+type Meta = { name: string; environment: string; installed: boolean; capabilities: string[]; password_reset_mail?: boolean }
 type View =
   | 'overview'
   | 'customers'
@@ -75,6 +76,7 @@ type View =
   | 'plans'
   | 'support'
   | 'audit'
+  | 'settings'
   | 'security'
 type AuthScreen = 'loading' | 'install' | 'login' | 'ready'
 
@@ -100,6 +102,7 @@ const navItems: Array<{ id: View; label: string; icon: typeof LayoutDashboard }>
   { id: 'hosts', label: '宿主机探针', icon: Cpu },
   { id: 'support', label: '客户工单', icon: Headphones },
   { id: 'audit', label: '审计日志', icon: ScrollText },
+  { id: 'settings', label: '站点设置', icon: SlidersHorizontal },
   { id: 'security', label: '安全中心', icon: Settings },
 ]
 
@@ -115,6 +118,7 @@ const adminViews: View[] = [
   'plans',
   'support',
   'audit',
+  'settings',
   'security',
 ]
 
@@ -456,7 +460,7 @@ function Field({
   )
 }
 
-type CustomerAuthScreen = 'loading' | 'login' | 'register' | 'ready'
+type CustomerAuthScreen = 'loading' | 'login' | 'register' | 'forgot' | 'reset' | 'ready'
 type PortalView = 'overview' | 'shop' | 'services' | 'billing' | 'support' | 'profile'
 const portalViews: PortalView[] = ['overview', 'shop', 'services', 'billing', 'support', 'profile']
 
@@ -468,12 +472,19 @@ function portalViewFromPath(): PortalView {
 function CustomerPortalApp() {
   const [screen, setScreen] = useState<CustomerAuthScreen>('loading')
   const [customer, setCustomer] = useState<CustomerIdentity | null>(null)
+  const [meta, setMeta] = useState<Meta | null>(null)
 
   useEffect(() => {
+    api<Meta>('/api/v1/meta').then(setMeta).catch(() => undefined)
     api<{ required: boolean }>('/api/v1/install')
       .then(installation => {
         if (installation.required) {
           window.location.replace('/admin')
+          return
+        }
+        // Reset links open the reset form even when a session exists.
+        if (window.location.pathname === '/portal/reset-password') {
+          setScreen('reset')
           return
         }
         return api<CustomerIdentity>('/api/v1/customer/auth/me')
@@ -491,6 +502,7 @@ function CustomerPortalApp() {
     return (
       <CustomerAuthPage
         mode={screen}
+        meta={meta}
         onMode={setScreen}
         onAuthenticated={value => {
           setCustomer(value)
@@ -514,26 +526,65 @@ function CustomerPortalApp() {
 
 function CustomerAuthPage({
   mode,
+  meta,
   onMode,
   onAuthenticated,
 }: {
   mode: CustomerAuthScreen
+  meta: Meta | null
   onMode: (mode: CustomerAuthScreen) => void
   onAuthenticated: (customer: CustomerIdentity) => void
 }) {
   const register = mode === 'register'
+  const forgot = mode === 'forgot'
+  const reset = mode === 'reset'
   const [displayName, setDisplayName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
   const [totpCode, setTotpCode] = useState('')
   const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const siteName = meta?.name || 'VPSBill'
+
+  function switchMode(next: CustomerAuthScreen) {
+    setError('')
+    setNotice('')
+    setPassword('')
+    setConfirmPassword('')
+    if (window.location.pathname === '/portal/reset-password') window.history.replaceState(null, '', '/')
+    onMode(next)
+  }
 
   async function submit(event: FormEvent) {
     event.preventDefault()
     setSubmitting(true)
     setError('')
+    setNotice('')
     try {
+      if (forgot) {
+        const result = await api<{ message: string }>('/api/v1/customer/auth/password-reset', {
+          method: 'POST',
+          body: JSON.stringify({ email }),
+        })
+        setNotice(result.message)
+        return
+      }
+      if (reset) {
+        if (password !== confirmPassword) {
+          setError('两次输入的新密码不一致')
+          return
+        }
+        const token = new URLSearchParams(window.location.search).get('token') ?? ''
+        await api('/api/v1/customer/auth/password-reset/confirm', {
+          method: 'POST',
+          body: JSON.stringify({ token, password }),
+        })
+        switchMode('login')
+        setNotice('密码已重置，请使用新密码登录。')
+        return
+      }
       const body = register ? { display_name: displayName, email, password } : { email, password, totp_code: totpCode }
       const current = await api<CustomerIdentity>(
         register ? '/api/v1/customer/auth/register' : '/api/v1/customer/auth/login',
@@ -547,13 +598,25 @@ function CustomerAuthPage({
     }
   }
 
+  const title = register ? '创建客户账户' : forgot ? '找回登录密码' : reset ? '设置新密码' : '登录客户中心'
+  const subtitle = register
+    ? '注册后会自动开通个人财务账本。'
+    : forgot
+      ? meta?.password_reset_mail === false
+        ? '本站暂未开通邮件找回，请通过客服或工单联系商家为你生成重置链接。'
+        : '输入注册邮箱，我们会发送一封包含重置链接的邮件，30 分钟内有效。'
+      : reset
+        ? '新密码至少 12 个字符。设置后，所有已登录的设备都会退出。'
+        : '管理你的云资源与服务账单。'
+  const submitLabel = register ? '完成注册并登录' : forgot ? '发送重置邮件' : reset ? '保存新密码' : '登录客户中心'
+
   return (
     <main className="auth-page customer-auth-page">
       <section className="auth-brand-panel customer-brand-panel">
         <div className="brand auth-brand">
           <div className="brand-mark">VB</div>
           <div>
-            <strong>VPSBill</strong>
+            <strong>{siteName}</strong>
             <span>客户服务中心</span>
           </div>
         </div>
@@ -570,19 +633,26 @@ function CustomerAuthPage({
       <section className="auth-form-panel">
         <form className="auth-form" onSubmit={submit}>
           <p className="eyebrow">CUSTOMER PORTAL</p>
-          <h2>{register ? '创建客户账户' : '登录客户中心'}</h2>
-          <p>{register ? '注册后会自动开通个人财务账本。' : '管理你的云资源与服务账单。'}</p>
+          <h2>{title}</h2>
+          <p>{subtitle}</p>
           {register && <Field label="姓名 / 昵称" value={displayName} onChange={setDisplayName} autoComplete="name" />}
-          <Field label="登录邮箱" value={email} onChange={setEmail} type="email" autoComplete="email" />
-          <Field
-            label="登录密码"
-            value={password}
-            onChange={setPassword}
-            type="password"
-            autoComplete={register ? 'new-password' : 'current-password'}
-            hint={register ? '至少 12 个字符' : undefined}
-          />
-          {!register && (
+          {!reset && !(forgot && meta?.password_reset_mail === false) && (
+            <Field label="登录邮箱" value={email} onChange={setEmail} type="email" autoComplete="email" />
+          )}
+          {!forgot && (
+            <Field
+              label={reset ? '新密码' : '登录密码'}
+              value={password}
+              onChange={setPassword}
+              type="password"
+              autoComplete={register || reset ? 'new-password' : 'current-password'}
+              hint={register || reset ? '至少 12 个字符' : undefined}
+            />
+          )}
+          {reset && (
+            <Field label="再次输入新密码" value={confirmPassword} onChange={setConfirmPassword} type="password" autoComplete="new-password" />
+          )}
+          {mode === 'login' && (
             <Field
               label="二步验证码（启用后填写）"
               value={totpCode}
@@ -592,19 +662,26 @@ function CustomerAuthPage({
             />
           )}
           {error && <div className="form-error" role="alert">{error}</div>}
-          <button className="primary-button" style={{ width: '100%', marginTop: '6px' }} disabled={submitting || mode === 'loading'}>
-            {mode === 'loading' ? '正在连接…' : submitting ? '正在提交…' : register ? '完成注册并登录' : '登录客户中心'}
-          </button>
-          <button
-            type="button"
-            className="auth-switch button-link"
-            onClick={() => {
-              setError('')
-              onMode(register ? 'login' : 'register')
-            }}
-          >
-            {register ? '已有账号？返回登录' : '还没有账号？立即注册'}
-          </button>
+          {notice && <div className="form-success" role="status">{notice}</div>}
+          {!(forgot && meta?.password_reset_mail === false) && (
+            <button className="primary-button" style={{ width: '100%', marginTop: '6px' }} disabled={submitting || mode === 'loading'}>
+              {mode === 'loading' ? '正在连接…' : submitting ? '正在提交…' : submitLabel}
+            </button>
+          )}
+          <div className="auth-links">
+            <button
+              type="button"
+              className="auth-switch button-link"
+              onClick={() => switchMode(mode === 'login' ? 'register' : 'login')}
+            >
+              {mode === 'login' ? '还没有账号？立即注册' : register ? '已有账号？返回登录' : '返回登录'}
+            </button>
+            {mode === 'login' && (
+              <button type="button" className="auth-switch button-link" onClick={() => switchMode('forgot')}>
+                忘记密码？
+              </button>
+            )}
+          </div>
         </form>
       </section>
     </main>
@@ -1862,6 +1939,7 @@ function AdminShell({ meta, user, onLogout }: { meta: Meta | null; user: StaffUs
         {view === 'orders' && <OrdersView />}
         {view === 'billing' && <BillingView />}
         {view === 'payment' && <PaymentSettingsView />}
+        {view === 'settings' && <SiteSettingsView />}
         {view === 'services' && <ServicesView />}
         {view === 'nodes' && <NodesView />}
         {view === 'hosts' &&
@@ -2031,6 +2109,26 @@ function CustomersView() {
   const [showForm, setShowForm] = useState(false)
   const [error, setError] = useState('')
   const [updating, setUpdating] = useState('')
+  const [resetLink, setResetLink] = useState<{ name: string; email: string; link: string; expires_at: string } | null>(null)
+  const [copied, setCopied] = useState(false)
+
+  async function issueResetLink(customer: AccountRecord) {
+    if (!window.confirm(`为客户【${customer.display_name}】生成一次性密码重置链接？此前未使用的链接会失效。`)) return
+    setUpdating(customer.id)
+    setError('')
+    setCopied(false)
+    try {
+      const result = await api<{ email: string; link: string; expires_at: string }>(
+        `/api/v1/admin/customers/${customer.id}/password-reset`,
+        { method: 'POST' }
+      )
+      setResetLink({ name: customer.display_name, ...result })
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '生成重置链接失败')
+    } finally {
+      setUpdating('')
+    }
+  }
 
   const load = () =>
     api<AccountRecord[]>('/api/v1/admin/customers')
@@ -2069,6 +2167,33 @@ function CustomersView() {
 
       {error && <div className="form-error">{error}</div>}
 
+      {resetLink && (
+        <div className="inline-form reset-link-panel">
+          <div className="inline-form-heading">
+            <div>
+              <h3>{resetLink.name} 的密码重置链接</h3>
+              <p>
+                登录邮箱 {resetLink.email}，{new Date(resetLink.expires_at).toLocaleString()} 前有效，只能使用一次。请通过工单或其他可信渠道发给客户本人。
+              </p>
+            </div>
+            <button className="icon-button" onClick={() => setResetLink(null)} aria-label="关闭">
+              <X size={16} />
+            </button>
+          </div>
+          <div className="reset-link-row">
+            <code>{resetLink.link}</code>
+            <button
+              className="secondary-button compact"
+              onClick={() => {
+                void navigator.clipboard?.writeText(resetLink.link).then(() => setCopied(true), () => setCopied(false))
+              }}
+            >
+              {copied ? '已复制' : '复制链接'}
+            </button>
+          </div>
+        </div>
+      )}
+
       {showForm && (
         <CustomerForm
           onClose={() => setShowForm(false)}
@@ -2105,13 +2230,22 @@ function CustomersView() {
                 <td><StatusBadge status={customer.status} /></td>
                 <td>{new Date(customer.created_at).toLocaleString()}</td>
                 <td>
-                  <button
-                    className="text-button"
-                    disabled={updating === customer.id}
-                    onClick={() => void toggleStatus(customer)}
-                  >
-                    {customer.status === 'active' ? '暂停账户' : '恢复正常'}
-                  </button>
+                  <div className="row-actions">
+                    <button
+                      className="text-button"
+                      disabled={updating === customer.id}
+                      onClick={() => void toggleStatus(customer)}
+                    >
+                      {customer.status === 'active' ? '暂停账户' : '恢复正常'}
+                    </button>
+                    <button
+                      className="text-button"
+                      disabled={updating === customer.id}
+                      onClick={() => void issueResetLink(customer)}
+                    >
+                      重置密码链接
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}
@@ -2810,6 +2944,273 @@ function PaymentSettingsView() {
         <div className="form-actions">
           <button className="primary-button compact" disabled={saving}>
             {saving ? '正在保存…' : '保存并应用设置'}
+          </button>
+        </div>
+      </form>
+    </section>
+  )
+}
+
+type SiteSettingsRecord = {
+  app_name: string
+  public_url: string
+  timezone: string
+  worker_poll_interval: string
+  reconcile_interval: string
+  lifecycle_interval: string
+  renewal_lead_time: string
+  overdue_grace_period: string
+  termination_retention: string
+  notification_webhook_url: string
+  notification_webhook_secret_configured: boolean
+  smtp_host: string
+  smtp_port: number
+  smtp_username: string
+  smtp_password_configured: boolean
+  smtp_from: string
+  smtp_security: string
+  password_reset_mail_enabled: boolean
+}
+
+function SiteSettingsView() {
+  const [settings, setSettings] = useState<SiteSettingsRecord | null>(null)
+  const [form, setForm] = useState({
+    app_name: '',
+    public_url: '',
+    timezone: 'Asia/Shanghai',
+    worker_poll_interval: '',
+    reconcile_interval: '',
+    lifecycle_interval: '',
+    renewal_lead_time: '',
+    overdue_grace_period: '',
+    termination_retention: '',
+    notification_webhook_url: '',
+    notification_webhook_secret: '',
+    smtp_host: '',
+    smtp_port: '587',
+    smtp_username: '',
+    smtp_password: '',
+    smtp_from: '',
+    smtp_security: 'starttls',
+  })
+  const [clearPassword, setClearPassword] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [testing, setTesting] = useState(false)
+  const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
+
+  const apply = (value: SiteSettingsRecord) => {
+    setSettings(value)
+    setForm(current => ({
+      ...current,
+      app_name: value.app_name,
+      public_url: value.public_url,
+      timezone: value.timezone,
+      worker_poll_interval: value.worker_poll_interval,
+      reconcile_interval: value.reconcile_interval,
+      lifecycle_interval: value.lifecycle_interval,
+      renewal_lead_time: value.renewal_lead_time,
+      overdue_grace_period: value.overdue_grace_period,
+      termination_retention: value.termination_retention,
+      notification_webhook_url: value.notification_webhook_url,
+      notification_webhook_secret: '',
+      smtp_host: value.smtp_host,
+      smtp_port: String(value.smtp_port || 587),
+      smtp_username: value.smtp_username,
+      smtp_password: '',
+      smtp_from: value.smtp_from,
+      smtp_security: value.smtp_security || 'starttls',
+    }))
+    setClearPassword(false)
+  }
+
+  useEffect(() => {
+    api<SiteSettingsRecord>('/api/v1/admin/settings/site')
+      .then(apply)
+      .catch(err => setError(err.message))
+  }, [])
+
+  const update =
+    (key: keyof typeof form) =>
+    (event: ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
+      setForm(current => ({ ...current, [key]: event.target.value }))
+
+  async function submit(event: FormEvent) {
+    event.preventDefault()
+    setSaving(true)
+    setNotice('')
+    setError('')
+    try {
+      const value = await api<SiteSettingsRecord>('/api/v1/admin/settings/site', {
+        method: 'PUT',
+        body: JSON.stringify({ ...form, smtp_port: Number(form.smtp_port) || 0, clear_smtp_password: clearPassword }),
+      })
+      apply(value)
+      setNotice('站点设置已保存并立即生效。')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '保存失败')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function sendTest() {
+    setTesting(true)
+    setNotice('')
+    setError('')
+    try {
+      const result = await api<{ to: string }>('/api/v1/admin/settings/site/test-mail', { method: 'POST' })
+      setNotice(`测试邮件已发送到 ${result.to}，请检查收件箱和垃圾邮件。`)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '发送失败')
+    } finally {
+      setTesting(false)
+    }
+  }
+
+  return (
+    <section className="workspace-panel">
+      <div className="page-actions">
+        <div>
+          <p className="eyebrow">SITE SETTINGS</p>
+          <h2>站点设置</h2>
+          <p>站点名称、公开地址、自动化周期、通知与发信邮箱。支付回调和密码重置链接都基于公开地址，换域名后要同步修改。密钥加密保存且不回显，留空代表保留原值。</p>
+        </div>
+      </div>
+
+      {error && <div className="form-error">{error}</div>}
+      {notice && <div className="success-note">{notice}</div>}
+
+      <form className="panel site-settings" onSubmit={submit}>
+        <div className="form-grid">
+          <fieldset className="wide">
+            <legend>基本信息</legend>
+          </fieldset>
+          <label>
+            <span>站点名称</span>
+            <input value={form.app_name} onChange={update('app_name')} required />
+          </label>
+          <label>
+            <span>公开访问地址</span>
+            <input type="url" value={form.public_url} onChange={update('public_url')} placeholder="https://billing.example.com" required />
+          </label>
+          <label>
+            <span>时区</span>
+            <input value={form.timezone} onChange={update('timezone')} placeholder="Asia/Shanghai" required />
+          </label>
+
+          <fieldset className="wide">
+            <legend>续费与自动化（格式如 30s、5m、72h）</legend>
+          </fieldset>
+          <label>
+            <span>续费账单提前生成</span>
+            <input value={form.renewal_lead_time} onChange={update('renewal_lead_time')} />
+          </label>
+          <label>
+            <span>逾期宽限期（到期后暂停）</span>
+            <input value={form.overdue_grace_period} onChange={update('overdue_grace_period')} />
+          </label>
+          <label>
+            <span>暂停后保留（到期后删除）</span>
+            <input value={form.termination_retention} onChange={update('termination_retention')} />
+          </label>
+          <label>
+            <span>任务轮询间隔</span>
+            <input value={form.worker_poll_interval} onChange={update('worker_poll_interval')} />
+          </label>
+          <label>
+            <span>对账间隔</span>
+            <input value={form.reconcile_interval} onChange={update('reconcile_interval')} />
+          </label>
+          <label>
+            <span>生命周期检查间隔</span>
+            <input value={form.lifecycle_interval} onChange={update('lifecycle_interval')} />
+          </label>
+
+          <fieldset className="wide">
+            <legend>通知 Webhook（可选）</legend>
+          </fieldset>
+          <label>
+            <span>通知地址</span>
+            <input type="url" value={form.notification_webhook_url} onChange={update('notification_webhook_url')} placeholder="留空则不投递" />
+          </label>
+          <label>
+            <span>签名密钥 {settings?.notification_webhook_secret_configured ? '（已加密配置）' : ''}</span>
+            <input
+              type="password"
+              value={form.notification_webhook_secret}
+              onChange={update('notification_webhook_secret')}
+              placeholder="至少 32 位，留空保留或自动生成"
+              autoComplete="new-password"
+            />
+          </label>
+          <div />
+
+          <fieldset className="wide">
+            <legend>
+              发信邮箱（SMTP）· 用于客户找回密码
+              {settings && (
+                <span className={`tag ${settings.password_reset_mail_enabled ? 'tag-ok' : ''}`}>
+                  {settings.password_reset_mail_enabled ? '已启用' : '未配置'}
+                </span>
+              )}
+            </legend>
+          </fieldset>
+          <label>
+            <span>SMTP 服务器</span>
+            <input value={form.smtp_host} onChange={update('smtp_host')} placeholder="smtp.example.com，留空不发信" />
+          </label>
+          <label>
+            <span>端口</span>
+            <input type="number" min={1} max={65535} value={form.smtp_port} onChange={update('smtp_port')} />
+          </label>
+          <label>
+            <span>加密方式</span>
+            <select value={form.smtp_security} onChange={update('smtp_security')}>
+              <option value="starttls">STARTTLS（通常 587）</option>
+              <option value="tls">SSL/TLS（通常 465）</option>
+              <option value="none">不加密（仅限内网中继）</option>
+            </select>
+          </label>
+          <label>
+            <span>发件人</span>
+            <input value={form.smtp_from} onChange={update('smtp_from')} placeholder="VPSBill <noreply@example.com>" />
+          </label>
+          <label>
+            <span>登录账号</span>
+            <input value={form.smtp_username} onChange={update('smtp_username')} autoComplete="off" />
+          </label>
+          <label>
+            <span>登录密码 {settings?.smtp_password_configured ? '（已加密配置）' : ''}</span>
+            <input
+              type="password"
+              value={form.smtp_password}
+              onChange={update('smtp_password')}
+              placeholder="留空保留已有密码"
+              autoComplete="new-password"
+              disabled={clearPassword}
+            />
+          </label>
+          {settings?.smtp_password_configured && (
+            <label className="checkbox wide">
+              <input type="checkbox" checked={clearPassword} onChange={event => setClearPassword(event.target.checked)} />
+              清除已保存的 SMTP 密码
+            </label>
+          )}
+        </div>
+
+        <div className="form-actions">
+          <button
+            type="button"
+            className="secondary-button compact"
+            disabled={testing || !settings?.password_reset_mail_enabled}
+            onClick={() => void sendTest()}
+            title={settings?.password_reset_mail_enabled ? '发送到当前管理员邮箱' : '先保存 SMTP 设置'}
+          >
+            {testing ? '正在发送…' : '发送测试邮件'}
+          </button>
+          <button className="primary-button compact" disabled={saving}>
+            {saving ? '正在保存…' : '保存设置'}
           </button>
         </div>
       </form>
@@ -3958,6 +4359,7 @@ function viewTitle(view: View) {
       plans: '商品套餐管理',
       support: '工单管理',
       audit: '安全审计日志',
+      settings: '站点设置',
       security: '账户安全设置',
     } as Record<View, string>)[view]
   )

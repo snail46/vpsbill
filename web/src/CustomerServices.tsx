@@ -192,13 +192,6 @@ function ServiceCard({ service, onReload }: { service: CustomerServiceRecord; on
         </div>
       )}
 
-      <div className="service-specs">
-        <span><strong>{service.vcpu}</strong>vCPU</span>
-        <span><strong>{service.ram_mb}</strong>MB 内存</span>
-        <span><strong>{service.disk_gb}</strong>GB 磁盘</span>
-        <span><strong>{service.traffic_gb}</strong>GB 流量</span>
-      </div>
-
       {usable && (<>
       <div className="runtime-grid">
         <Meter

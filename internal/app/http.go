@@ -68,9 +68,10 @@ func NewHandler(deps Dependencies) (http.Handler, error) {
 	mux.HandleFunc("GET /api/v1/meta", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"data": map[string]any{
-				"name":        deps.Settings.Current().AppName,
-				"environment": deps.Config.Environment,
-				"installed":   deps.Settings.Current().Installed,
+				"name":                deps.Settings.Current().AppName,
+				"environment":         deps.Config.Environment,
+				"installed":           deps.Settings.Current().Installed,
+				"password_reset_mail": deps.Settings.Current().SMTP.Configured(),
 				"capabilities": []string{
 					"accounts", "catalog", "billing", "provisioning", "clicd", "support", "audit", "notifications",
 				},
@@ -88,6 +89,8 @@ func NewHandler(deps Dependencies) (http.Handler, error) {
 	mux.Handle("POST /api/v1/auth/password", auth.require("", http.HandlerFunc(auth.staffChangePassword)))
 	mux.HandleFunc("POST /api/v1/customer/auth/register", auth.customerRegister)
 	mux.HandleFunc("POST /api/v1/customer/auth/login", auth.customerLogin)
+	mux.HandleFunc("POST /api/v1/customer/auth/password-reset", auth.customerRequestPasswordReset)
+	mux.HandleFunc("POST /api/v1/customer/auth/password-reset/confirm", auth.customerResetPassword)
 	mux.Handle("GET /api/v1/customer/auth/me", auth.requireCustomer(http.HandlerFunc(auth.customerMe)))
 	mux.Handle("POST /api/v1/customer/auth/logout", auth.requireCustomer(http.HandlerFunc(auth.logout)))
 	mux.Handle("POST /api/v1/customer/auth/mfa/setup", auth.requireCustomer(http.HandlerFunc(auth.customerMFASetup)))
@@ -143,6 +146,7 @@ func NewHandler(deps Dependencies) (http.Handler, error) {
 	mux.Handle("GET /api/v1/admin/customers", auth.require("customers:read", http.HandlerFunc(billing.listCustomers)))
 	mux.Handle("POST /api/v1/admin/customers", auth.require("customers:write", http.HandlerFunc(billing.createCustomer)))
 	mux.Handle("PATCH /api/v1/admin/customers/{id}", auth.require("customers:write", http.HandlerFunc(billing.updateCustomer)))
+	mux.Handle("POST /api/v1/admin/customers/{id}/password-reset", auth.require("customers:write", http.HandlerFunc(auth.staffIssueCustomerReset)))
 	mux.Handle("GET /api/v1/admin/regions", auth.require("nodes:read", http.HandlerFunc(billing.listRegions)))
 	mux.Handle("GET /api/v1/admin/orders", auth.require("orders:read", http.HandlerFunc(billing.listOrders)))
 	mux.Handle("POST /api/v1/admin/orders", auth.require("orders:write", http.HandlerFunc(billing.createOrder)))
@@ -151,6 +155,9 @@ func NewHandler(deps Dependencies) (http.Handler, error) {
 	mux.Handle("POST /api/v1/admin/invoices/{id}/pay", auth.require("billing:write", http.HandlerFunc(billing.recordManualPayment)))
 	mux.Handle("GET /api/v1/admin/settings/payment", auth.require("billing:read", http.HandlerFunc(adminSettings.payment)))
 	mux.Handle("PUT /api/v1/admin/settings/payment", auth.require("billing:write", http.HandlerFunc(adminSettings.updatePayment)))
+	mux.Handle("GET /api/v1/admin/settings/site", auth.require("settings:read", http.HandlerFunc(adminSettings.site)))
+	mux.Handle("PUT /api/v1/admin/settings/site", auth.require("settings:write", http.HandlerFunc(adminSettings.updateSite)))
+	mux.Handle("POST /api/v1/admin/settings/site/test-mail", auth.require("settings:write", http.HandlerFunc(adminSettings.testMail)))
 	mux.Handle("GET /api/v1/admin/services", auth.require("services:read", http.HandlerFunc(automation.listServices)))
 	mux.Handle("GET /api/v1/admin/jobs", auth.require("services:read", http.HandlerFunc(automation.listJobs)))
 	mux.Handle("POST /api/v1/admin/jobs/{id}/retry", auth.require("services:write", http.HandlerFunc(automation.retryJob)))

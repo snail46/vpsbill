@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"vpsbill/internal/config"
+	"vpsbill/internal/mail"
 	"vpsbill/internal/security"
 	"vpsbill/internal/store/postgres"
 )
@@ -39,6 +40,7 @@ type Runtime struct {
 	OverdueGracePeriod           time.Duration
 	TerminationRetention         time.Duration
 	PaymentGateway               PaymentGatewayConfig
+	SMTP                         mail.Config
 }
 
 type PaymentGatewayConfig struct {
@@ -226,15 +228,17 @@ func (m *Manager) UpdatePaymentGateway(ctx context.Context, in PaymentGatewayInp
 
 func (m *Manager) reload(ctx context.Context) error {
 	var v Runtime
-	var payment, notification, metrics, gatewayConfig []byte
+	var payment, notification, metrics, gatewayConfig, smtpPassword []byte
 	var gatewayType string
 	var poll, reconcile, lifecycle, lead, grace, retention int
 	err := m.db.QueryRow(ctx, `SELECT app_name,public_url,timezone,payment_provider_name,payment_checkout_url,
 		payment_webhook_secret_encrypted,notification_webhook_url,notification_webhook_secret_encrypted,metrics_token_encrypted,
 		worker_poll_interval_seconds,reconcile_interval_seconds,lifecycle_interval_seconds,renewal_lead_seconds,overdue_grace_seconds,termination_retention_seconds,
-		payment_gateway_type,payment_gateway_config_encrypted
+		payment_gateway_type,payment_gateway_config_encrypted,
+		smtp_host,smtp_port,smtp_username,smtp_password_encrypted,smtp_from,smtp_security
 		FROM system_settings WHERE singleton=true`).Scan(&v.AppName, &v.PublicURL, &v.Timezone, &v.PaymentProviderName, &v.PaymentCheckoutURL,
-		&payment, &v.NotificationWebhookURL, &notification, &metrics, &poll, &reconcile, &lifecycle, &lead, &grace, &retention, &gatewayType, &gatewayConfig)
+		&payment, &v.NotificationWebhookURL, &notification, &metrics, &poll, &reconcile, &lifecycle, &lead, &grace, &retention, &gatewayType, &gatewayConfig,
+		&v.SMTP.Host, &v.SMTP.Port, &v.SMTP.Username, &smtpPassword, &v.SMTP.From, &v.SMTP.Security)
 	if err != nil {
 		return err
 	}
@@ -248,6 +252,11 @@ func (m *Manager) reload(ctx context.Context) error {
 	}
 	if v.MetricsToken, err = m.box.Open(metrics); err != nil {
 		return fmt.Errorf("decrypt metrics token: %w", err)
+	}
+	if len(smtpPassword) > 0 {
+		if v.SMTP.Password, err = m.box.Open(smtpPassword); err != nil {
+			return fmt.Errorf("decrypt smtp password: %w", err)
+		}
 	}
 	v.PaymentGateway = legacyPaymentConfig(gatewayType, v.PaymentCheckoutURL, v.PaymentWebhookSecret)
 	if len(gatewayConfig) > 0 {

@@ -51,6 +51,7 @@ func fakeLibpod(t *testing.T) (string, *map[string]any) {
 	}
 	created := map[string]any{}
 	var mu sync.Mutex
+	sizeQueries = 0
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /v4.0.0/libpod/containers/create", func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
@@ -62,14 +63,19 @@ func fakeLibpod(t *testing.T) (string, *map[string]any) {
 	mux.HandleFunc("POST /v4.0.0/libpod/containers/svc/start", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	})
-	mux.HandleFunc("GET /v4.0.0/libpod/containers/svc/json", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("GET /v4.0.0/libpod/containers/svc/json", func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		defer mu.Unlock()
 		labels, _ := created["labels"].(map[string]any)
-		_ = json.NewEncoder(w).Encode(map[string]any{
+		body := map[string]any{
 			"State":  map[string]any{"Status": "running", "Pid": 4242},
 			"Config": map[string]any{"Labels": labels},
-		})
+		}
+		if r.URL.Query().Get("size") == "true" {
+			sizeQueries++
+			body["SizeRootFs"] = int64(512 << 20)
+		}
+		_ = json.NewEncoder(w).Encode(body)
 	})
 	server := &http.Server{Handler: mux}
 	go func() { _ = server.Serve(listener) }()
@@ -113,5 +119,26 @@ func TestPodmanAppliesBandwidthLimitsOncePerVeth(t *testing.T) {
 func TestBurstBytes(t *testing.T) {
 	if burstBytes(1) != "32768b" || burstBytes(1000) != "1250000b" {
 		t.Fatalf("unexpected bursts %s %s", burstBytes(1), burstBytes(1000))
+	}
+}
+
+// sizeQueries counts ?size=true inspections served by fakeLibpod.
+var sizeQueries int
+
+func TestPodmanReportsCachedDiskUsage(t *testing.T) {
+	socket, _ := fakeLibpod(t)
+	runtime := NewPodman(PodmanConfig{Socket: socket, Network: "podman"})
+	ctx := context.Background()
+	for range 3 {
+		state, err := runtime.State(ctx, "svc")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if state.DiskBytes != 512<<20 {
+			t.Fatalf("disk bytes = %d", state.DiskBytes)
+		}
+	}
+	if sizeQueries != 1 {
+		t.Fatalf("root fs measured %d times, want once per TTL", sizeQueries)
 	}
 }

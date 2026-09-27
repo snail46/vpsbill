@@ -332,4 +332,38 @@ func TestBillingLifecycleIntegration(t *testing.T) {
 	if _, err = auth.SessionByToken(ctx, []byte("other-token")); err == nil {
 		t.Fatal("other sessions must be revoked")
 	}
+
+	// Reset links: only the newest one works, once, and it ends every session.
+	ownerID, ownerEmail, err := auth.AccountOwnerLogin(ctx, account.ID)
+	if err != nil || ownerID != customerID || ownerEmail != "customer@example.com" {
+		t.Fatalf("account owner: id=%s email=%s err=%v", ownerID, ownerEmail, err)
+	}
+	if err = auth.CreatePasswordReset(ctx, customerID, []byte("reset-old"), "self", time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if err = auth.CreatePasswordReset(ctx, customerID, []byte("reset-new"), "staff", time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if recent, recentErr := auth.RecentPasswordResets(ctx, customerID); recentErr != nil || recent != 1 {
+		t.Fatalf("recent self resets=%d err=%v", recent, recentErr)
+	}
+	if err = auth.CreateSession(ctx, customerID, []byte("customer-token"), []byte("csrf-3"), time.Now().Add(time.Hour), "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = auth.ResetPassword(ctx, []byte("reset-old"), "reset-hash"); !errors.Is(err, ErrResetTokenInvalid) {
+		t.Fatalf("superseded link must fail, got %v", err)
+	}
+	if resetUser, resetErr := auth.ResetPassword(ctx, []byte("reset-new"), "reset-hash"); resetErr != nil || resetUser != customerID {
+		t.Fatalf("reset: user=%s err=%v", resetUser, resetErr)
+	}
+	if _, err = auth.ResetPassword(ctx, []byte("reset-new"), "again"); !errors.Is(err, ErrResetTokenInvalid) {
+		t.Fatalf("used link must fail, got %v", err)
+	}
+	if hash, hashErr := auth.PasswordHash(ctx, customerID); hashErr != nil || hash != "reset-hash" {
+		t.Fatalf("customer hash=%q err=%v", hash, hashErr)
+	}
+	var customerSessions int
+	if err = db.QueryRow(ctx, `SELECT count(*) FROM login_sessions WHERE user_id=$1`, customerID).Scan(&customerSessions); err != nil || customerSessions != 0 {
+		t.Fatalf("sessions after reset=%d err=%v", customerSessions, err)
+	}
 }

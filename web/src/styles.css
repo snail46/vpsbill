@@ -1281,33 +1281,6 @@ textarea {
   margin: 0;
 }
 
-.service-specs {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 8px;
-  margin: 18px 0;
-}
-
-.service-specs span {
-  padding: 9px 8px;
-  border-radius: var(--radius-md);
-  background: var(--bg-card-subtle);
-  border: 1px solid var(--border-subtle);
-  color: var(--text-muted);
-  font-size: 12px;
-  text-align: center;
-}
-
-.service-specs strong {
-  display: block;
-  color: var(--text-primary);
-  font-family: var(--font-mono);
-  font-size: 15px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  margin-bottom: 2px;
-}
-
 /* Runtime Meters */
 .runtime-grid {
   display: grid;
@@ -1332,6 +1305,8 @@ textarea {
 
 .runtime-meter span {
   display: flex;
+  flex: none;
+  white-space: nowrap;
   align-items: center;
   gap: 6px;
   color: var(--text-muted);
@@ -1341,6 +1316,8 @@ textarea {
 
 .runtime-meter strong {
   color: var(--text-secondary);
+  min-width: 0;
+  text-align: right;
   font-family: var(--font-mono);
   font-size: 12px;
   font-weight: 600;
@@ -2896,9 +2873,6 @@ textarea {
   .runtime-grid, .live-io {
     grid-template-columns: 1fr 1fr;
   }
-  .service-specs {
-    grid-template-columns: repeat(2, 1fr);
-  }
   .network-box {
     grid-template-columns: 1fr;
   }
@@ -2984,4 +2958,44 @@ textarea {
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 12px;
   margin-bottom: 14px;
+}
+
+.reset-link-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.reset-link-row code {
+  flex: 1 1 320px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  background: var(--bg-card-subtle);
+  border: 1px solid var(--border-subtle);
+  font-size: 12px;
+}
+
+.tag.tag-ok {
+  color: var(--success-text);
+  background: var(--success-bg);
+  border-color: rgba(16, 185, 129, 0.25);
+}
+
+.site-settings legend .tag {
+  margin-left: 8px;
+}
+
+.auth-links {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 4px 16px;
+  margin-top: 18px;
+}
+
+.auth-links .auth-switch {
+  margin-top: 0;
 }
