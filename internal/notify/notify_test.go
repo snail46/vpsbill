@@ -24,16 +24,16 @@ func TestCrossedThreshold(t *testing.T) {
 }
 
 func TestTrafficUsedBytesReadsProviderDocuments(t *testing.T) {
-	if used, ok := trafficUsedBytes(map[string]any{"total_used_bytes": int64(1234567890123)}); !ok || used != 1234567890123 {
+	if used, ok := TrafficUsedBytes(map[string]any{"total_used_bytes": int64(1234567890123)}); !ok || used != 1234567890123 {
 		t.Fatalf("int document: %d %v", used, ok)
 	}
-	if used, ok := trafficUsedBytes(map[string]any{"total_used_bytes": 2.5e9}); !ok || used != 2500000000 {
+	if used, ok := TrafficUsedBytes(map[string]any{"total_used_bytes": 2.5e9}); !ok || used != 2500000000 {
 		t.Fatalf("float document: %d %v", used, ok)
 	}
-	if _, ok := trafficUsedBytes(map[string]any{"rx_bytes": 1}); ok {
+	if _, ok := TrafficUsedBytes(map[string]any{"rx_bytes": 1}); ok {
 		t.Fatal("document without a total must be skipped")
 	}
-	if _, ok := trafficUsedBytes(nil); ok {
+	if _, ok := TrafficUsedBytes(nil); ok {
 		t.Fatal("nil document must be skipped")
 	}
 }

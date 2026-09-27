@@ -136,8 +136,10 @@ type OrderItemInput struct {
 type CreateOrderInput struct {
 	AccountID string           `json:"account_id"`
 	Items     []OrderItemInput `json:"items"`
-	ActorType string           `json:"-"`
-	ActorID   string           `json:"-"`
+	// CouponCode is an optional discount code.
+	CouponCode string `json:"coupon_code"`
+	ActorType  string `json:"-"`
+	ActorID    string `json:"-"`
 }
 
 type Order struct {
@@ -148,6 +150,7 @@ type Order struct {
 	Status        string    `json:"status"`
 	Currency      string    `json:"currency"`
 	SubtotalMinor int64     `json:"subtotal_minor"`
+	DiscountMinor int64     `json:"discount_minor"`
 	TaxMinor      int64     `json:"tax_minor"`
 	TotalMinor    int64     `json:"total_minor"`
 	InvoiceID     string    `json:"invoice_id,omitempty"`
@@ -242,15 +245,26 @@ func (s *BillingStore) CreateOrder(ctx context.Context, input CreateOrderInput) 
 		order.SubtotalMinor += lineTotal + setupTotal
 		items = append(items, priced)
 	}
-	order.TotalMinor = order.SubtotalMinor + order.TaxMinor
+	var coupon appliedCoupon
+	if code := strings.TrimSpace(input.CouponCode); code != "" {
+		couponItems := make([]couponItem, len(items))
+		for i, item := range items {
+			couponItems[i] = couponItem{PlanID: item.Input.PlanID, Unit: item.UnitAmountMinor, Quantity: item.Input.Quantity}
+		}
+		if coupon, err = applyCoupon(ctx, tx, code, input.AccountID, couponItems); err != nil {
+			return Order{}, err
+		}
+	}
+	order.DiscountMinor = coupon.TotalMinor
+	order.TotalMinor = order.SubtotalMinor - order.DiscountMinor + order.TaxMinor
 	order.AccountID = input.AccountID
 	order.Number = newDocumentNumber("ORD")
 	order.Status = "pending_payment"
 	if err := tx.QueryRow(ctx, `
-		INSERT INTO orders(number, account_id, status, currency, subtotal_minor, tax_minor, total_minor)
-		VALUES($1, $2, $3, $4, $5, $6, $7)
+		INSERT INTO orders(number, account_id, status, currency, subtotal_minor, tax_minor, total_minor, discount_minor, coupon_id)
+		VALUES($1, $2, $3, $4, $5, $6, $7, $8, nullif($9,'')::uuid)
 		RETURNING id, created_at
-	`, order.Number, order.AccountID, order.Status, order.Currency, order.SubtotalMinor, order.TaxMinor, order.TotalMinor).Scan(&order.ID, &order.CreatedAt); err != nil {
+	`, order.Number, order.AccountID, order.Status, order.Currency, order.SubtotalMinor, order.TaxMinor, order.TotalMinor, order.DiscountMinor, coupon.ID).Scan(&order.ID, &order.CreatedAt); err != nil {
 		return Order{}, fmt.Errorf("create order: %w", err)
 	}
 
@@ -259,12 +273,16 @@ func (s *BillingStore) CreateOrder(ctx context.Context, input CreateOrderInput) 
 		INSERT INTO invoices(number, account_id, order_id, status, currency, subtotal_minor, tax_minor, total_minor, balance_minor, issued_at, due_at)
 		VALUES($1, $2, $3, 'open', $4, $5, $6, $7, $7, now(), now() + interval '1 day')
 		RETURNING id
-	`, invoiceNumber, order.AccountID, order.ID, order.Currency, order.SubtotalMinor, order.TaxMinor, order.TotalMinor).Scan(&order.InvoiceID); err != nil {
+	`, invoiceNumber, order.AccountID, order.ID, order.Currency, order.SubtotalMinor-order.DiscountMinor, order.TaxMinor, order.TotalMinor).Scan(&order.InvoiceID); err != nil {
 		return Order{}, fmt.Errorf("create invoice: %w", err)
 	}
 	order.InvoiceNumber = invoiceNumber
 
-	for _, item := range items {
+	for index, item := range items {
+		var discount couponLine
+		if coupon.ID != "" {
+			discount = coupon.Lines[index]
+		}
 		configuration := map[string]any{
 			"billing_cycle":      item.Input.BillingCycle,
 			"plan_version":       item.PlanVersion,
@@ -289,10 +307,10 @@ func (s *BillingStore) CreateOrder(ctx context.Context, input CreateOrderInput) 
 		configBody, _ := json.Marshal(configuration)
 		var orderItemID string
 		if err := tx.QueryRow(ctx, `
-			INSERT INTO order_items(order_id, plan_id, region_id, description, quantity, unit_amount_minor, configuration)
-			VALUES($1, $2, $3, $4, $5, $6, $7)
+			INSERT INTO order_items(order_id, plan_id, region_id, description, quantity, unit_amount_minor, configuration, discount_unit_minor, renewal_discount_type, renewal_discount_value)
+			VALUES($1, $2, $3, $4, $5, $6, $7, $8, nullif($9,''), nullif($10::bigint,0))
 			RETURNING id
-		`, order.ID, item.Input.PlanID, item.Input.RegionID, item.PlanName, item.Input.Quantity, item.UnitAmountMinor, configBody).Scan(&orderItemID); err != nil {
+		`, order.ID, item.Input.PlanID, item.Input.RegionID, item.PlanName, item.Input.Quantity, item.UnitAmountMinor, configBody, discount.DiscountUnit, discount.RenewalType, discount.RenewalValue).Scan(&orderItemID); err != nil {
 			return Order{}, fmt.Errorf("create order item: %w", err)
 		}
 		lineTotal := item.UnitAmountMinor * int64(item.Input.Quantity)
@@ -310,6 +328,22 @@ func (s *BillingStore) CreateOrder(ctx context.Context, input CreateOrderInput) 
 			`, order.InvoiceID, orderItemID, item.PlanName+" / setup", item.Input.Quantity, item.SetupFeeMinor, setupTotal); err != nil {
 				return Order{}, fmt.Errorf("create setup fee invoice line: %w", err)
 			}
+		}
+		if discount.DiscountUnit > 0 {
+			if _, err := tx.Exec(ctx, `
+				INSERT INTO invoice_lines(invoice_id, order_item_id, description, quantity, unit_amount_minor, tax_minor, total_minor)
+				VALUES($1, $2, $3, $4, $5, 0, $6)
+			`, order.InvoiceID, orderItemID, "优惠码 "+coupon.Code, item.Input.Quantity, -discount.DiscountUnit, -discount.DiscountUnit*int64(item.Input.Quantity)); err != nil {
+				return Order{}, fmt.Errorf("create discount invoice line: %w", err)
+			}
+		}
+	}
+	if coupon.ID != "" {
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO coupon_redemptions(coupon_id, account_id, order_id, invoice_id, units, discount_minor)
+			VALUES($1, $2, $3, $4, $5, $6)
+		`, coupon.ID, order.AccountID, order.ID, order.InvoiceID, coupon.Units, coupon.TotalMinor); err != nil {
+			return Order{}, fmt.Errorf("record coupon use: %w", err)
 		}
 	}
 	eventPayload, _ := json.Marshal(map[string]any{"order_number": order.Number, "invoice_id": order.InvoiceID, "invoice_number": order.InvoiceNumber, "total_minor": order.TotalMinor, "currency": order.Currency})
@@ -659,9 +693,13 @@ func (s *BillingStore) processPayment(ctx context.Context, tx pgx.Tx, event Paym
 			return PaymentResult{}, err
 		}
 
+		if _, err := tx.Exec(ctx, "UPDATE coupon_redemptions SET status='paid' WHERE order_id=$1", result.OrderID); err != nil {
+			return PaymentResult{}, err
+		}
 		rows, err := tx.Query(ctx, `
-		SELECT id, plan_id, region_id, quantity, configuration
-		FROM order_items WHERE order_id=$1 ORDER BY created_at
+		SELECT oi.id, oi.plan_id, oi.region_id, oi.quantity, oi.configuration,
+		       CASE WHEN oi.discount_unit_minor>0 THEN o.coupon_id::text END, oi.renewal_discount_type, oi.renewal_discount_value
+		FROM order_items oi JOIN orders o ON o.id=oi.order_id WHERE oi.order_id=$1 ORDER BY oi.created_at
 	`, result.OrderID)
 		if err != nil {
 			return PaymentResult{}, err
@@ -670,11 +708,14 @@ func (s *BillingStore) processPayment(ctx context.Context, tx pgx.Tx, event Paym
 			id, planID, regionID string
 			quantity             int
 			configuration        []byte
+			couponID             *string
+			renewalType          *string
+			renewalValue         *int64
 		}
 		items := make([]itemRow, 0)
 		for rows.Next() {
 			var item itemRow
-			if err := rows.Scan(&item.id, &item.planID, &item.regionID, &item.quantity, &item.configuration); err != nil {
+			if err := rows.Scan(&item.id, &item.planID, &item.regionID, &item.quantity, &item.configuration, &item.couponID, &item.renewalType, &item.renewalValue); err != nil {
 				rows.Close()
 				return PaymentResult{}, err
 			}
@@ -700,9 +741,10 @@ func (s *BillingStore) processPayment(ctx context.Context, tx pgx.Tx, event Paym
 				instanceName := "svc-" + strings.ReplaceAll(serviceID, "-", "")[:16]
 				nextDue := addBillingCycle(time.Now().UTC(), cycle)
 				if _, err := tx.Exec(ctx, `
-				INSERT INTO services(id, account_id, order_item_id, plan_id, region_id, status, instance_name, billing_cycle, next_due_at, expires_at)
-				VALUES($1, $2, $3, $4, $5, 'provisioning', $6, $7, $8, $8)
-			`, serviceID, accountID, item.id, item.planID, item.regionID, instanceName, cycle, nextDue); err != nil {
+				INSERT INTO services(id, account_id, order_item_id, plan_id, region_id, status, instance_name, billing_cycle, next_due_at, expires_at,
+				                     coupon_id, renewal_discount_type, renewal_discount_value)
+				VALUES($1, $2, $3, $4, $5, 'provisioning', $6, $7, $8, $8, $9::uuid, $10, $11)
+			`, serviceID, accountID, item.id, item.planID, item.regionID, instanceName, cycle, nextDue, item.couponID, item.renewalType, item.renewalValue); err != nil {
 					return PaymentResult{}, fmt.Errorf("create service: %w", err)
 				}
 				deduplicationKey := serviceID + ":provision:v1"

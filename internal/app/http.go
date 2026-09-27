@@ -70,6 +70,7 @@ func NewHandler(deps Dependencies) (http.Handler, error) {
 		marketService = marketplace.New(marketStore, catalogStore, secretBox, deps.Settings, notifier, deps.Logger)
 	}
 	market := &marketplaceAPI{store: marketStore, catalog: catalogStore, billing: billingStore, settings: deps.Settings, box: secretBox, service: marketService, hub: deps.ChatHub}
+	coupons := &couponAPI{coupons: postgres.NewCouponStore(deps.DB), settings: deps.Settings, market: market}
 	install := &installer{settings: deps.Settings, auth: auth, logger: deps.Logger}
 
 	mux := http.NewServeMux()
@@ -158,6 +159,12 @@ func NewHandler(deps Dependencies) (http.Handler, error) {
 	mux.Handle("GET /api/v1/customer/hosting/tickets/{id}", auth.requireCustomer(http.HandlerFunc(operations.hostTicketDetail)))
 	mux.Handle("POST /api/v1/customer/hosting/tickets/{id}/messages", auth.requireCustomer(http.HandlerFunc(operations.hostReplyTicket)))
 	mux.Handle("GET /api/v1/customer/hosting/tickets/{id}/attachments/{attachment}", auth.requireCustomer(http.HandlerFunc(operations.hostAttachment)))
+	mux.Handle("GET /api/v1/customer/hosting/coupons", auth.requireCustomer(http.HandlerFunc(coupons.hostList)))
+	mux.Handle("POST /api/v1/customer/hosting/coupons", auth.requireCustomer(http.HandlerFunc(coupons.hostCreate)))
+	mux.Handle("PUT /api/v1/customer/hosting/coupons/{id}", auth.requireCustomer(http.HandlerFunc(coupons.hostUpdate)))
+	mux.Handle("POST /api/v1/customer/coupons/quote", auth.requireCustomer(http.HandlerFunc(coupons.quote)))
+	mux.Handle("GET /api/v1/customer/services/{id}/refund", auth.requireCustomer(http.HandlerFunc(coupons.refundQuote)))
+	mux.Handle("POST /api/v1/customer/services/{id}/refund", auth.requireCustomer(http.HandlerFunc(coupons.refund)))
 	mux.Handle("GET /api/v1/customer/chat/rooms", auth.requireCustomer(http.HandlerFunc(market.customerChatRooms)))
 	mux.Handle("GET /api/v1/customer/chat/rooms/{node}/messages", auth.requireCustomer(http.HandlerFunc(market.customerChatMessages)))
 	mux.Handle("POST /api/v1/customer/chat/rooms/{node}/messages", auth.requireCustomer(http.HandlerFunc(market.customerPostChat)))
@@ -215,6 +222,9 @@ func NewHandler(deps Dependencies) (http.Handler, error) {
 	mux.Handle("POST /api/v1/admin/marketplace/nodes/{id}/clear", auth.require("nodes:write", http.HandlerFunc(market.adminClearNode)))
 	mux.Handle("PUT /api/v1/admin/marketplace/nodes/{id}/hold", auth.require("nodes:write", http.HandlerFunc(market.adminHoldClearance)))
 	mux.Handle("POST /api/v1/admin/marketplace/nodes/{id}/listing", auth.require("nodes:write", http.HandlerFunc(market.adminSetListing)))
+	mux.Handle("GET /api/v1/admin/coupons", auth.require("plans:read", http.HandlerFunc(coupons.adminList)))
+	mux.Handle("POST /api/v1/admin/coupons", auth.require("plans:write", http.HandlerFunc(coupons.adminCreate)))
+	mux.Handle("PUT /api/v1/admin/coupons/{id}", auth.require("plans:write", http.HandlerFunc(coupons.adminUpdate)))
 	mux.Handle("GET /api/v1/admin/chat/rooms", auth.require("tickets:read", http.HandlerFunc(market.adminChatRooms)))
 	mux.Handle("GET /api/v1/admin/chat/rooms/{node}/messages", auth.require("tickets:read", http.HandlerFunc(market.adminChatMessages)))
 	mux.Handle("POST /api/v1/admin/chat/rooms/{node}/messages", auth.require("tickets:write", http.HandlerFunc(market.adminPostChat)))

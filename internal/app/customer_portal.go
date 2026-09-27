@@ -505,13 +505,14 @@ func (p *customerPortal) listOrders(w http.ResponseWriter, r *http.Request) {
 
 func (p *customerPortal) createOrder(w http.ResponseWriter, r *http.Request) {
 	var input struct {
-		Items []postgres.OrderItemInput `json:"items"`
+		Items      []postgres.OrderItemInput `json:"items"`
+		CouponCode string                    `json:"coupon_code"`
 	}
 	if !decodeJSON(w, r, &input) {
 		return
 	}
 	identity := customerPrincipalFromContext(r.Context())
-	order, err := p.billing.CreateOrder(r.Context(), postgres.CreateOrderInput{AccountID: identity.AccountID, Items: input.Items, ActorType: "customer", ActorID: identity.UserID})
+	order, err := p.billing.CreateOrder(r.Context(), postgres.CreateOrderInput{AccountID: identity.AccountID, Items: input.Items, CouponCode: input.CouponCode, ActorType: "customer", ActorID: identity.UserID})
 	var hosted *postgres.HostedOrderError
 	if errors.As(err, &hosted) {
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "hosted_unavailable", "message": hosted.Message})

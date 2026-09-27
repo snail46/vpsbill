@@ -9,6 +9,7 @@ export const walletKindLabels: Record<WalletEntryRecord['kind'], string> = {
   clearance_refund: '清退补偿',
   clearance_penalty: '清退赔付',
   adjustment: '管理员调整',
+  refund: '退款',
 }
 
 export function walletMoney(amountMinor: number, currency = 'CNY') {

@@ -20,7 +20,8 @@ import {
   Trash2,
   X,
 } from 'lucide-react'
-import { api, imageLabel, serviceUsable, CustomerServiceRecord, PortMappingRecord, ServiceCredentialRecord, ServiceRuntimeRecord } from './api'
+import { api, imageLabel, serviceUsable, CustomerServiceRecord, PortMappingRecord, RefundQuoteRecord, ServiceCredentialRecord, ServiceRuntimeRecord } from './api'
+import { walletMoney } from './Wallet'
 
 const ServiceConsole = lazy(() => import('./ServiceConsole').then(module => ({ default: module.ServiceConsole })))
 
@@ -172,7 +173,14 @@ function ServiceCard({ service, onReload }: { service: CustomerServiceRecord; on
         <StatusBadge status={usable ? liveStatus : service.status} />
       </div>
 
-      {service.termination_reason && <div className="note-banner warn">{service.termination_reason}。实例已停止服务，按托管准则计算的补偿已存入账户余额。</div>}
+      {service.termination_reason && (
+        <div className="note-banner warn">
+          {service.termination_reason === '买家申请退款'
+            ? '已按你的申请取消实例并退款，退款已存入账户余额。'
+            : `${service.termination_reason}。实例已停止服务，按托管准则计算的补偿已存入账户余额。`}
+        </div>
+      )}
+      {service.host_name && ['active', 'overdue', 'suspended'].includes(service.status) && <RefundPanel service={service} onDone={onReload} />}
 
       {service.status === 'overdue' && (
         <div className="service-notice warning">
@@ -630,5 +638,79 @@ export default function CustomerServices() {
         )}
       </div>
     </section>
+  )
+}
+
+// RefundPanel lets the buyer of a hosted instance cancel it for a refund to
+// the balance, after showing the amount the rules give right now.
+function RefundPanel({ service, onDone }: { service: CustomerServiceRecord; onDone: () => void }) {
+  const [quote, setQuote] = useState<RefundQuoteRecord | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  async function load() {
+    setBusy(true)
+    setError('')
+    try {
+      setQuote(await api<RefundQuoteRecord>(`/api/v1/customer/services/${service.id}/refund`))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '无法计算退款')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function confirm() {
+    if (!quote) return
+    setBusy(true)
+    setError('')
+    try {
+      await api(`/api/v1/customer/services/${service.id}/refund`, { method: 'POST', body: JSON.stringify({ expected_minor: quote.refund_minor }) })
+      setQuote(null)
+      onDone()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '退款失败')
+      void load()
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  if (!quote) {
+    return (
+      <div className="service-refund">
+        {error && <div className="form-error">{error}</div>}
+        <button className="secondary-button compact" disabled={busy} onClick={() => void load()}>
+          {busy ? '正在计算…' : '申请退款'}
+        </button>
+      </div>
+    )
+  }
+  return (
+    <div className="panel nested-panel">
+      <div className="panel-heading">
+        <h3>申请退款：{quote.instance_name}</h3>
+        <button className="icon-button" aria-label="关闭" onClick={() => setQuote(null)}>
+          <X size={16} />
+        </button>
+      </div>
+      {error && <div className="form-error">{error}</div>}
+      <div className="refund-summary">
+        <span>{quote.full ? '早期全额退款' : '按剩余天数比例退款'}</span>
+        <strong>{walletMoney(quote.refund_minor, quote.currency)}</strong>
+        <small className="muted-text">
+          已付 {walletMoney(quote.paid_minor, quote.currency)}
+          {quote.traffic_bytes !== null ? ` · 已用流量 ${bytes(quote.traffic_bytes)}` : ''}
+          {quote.message ? ` · ${quote.message}` : ''}
+        </small>
+      </div>
+      <p className="muted-text">退款存入账户余额（不可提现），实例会立即停止并从母机上删除，数据无法恢复。{quote.full ? '' : '按比例退款时，当天按已使用计算。'}</p>
+      <div className="form-actions">
+        <button className="secondary-button" onClick={() => setQuote(null)}>取消</button>
+        <button className="danger-button compact" disabled={busy || !quote.available} onClick={() => void confirm()}>
+          {busy ? '正在处理…' : `确认退款 ${walletMoney(quote.refund_minor, quote.currency)}`}
+        </button>
+      </div>
+    </div>
   )
 }

@@ -82,11 +82,13 @@ func (s *LifecycleStore) createRenewal(ctx context.Context, lead time.Duration) 
 	var serviceID, accountID, planID, cycle, currency, planName string
 	var nextDue time.Time
 	var amount int64
-	err = tx.QueryRow(ctx, `SELECT s.id,s.account_id,s.plan_id,s.billing_cycle,a.default_currency,p.name,s.next_due_at,pp.amount_minor
-		FROM services s JOIN accounts a ON a.id=s.account_id JOIN plans p ON p.id=s.plan_id JOIN LATERAL (SELECT amount_minor FROM plan_prices WHERE plan_id=s.plan_id AND currency=a.default_currency AND billing_cycle=s.billing_cycle AND active_from<=now() AND (active_until IS NULL OR active_until>now()) ORDER BY active_from DESC LIMIT 1) pp ON true
+	var discountType, couponCode *string
+	var discountValue *int64
+	err = tx.QueryRow(ctx, `SELECT s.id,s.account_id,s.plan_id,s.billing_cycle,a.default_currency,p.name,s.next_due_at,pp.amount_minor,s.renewal_discount_type,s.renewal_discount_value,c.code
+		FROM services s JOIN accounts a ON a.id=s.account_id JOIN plans p ON p.id=s.plan_id LEFT JOIN coupons c ON c.id=s.coupon_id JOIN LATERAL (SELECT amount_minor FROM plan_prices WHERE plan_id=s.plan_id AND currency=a.default_currency AND billing_cycle=s.billing_cycle AND active_from<=now() AND (active_until IS NULL OR active_until>now()) ORDER BY active_from DESC LIMIT 1) pp ON true
 		WHERE s.status='active' AND s.next_due_at IS NOT NULL AND s.next_due_at<=now()+make_interval(secs=>$1)
 		AND NOT EXISTS(SELECT 1 FROM invoices i WHERE i.service_id=s.id AND i.period_start=s.next_due_at AND i.status IN ('draft','open','paid'))
-		ORDER BY s.next_due_at FOR UPDATE OF s SKIP LOCKED LIMIT 1`, int(lead.Seconds())).Scan(&serviceID, &accountID, &planID, &cycle, &currency, &planName, &nextDue, &amount)
+		ORDER BY s.next_due_at FOR UPDATE OF s SKIP LOCKED LIMIT 1`, int(lead.Seconds())).Scan(&serviceID, &accountID, &planID, &cycle, &currency, &planName, &nextDue, &amount, &discountType, &discountValue, &couponCode)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}
@@ -94,9 +96,15 @@ func (s *LifecycleStore) createRenewal(ctx context.Context, lead time.Duration) 
 		return false, err
 	}
 	periodEnd := addBillingCycle(nextDue, cycle)
+	// Instances bought with a recurring coupon renew with the same discount
+	// off the current price.
+	var discount int64
+	if discountType != nil && discountValue != nil {
+		discount = CouponDiscount(*discountType, *discountValue, amount)
+	}
 	number := newDocumentNumber("INV")
 	var invoiceID string
-	err = tx.QueryRow(ctx, `INSERT INTO invoices(number,account_id,service_id,kind,status,currency,subtotal_minor,tax_minor,total_minor,balance_minor,issued_at,due_at,period_start,period_end) VALUES($1,$2,$3,'renewal','open',$4,$5,0,$5,$5,now(),$6,$6,$7) ON CONFLICT(service_id,period_end) WHERE service_id IS NOT NULL DO NOTHING RETURNING id`, number, accountID, serviceID, currency, amount, nextDue, periodEnd).Scan(&invoiceID)
+	err = tx.QueryRow(ctx, `INSERT INTO invoices(number,account_id,service_id,kind,status,currency,subtotal_minor,tax_minor,total_minor,balance_minor,issued_at,due_at,period_start,period_end) VALUES($1,$2,$3,'renewal','open',$4,$5,0,$5,$5,now(),$6,$6,$7) ON CONFLICT(service_id,period_end) WHERE service_id IS NOT NULL DO NOTHING RETURNING id`, number, accountID, serviceID, currency, amount-discount, nextDue, periodEnd).Scan(&invoiceID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, tx.Commit(ctx)
 	}
@@ -105,6 +113,16 @@ func (s *LifecycleStore) createRenewal(ctx context.Context, lead time.Duration) 
 	}
 	if _, err = tx.Exec(ctx, `INSERT INTO invoice_lines(invoice_id,description,quantity,unit_amount_minor,tax_minor,total_minor,metadata) VALUES($1,$2,1,$3,0,$3,jsonb_build_object('service_id',$4::text,'plan_id',$5::text,'billing_cycle',$6::text,'period_start',$7::timestamptz,'period_end',$8::timestamptz))`, invoiceID, planName+" / renewal", amount, serviceID, planID, cycle, nextDue, periodEnd); err != nil {
 		return false, err
+	}
+	if discount > 0 {
+		label := "续费同价优惠"
+		if couponCode != nil {
+			label = "优惠码 " + *couponCode + "（续费同价）"
+		}
+		if _, err = tx.Exec(ctx, `INSERT INTO invoice_lines(invoice_id,description,quantity,unit_amount_minor,tax_minor,total_minor,metadata) VALUES($1,$2,1,$3,0,$3,jsonb_build_object('service_id',$4::text))`, invoiceID, label, -discount, serviceID); err != nil {
+			return false, err
+		}
+		amount -= discount
 	}
 	if _, err = tx.Exec(ctx, `INSERT INTO outbox_events(aggregate_type,aggregate_id,event_type,deduplication_key,payload) VALUES('invoice',$1,'invoice.renewal_created',$2,jsonb_build_object('invoice_number',$3::text,'service_id',$4::text,'due_at',$5::timestamptz,'amount_minor',$6::bigint,'currency',$7::text))`, invoiceID, invoiceID+":renewal-created:v1", number, serviceID, nextDue, amount, currency); err != nil {
 		return false, err

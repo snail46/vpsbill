@@ -102,6 +102,9 @@ export type PlanRecord = {
   prices: Price[]
   owner_account_id?: string
   node_id?: string
+  description?: string
+  purchase_limit?: number
+  early_refund?: boolean
 }
 
 export type AvailableTemplateRecord = {
@@ -139,6 +142,7 @@ export type OrderRecord = {
   status: string
   currency: string
   subtotal_minor: number
+  discount_minor?: number
   tax_minor: number
   total_minor: number
   invoice_id: string
@@ -373,7 +377,7 @@ export function imageLabel(item: { name: string; release?: string; arch?: string
 
 export type WalletEntryRecord = {
   id: string
-  kind: 'topup' | 'earning' | 'payment' | 'clearance_refund' | 'clearance_penalty' | 'adjustment'
+  kind: 'topup' | 'earning' | 'payment' | 'clearance_refund' | 'clearance_penalty' | 'adjustment' | 'refund'
   amount_minor: number
   balance_after_minor: number
   currency: string
@@ -478,3 +482,41 @@ export type ChatRoomRecord = {
   last_message?: ChatMessageRecord
 }
 export type ChatHistoryRecord = { messages: ChatMessageRecord[]; can_post: boolean; role: string }
+
+export type CouponRecord = {
+  id: string
+  code: string
+  description: string
+  discount_type: 'percent' | 'amount'
+  discount_value: number
+  plan_ids: string[]
+  max_uses: number
+  used_count: number
+  expires_at: string | null
+  recurring: boolean
+  enabled: boolean
+  created_at: string
+}
+
+export type CouponQuoteRecord = {
+  code: string
+  description: string
+  unit_minor: number
+  discount_minor: number
+  final_minor: number
+  recurring: boolean
+}
+
+export type RefundQuoteRecord = {
+  service_id: string
+  instance_name: string
+  available: boolean
+  message?: string
+  full: boolean
+  early_refund: boolean
+  paid_minor: number
+  refund_minor: number
+  currency: string
+  traffic_bytes: number | null
+  purchased_at: string
+}

@@ -69,6 +69,7 @@ import HostDetailPanel from './HostDetail'
 import CustomerWallet from './Wallet'
 import HostingCenter from './Hosting'
 import AdminMarketplace from './AdminMarketplace'
+import { CouponField, CouponManager } from './Coupons'
 import { AdminWalletPanel, walletMoney } from './Wallet'
 
 type Meta = { name: string; environment: string; installed: boolean; capabilities: string[]; password_reset_mail?: boolean }
@@ -864,6 +865,8 @@ function CustomerShop({ customer }: { customer: CustomerIdentity }) {
   const [saving, setSaving] = useState(false)
   const [created, setCreated] = useState<OrderRecord | null>(null)
   const [paying, setPaying] = useState(false)
+  const [coupon, setCoupon] = useState('')
+  const [discount, setDiscount] = useState(0)
 
   useEffect(() => {
     api<CustomerCatalogRecord>('/api/v1/customer/catalog')
@@ -911,6 +914,7 @@ function CustomerShop({ customer }: { customer: CustomerIdentity }) {
               configuration: { template_id: data.get('template_id') },
             },
           ],
+          coupon_code: coupon,
         }),
       })
       setCreated(order)
@@ -1026,11 +1030,12 @@ function CustomerShop({ customer }: { customer: CustomerIdentity }) {
                 ))}
               </select>
             </label>
+            <CouponField planId={selected.id} cycle={cycle} onApplied={(code, discount) => { setCoupon(code); setDiscount(discount) }} />
             <div className="order-total">
-              <span>应付金额{currentPrice?.setup_fee_minor ? '（含开通费）' : ''}</span>
+              <span>每台应付{currentPrice?.setup_fee_minor ? '（含开通费）' : ''}{discount ? '（已扣优惠）' : ''}</span>
               <strong>
                 {money(
-                  (currentPrice?.amount_minor || 0) + (currentPrice?.setup_fee_minor || 0),
+                  (currentPrice?.amount_minor || 0) + (currentPrice?.setup_fee_minor || 0) - discount,
                   customer.default_currency
                 )}
               </strong>
@@ -1048,7 +1053,7 @@ function CustomerShop({ customer }: { customer: CustomerIdentity }) {
         <div className="checkout-success">
           <div>
             <strong>订单 {created.number} 已生成</strong>
-            <span>应付总额 {money(created.total_minor, created.currency)}，关联账单 {created.invoice_number}</span>
+            <span>应付总额 {money(created.total_minor, created.currency)}{created.discount_minor ? `（已优惠 ${money(created.discount_minor, created.currency)}）` : ''}，关联账单 {created.invoice_number}</span>
           </div>
           {catalog?.checkout_enabled ? (
             <button className="primary-button compact" disabled={paying} onClick={checkout}>
@@ -4223,6 +4228,12 @@ function PlansView() {
         ))}
         {!plans.length && <div className="empty-card" style={{ gridColumn: '1 / -1' }}>尚未创建任何商品套餐</div>}
       </div>
+
+      <CouponManager
+        endpoint="/api/v1/admin/coupons"
+        plans={plans.map(plan => ({ id: plan.id, name: plan.name }))}
+        intro="平台优惠码适用于上面的平台套餐；托管母机的套餐由机主在托管中心自行发放优惠码。"
+      />
     </section>
   )
 }

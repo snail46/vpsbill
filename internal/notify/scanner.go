@@ -95,7 +95,7 @@ func (n *Notifier) collectTraffic(ctx context.Context) {
 		requestCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 		value, err := metrics.InstanceTraffic(requestCtx, target.InstanceName)
 		cancel()
-		used, found := trafficUsedBytes(value)
+		used, found := TrafficUsedBytes(value)
 		if err != nil || !found {
 			continue
 		}
@@ -200,8 +200,8 @@ func crossedThreshold(used, limit int64, alertPercent int) (int, bool) {
 	}
 }
 
-// trafficUsedBytes reads total_used_bytes from a provider traffic document.
-func trafficUsedBytes(value any) (int64, bool) {
+// TrafficUsedBytes reads total_used_bytes from a provider traffic document.
+func TrafficUsedBytes(value any) (int64, bool) {
 	if value == nil {
 		return 0, false
 	}

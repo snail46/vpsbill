@@ -51,3 +51,27 @@ func (n *Notifier) NodeCleared(ctx context.Context, result postgres.ClearanceRes
 		n.enqueue(ctx, to, subject, body, "node-cleared:"+item.ServiceID+":buyer")
 	}
 }
+
+// ServiceRefunded confirms a buyer's refund and tells the host an instance
+// on the node was cancelled.
+func (n *Notifier) ServiceRefunded(ctx context.Context, result postgres.RefundResult) {
+	if !n.enabled() {
+		return
+	}
+	kind := "按剩余天数比例退款"
+	if result.Full {
+		kind = "早期全额退款"
+	}
+	if result.BuyerEmail != "" {
+		subject := fmt.Sprintf("[%s] 实例 %s 已退款", n.siteName(), result.InstanceName)
+		body := fmt.Sprintf("您好，%s：\n\n您的实例 %s（%s）已按您的申请取消，实例会从母机上删除。\n\n退款方式：%s\n退款金额：%s，已存入您的账户余额，可用于本平台消费。\n\n查看余额：%s\n",
+			result.BuyerName, result.InstanceName, result.PlanName, kind, money(result.RefundMinor, result.Currency), n.link("/portal/wallet"))
+		n.enqueue(ctx, result.BuyerEmail, subject, body, "service-refunded:"+result.ServiceID+":buyer")
+	}
+	if result.HostEmail != "" {
+		subject := fmt.Sprintf("[%s] 买家取消了实例 %s", n.siteName(), result.InstanceName)
+		body := fmt.Sprintf("您好，%s：\n\n买家 %s 申请退款并取消了您母机上的实例 %s（%s），实例会从母机上删除。\n\n退款方式：%s，退还买家 %s。\n已使用部分的收益 %s 已结算到您的余额。\n\n托管中心：%s\n",
+			result.HostName, result.BuyerName, result.InstanceName, result.PlanName, kind, money(result.RefundMinor, result.Currency), money(result.HostMinor, result.Currency), n.link("/portal/hosting"))
+		n.enqueue(ctx, result.HostEmail, subject, body, "service-refunded:"+result.ServiceID+":host")
+	}
+}

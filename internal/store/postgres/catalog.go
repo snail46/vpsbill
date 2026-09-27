@@ -217,12 +217,17 @@ type Plan struct {
 	AllowedTemplateIDs []string `json:"allowed_template_ids"`
 	// OwnerAccountID and NodeID are set on hosted plans, which only sell
 	// their owner's node.
-	OwnerAccountID string    `json:"owner_account_id,omitempty"`
-	NodeID         string    `json:"node_id,omitempty"`
-	Enabled        bool      `json:"enabled"`
-	Version        int       `json:"version"`
-	Prices         []Price   `json:"prices"`
-	CreatedAt      time.Time `json:"created_at"`
+	OwnerAccountID string `json:"owner_account_id,omitempty"`
+	NodeID         string `json:"node_id,omitempty"`
+	// Description, PurchaseLimit (per buyer, 0 = unlimited) and EarlyRefund
+	// are hosted plan terms shown in the market.
+	Description   string    `json:"description"`
+	PurchaseLimit int       `json:"purchase_limit"`
+	EarlyRefund   bool      `json:"early_refund"`
+	Enabled       bool      `json:"enabled"`
+	Version       int       `json:"version"`
+	Prices        []Price   `json:"prices"`
+	CreatedAt     time.Time `json:"created_at"`
 }
 
 func (s *CatalogStore) ListPlans(ctx context.Context) ([]Plan, error) {
@@ -231,7 +236,7 @@ func (s *CatalogStore) ListPlans(ctx context.Context) ([]Plan, error) {
 		       network_down_mbps, network_up_mbps, snapshot_limit,
 		       assign_nat, port_mapping_count, assign_ipv4, ipv4_count, assign_ipv6, ipv6_count,
 		       default_template_id, allowed_template_ids, enabled, version, created_at,
-		       coalesce(owner_account_id::text,''), coalesce(node_id::text,'')
+		       coalesce(owner_account_id::text,''), coalesce(node_id::text,''), description, purchase_limit, early_refund
 		FROM plans ORDER BY created_at DESC
 	`)
 	if err != nil {
@@ -243,7 +248,7 @@ func (s *CatalogStore) ListPlans(ctx context.Context) ([]Plan, error) {
 		var plan Plan
 		if err := rows.Scan(&plan.ID, &plan.Code, &plan.Name, &plan.ProviderType, &plan.Virtualization, &plan.VCPU, &plan.RAMMB, &plan.DiskGB, &plan.TrafficGB, &plan.NetworkDownMbps, &plan.NetworkUpMbps, &plan.SnapshotLimit,
 			&plan.AssignNAT, &plan.PortMappingCount, &plan.AssignIPv4, &plan.IPv4Count, &plan.AssignIPv6, &plan.IPv6Count,
-			&plan.DefaultTemplateID, &plan.AllowedTemplateIDs, &plan.Enabled, &plan.Version, &plan.CreatedAt, &plan.OwnerAccountID, &plan.NodeID); err != nil {
+			&plan.DefaultTemplateID, &plan.AllowedTemplateIDs, &plan.Enabled, &plan.Version, &plan.CreatedAt, &plan.OwnerAccountID, &plan.NodeID, &plan.Description, &plan.PurchaseLimit, &plan.EarlyRefund); err != nil {
 			return nil, err
 		}
 		plan.Prices = []Price{}
@@ -285,12 +290,12 @@ func (s *CatalogStore) CreatePlan(ctx context.Context, input Plan) (Plan, error)
 		INSERT INTO plans(code, name, virtualization, vcpu, ram_mb, disk_gb, traffic_gb,
 		                  network_down_mbps, network_up_mbps, snapshot_limit,
 		                  assign_nat, port_mapping_count, assign_ipv4, ipv4_count, assign_ipv6, ipv6_count,
-		                  default_template_id, allowed_template_ids, enabled, provider_type, owner_account_id, node_id)
-		VALUES(upper($1), $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, nullif($21,'')::uuid, nullif($22,'')::uuid)
+		                  default_template_id, allowed_template_ids, enabled, provider_type, owner_account_id, node_id, description, purchase_limit, early_refund)
+		VALUES(upper($1), $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, nullif($21,'')::uuid, nullif($22,'')::uuid, $23, $24, $25)
 		RETURNING id, code, version, created_at
 	`, input.Code, input.Name, input.Virtualization, input.VCPU, input.RAMMB, input.DiskGB, input.TrafficGB, input.NetworkDownMbps, input.NetworkUpMbps, input.SnapshotLimit,
 		input.AssignNAT, input.PortMappingCount, input.AssignIPv4, input.IPv4Count, input.AssignIPv6, input.IPv6Count,
-		input.DefaultTemplateID, input.AllowedTemplateIDs, input.Enabled, input.ProviderType, input.OwnerAccountID, input.NodeID).Scan(&input.ID, &input.Code, &input.Version, &input.CreatedAt); err != nil {
+		input.DefaultTemplateID, input.AllowedTemplateIDs, input.Enabled, input.ProviderType, input.OwnerAccountID, input.NodeID, input.Description, input.PurchaseLimit, input.EarlyRefund).Scan(&input.ID, &input.Code, &input.Version, &input.CreatedAt); err != nil {
 		return Plan{}, fmt.Errorf("create plan: %w", err)
 	}
 	for i := range input.Prices {
@@ -321,13 +326,13 @@ func (s *CatalogStore) UpdatePlan(ctx context.Context, id string, input Plan) (P
 		       traffic_gb=$8, network_down_mbps=$9, network_up_mbps=$10, snapshot_limit=$11,
 		       assign_nat=$12, port_mapping_count=$13, assign_ipv4=$14, ipv4_count=$15,
 		       assign_ipv6=$16, ipv6_count=$17, default_template_id=$18, allowed_template_ids=$19,
-		       enabled=$20, provider_type=$21, version=version+1, updated_at=now()
+		       enabled=$20, provider_type=$21, description=$22, purchase_limit=$23, early_refund=$24, version=version+1, updated_at=now()
 		WHERE id=$1
 		RETURNING id, code, version, created_at
 	`, id, input.Code, input.Name, input.Virtualization, input.VCPU, input.RAMMB, input.DiskGB, input.TrafficGB,
 		input.NetworkDownMbps, input.NetworkUpMbps, input.SnapshotLimit, input.AssignNAT, input.PortMappingCount,
 		input.AssignIPv4, input.IPv4Count, input.AssignIPv6, input.IPv6Count, input.DefaultTemplateID,
-		input.AllowedTemplateIDs, input.Enabled, input.ProviderType).Scan(&input.ID, &input.Code, &input.Version, &input.CreatedAt); err != nil {
+		input.AllowedTemplateIDs, input.Enabled, input.ProviderType, input.Description, input.PurchaseLimit, input.EarlyRefund).Scan(&input.ID, &input.Code, &input.Version, &input.CreatedAt); err != nil {
 		return Plan{}, fmt.Errorf("update plan: %w", err)
 	}
 	now := time.Now().UTC()

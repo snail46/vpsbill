@@ -112,6 +112,24 @@ func validateHostedOrder(ctx context.Context, tx pgx.Tx, planID, buyerID, region
 	if freeVCPU < int64(vcpu)*q || freeRAM < int64(ramMB)*q || freeDisk < int64(diskGB)*q {
 		return &HostedOrderError{"该母机剩余资源不足"}
 	}
+	// The purchase limit counts the buyer's live instances of the plan and
+	// units in unpaid orders that can still be paid.
+	var limit, held int
+	if err := tx.QueryRow(ctx, `
+		SELECT p.purchase_limit,
+		       (SELECT count(*) FROM services s WHERE s.plan_id=p.id AND s.account_id=$2 AND s.status NOT IN ('terminating','terminated'))::int +
+		       coalesce((SELECT sum(oi.quantity) FROM order_items oi JOIN invoices i ON i.order_id=oi.order_id
+		                 WHERE oi.plan_id=p.id AND i.account_id=$2 AND i.status='open' AND i.due_at>now()),0)::int
+		FROM plans p WHERE p.id=$1
+	`, planID, buyerID).Scan(&limit, &held); err != nil {
+		return err
+	}
+	if limit > 0 && held+quantity > limit {
+		if held > 0 {
+			return &HostedOrderError{fmt.Sprintf("该套餐每人限购 %d 台，你已持有或有待支付的 %d 台", limit, held)}
+		}
+		return &HostedOrderError{fmt.Sprintf("该套餐每人限购 %d 台", limit)}
+	}
 	return nil
 }
 
@@ -320,7 +338,7 @@ func (m *MarketplaceStore) HostedNodes(ctx context.Context, ownerID string, mark
 			SELECT sum(CASE WHEN status='holding' THEN gross_minor-released_gross_minor ELSE 0 END)::bigint holding,
 			       sum(CASE WHEN status='holding' THEN host_share_minor-released_host_minor ELSE 0 END)::bigint host_pending,
 			       sum(released_host_minor)::bigint host_released,
-			       sum(CASE WHEN status='cleared' THEN (fee_minor*released_gross_minor)/greatest(gross_minor,1) ELSE fee_minor END)::bigint fee
+			       sum(CASE WHEN status IN ('cleared','refunded') THEN (fee_minor*released_gross_minor)/greatest(gross_minor,1) ELSE fee_minor END)::bigint fee
 			FROM marketplace_escrows WHERE node_id=n.id) e ON true
 		WHERE `+where+` ORDER BY n.retired_at NULLS FIRST, n.created_at DESC
 	`, args...)
@@ -568,7 +586,7 @@ func (m *MarketplaceStore) ClearNode(ctx context.Context, nodeID string, multipl
 	rows, err := tx.Query(ctx, `
 		SELECT s.id,s.instance_name,s.account_id,a.display_name,a.billing_email
 		FROM services s JOIN plans p ON p.id=s.plan_id JOIN accounts a ON a.id=s.account_id
-		WHERE p.node_id=$1 AND s.status NOT IN ('terminated') ORDER BY s.created_at FOR UPDATE OF s
+		WHERE p.node_id=$1 AND s.status NOT IN ('terminated') AND s.refunded_at IS NULL ORDER BY s.created_at FOR UPDATE OF s
 	`, nodeID)
 	if err != nil {
 		return ClearanceResult{}, err

@@ -273,4 +273,6 @@ func TestHostingMarketplaceIntegration(t *testing.T) {
 	if _, err = billing.AdjustWallet(ctx, buyerID, buyerUser, -10_000_000, "too much"); !errors.Is(err, ErrInsufficientBalance) {
 		t.Fatalf("adjustment overdrew: %v", err)
 	}
+
+	hostedTermsAndCoupons(t, ctx, db, hostID, hostUser, buyerID, buyerUser, strangerID, regionID)
 }

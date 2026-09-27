@@ -3285,3 +3285,23 @@ small.block, .block { display: block; margin-top: 2px; color: var(--text-subtle)
   .chat-compose { flex-direction: column; align-items: stretch; }
   .topup-amount input { width: 100%; }
 }
+
+/* Coupons, plan terms and refunds */
+.coupon-field { display: flex; flex-direction: column; gap: 6px; color: var(--text-secondary); font-size: 13px; }
+.coupon-input { display: flex; gap: 8px; }
+.coupon-input input { flex: 1; min-width: 0; text-transform: uppercase; }
+.field-error { color: var(--danger-text); }
+.coupon-ok { color: var(--success-text); }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing: 0.02em; }
+.plan-description { margin: 6px 0 0; color: var(--text-secondary); font-size: 13px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+.plan-terms { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.price-breakdown { display: grid; gap: 4px; margin: 0; }
+.price-breakdown div { display: flex; justify-content: space-between; gap: 12px; }
+.price-breakdown dt { color: var(--text-subtle); }
+.price-breakdown dd { margin: 0; }
+.refund-summary { display: grid; gap: 8px; margin: 12px 0; }
+.refund-summary strong { font-size: 20px; }
+.form-grid textarea { resize: vertical; min-height: 72px; }
+.form-grid .inline-field { display: inline-flex; flex-direction: row; align-items: center; gap: 8px; margin-top: 8px; }
+.form-grid .inline-field input { width: 90px; }
+.service-refund { display: flex; justify-content: flex-end; gap: 8px; margin: 8px 0; }

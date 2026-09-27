@@ -73,6 +73,52 @@ func (s *Service) deleteInstances(result postgres.ClearanceResult) {
 	}
 }
 
+// measureTraffic reads the instance's traffic from its node, falling back to
+// the last scanner measurement; nil means unknown.
+func (s *Service) measureTraffic(ctx context.Context, target postgres.RefundTarget) *int64 {
+	if target.NodeID != "" {
+		if node, err := s.catalog.NodeSecret(ctx, target.NodeID); err == nil {
+			if driver, err := provider.OpenSealed(s.box, node.Sealed(), 15*time.Second); err == nil {
+				if metrics, ok := driver.(provider.Metrics); ok {
+					requestCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+					value, err := metrics.InstanceTraffic(requestCtx, target.InstanceName)
+					cancel()
+					if used, found := notify.TrafficUsedBytes(value); err == nil && found {
+						return &used
+					}
+				}
+			}
+		}
+	}
+	return target.StoredTrafficBytes
+}
+
+// RefundQuote tells a buyer what cancelling a hosted service returns now.
+func (s *Service) RefundQuote(ctx context.Context, accountID, serviceID string) (postgres.RefundQuote, error) {
+	target, err := s.store.RefundTarget(ctx, accountID, serviceID)
+	if err != nil {
+		return postgres.RefundQuote{}, err
+	}
+	return s.store.QuoteRefund(ctx, accountID, serviceID, s.now(), s.measureTraffic(ctx, target))
+}
+
+// Refund cancels a hosted service for the buyer and tells both sides.
+func (s *Service) Refund(ctx context.Context, accountID, serviceID, userID string, expectedMinor int64) (postgres.RefundResult, error) {
+	target, err := s.store.RefundTarget(ctx, accountID, serviceID)
+	if err != nil {
+		return postgres.RefundResult{}, err
+	}
+	result, err := s.store.RefundService(ctx, accountID, serviceID, userID, s.now(), s.measureTraffic(ctx, target), expectedMinor)
+	if err != nil {
+		return result, err
+	}
+	s.logger.Info("hosted service refunded", "service_id", serviceID, "refund_minor", result.RefundMinor, "full", result.Full)
+	if s.notifier != nil {
+		s.notifier.ServiceRefunded(context.WithoutCancel(ctx), result)
+	}
+	return result, nil
+}
+
 // Run releases escrow and watches hosted nodes every ten minutes.
 func (s *Service) Run(ctx context.Context) {
 	timer := time.NewTimer(time.Minute)

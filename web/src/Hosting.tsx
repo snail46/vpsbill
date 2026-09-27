@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react'
-import { Copy, MapPin, MessagesSquare, Plus, RefreshCw, Server, Store, Ticket, X } from 'lucide-react'
+import { Copy, MapPin, MessagesSquare, Plus, RefreshCw, Server, Store, Ticket, TicketPercent, X } from 'lucide-react'
 import {
   api,
   type ChatRoomRecord,
@@ -16,14 +16,16 @@ import {
   type WalletRecord,
 } from './api'
 import ChatRoom from './ChatRoom'
+import { CouponField, CouponManager } from './Coupons'
 import { TicketConversation, ticketStatusLabel } from './App'
 import { ticketRequestBody, useAttachmentLimit } from './TicketAttachments'
 import { walletMoney } from './Wallet'
 
-type Tab = 'market' | 'mine' | 'tickets' | 'chat'
+type Tab = 'market' | 'mine' | 'coupons' | 'tickets' | 'chat'
 const tabs: [Tab, string, typeof Store][] = [
   ['market', '托管市场', Store],
   ['mine', '我的母机', Server],
+  ['coupons', '优惠码', TicketPercent],
   ['tickets', '托管工单', Ticket],
   ['chat', '聊天室', MessagesSquare],
 ]
@@ -61,6 +63,7 @@ export default function HostingCenter({ customer }: { customer: CustomerIdentity
       </div>
       {tab === 'market' && <Market customer={customer} />}
       {tab === 'mine' && <MyNodes />}
+      {tab === 'coupons' && <HostCoupons />}
       {tab === 'tickets' && <HostTickets />}
       {tab === 'chat' && <ChatRooms />}
     </section>
@@ -86,6 +89,17 @@ function PlanSpecs({ plan }: { plan: PlanRecord }) {
       <span>{plan.traffic_gb ? `${plan.traffic_gb} GB 流量` : '不限流量'}</span>
       <span>{plan.network_down_mbps ? `${plan.network_down_mbps}/${plan.network_up_mbps} Mbps` : '不限带宽'}</span>
       <span>NAT × {plan.port_mapping_count}</span>
+    </div>
+  )
+}
+
+function PlanTerms({ plan }: { plan: PlanRecord }) {
+  return (
+    <div className="plan-terms">
+      <span className={plan.early_refund ? 'tag success' : 'tag'}>
+        {plan.early_refund ? '1 小时内且流量未超 1GB 可全额退款' : '按剩余天数比例退款'}
+      </span>
+      {!!plan.purchase_limit && <span className="tag">每人限购 {plan.purchase_limit} 台</span>}
     </div>
   )
 }
@@ -154,6 +168,8 @@ function Market({ customer }: { customer: CustomerIdentity }) {
                     <span className="tag">{virtNames[plan.virtualization] || plan.virtualization}</span>
                   </div>
                   <PlanSpecs plan={plan} />
+                  {plan.description && <p className="plan-description">{plan.description}</p>}
+                  <PlanTerms plan={plan} />
                   <div className="market-plan-buy">
                     <strong>{planPrice(plan)}</strong>
                     <button
@@ -192,6 +208,8 @@ function BuyDialog({
   const prices = plan.prices.filter(price => price.currency === customer.default_currency)
   const [cycle, setCycle] = useState(prices[0]?.billing_cycle || 'monthly')
   const [template, setTemplate] = useState(plan.default_template_id)
+  const [coupon, setCoupon] = useState('')
+  const [discount, setDiscount] = useState(0)
   const [order, setOrder] = useState<OrderRecord | null>(null)
   const [wallet, setWallet] = useState<WalletRecord | null>(null)
   const [busy, setBusy] = useState(false)
@@ -212,6 +230,7 @@ function BuyDialog({
         method: 'POST',
         body: JSON.stringify({
           items: [{ plan_id: plan.id, region_id: node.region_id, billing_cycle: cycle, quantity: 1, configuration: { template_id: template } }],
+          coupon_code: coupon,
         }),
       })
       setOrder(created)
@@ -263,6 +282,8 @@ function BuyDialog({
           </button>
         </div>
         <PlanSpecs plan={plan} />
+        {plan.description && <p className="plan-description">{plan.description}</p>}
+        <PlanTerms plan={plan} />
         {error && <div className="form-error">{error}</div>}
         {done ? (
           <div className="checkout-success">
@@ -292,20 +313,23 @@ function BuyDialog({
                 ))}
               </select>
             </label>
+            <CouponField planId={plan.id} cycle={cycle} onApplied={(code, discount) => { setCoupon(code); setDiscount(discount) }} />
             <p className="muted-text wide">
               该实例由第三方机主提供，机主拥有服务器 root 权限，请勿存放敏感数据。母机到期日 {node.expires_at || '未填写'}。
+              可在「我的 VPS」申请退款：{plan.early_refund ? '购买 1 小时内且流量未超 1GB 全额退款，否则' : ''}按剩余天数比例退到余额。
             </p>
             <div className="form-actions wide">
               <button type="button" className="secondary-button" onClick={onClose}>取消</button>
               <button className="primary-button compact" disabled={busy || !price}>
-                {busy ? '正在下单…' : `下单 ${price ? walletMoney(price.amount_minor + price.setup_fee_minor, price.currency) : ''}`}
+                {busy ? '正在下单…' : `下单 ${price ? walletMoney(price.amount_minor + price.setup_fee_minor - discount, price.currency) : ''}`}
               </button>
             </div>
           </form>
         ) : (
           <div className="pay-choices">
             <p>
-              订单 {order.number} 已生成，应付 <strong>{walletMoney(order.total_minor, order.currency)}</strong>。当前余额{' '}
+              订单 {order.number} 已生成，应付 <strong>{walletMoney(order.total_minor, order.currency)}</strong>
+              {!!order.discount_minor && `（已优惠 ${walletMoney(order.discount_minor, order.currency)}）`}。当前余额{' '}
               <strong>{walletMoney(wallet?.balance_minor || 0, wallet?.currency)}</strong>。
             </p>
             <div className="form-actions">
@@ -687,6 +711,9 @@ function HostedNodeCard({
                 <td>
                   <strong>{plan.name}</strong>
                   <small className="block">{virtNames[plan.virtualization]} · {plan.allowed_template_ids.join('、')}</small>
+                  <small className="block">
+                    {plan.purchase_limit ? `每人限购 ${plan.purchase_limit} 台` : '不限购'} · {plan.early_refund ? '允许早期全额退款' : '按比例退款'}
+                  </small>
                 </td>
                 <td>{plan.vcpu} 核 / {plan.ram_mb} MB / {plan.disk_gb} GB / {plan.traffic_gb || '不限'} GB / NAT×{plan.port_mapping_count}</td>
                 <td>{plan.prices.map(price => `${cycleNames[price.billing_cycle]} ${walletMoney(price.amount_minor, price.currency)}`).join('，')}</td>
@@ -748,6 +775,7 @@ function HostedPlanForm({ node, plan, onClose, onSaved }: { node: HostedNodeReco
   const [virtualization, setVirtualization] = useState<string>(plan?.virtualization || node.virtualization_types[0] || 'lxc')
   const [allowed, setAllowed] = useState<string[]>(plan?.allowed_template_ids || [])
   const [fallback, setFallback] = useState(plan?.default_template_id || '')
+  const [limited, setLimited] = useState(!!plan?.purchase_limit)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
 
@@ -785,6 +813,9 @@ function HostedPlanForm({ node, plan, onClose, onSaved }: { node: HostedNodeReco
       default_template_id: allowed.includes(fallback) ? fallback : allowed[0] || '',
       prices,
       enabled: form.get('enabled') === 'on',
+      description: String(form.get('description') || ''),
+      purchase_limit: limited ? Number(form.get('purchase_limit') || 0) : 0,
+      early_refund: form.get('early_refund') === 'on',
     }
     setBusy(true)
     setError('')
@@ -861,6 +892,27 @@ function HostedPlanForm({ node, plan, onClose, onSaved }: { node: HostedNodeReco
             ))}
           </select>
         </label>
+        <label className="wide">
+          <span>套餐描述（可选，展示在托管市场）</span>
+          <textarea name="description" maxLength={1000} rows={3} defaultValue={plan?.description} placeholder="例如适用场景、线路特点、是否支持某些用途" />
+        </label>
+        <div className="wide">
+          <label className="checkbox">
+            <input type="checkbox" checked={limited} onChange={event => setLimited(event.target.checked)} />
+            <span>限购</span>
+          </label>
+          {limited && (
+            <label className="inline-field">
+              <span>每人最多</span>
+              <input name="purchase_limit" type="number" min="1" max="100" required defaultValue={plan?.purchase_limit || 1} />
+              <span>台（按有效实例计算）</span>
+            </label>
+          )}
+        </div>
+        <label className="checkbox wide">
+          <input name="early_refund" type="checkbox" defaultChecked={plan?.early_refund ?? false} />
+          <span>允许早期全额退款：买家在购买 1 小时内且流量未超 1GB 时可申请全额退款；关闭则一律按剩余天数比例退款</span>
+        </label>
         <label className="checkbox">
           <input name="enabled" type="checkbox" defaultChecked={plan?.enabled ?? true} />
           <span>立即上架</span>
@@ -871,6 +923,30 @@ function HostedPlanForm({ node, plan, onClose, onSaved }: { node: HostedNodeReco
         </div>
       </div>
     </form>
+  )
+}
+
+// ---- Host coupons ----
+
+function HostCoupons() {
+  const [data, setData] = useState<HostingRecord | null>(null)
+  const [error, setError] = useState('')
+  useEffect(() => {
+    api<HostingRecord>('/api/v1/customer/hosting')
+      .then(setData)
+      .catch(err => setError(err instanceof Error ? err.message : '加载失败'))
+  }, [])
+  if (!data) return error ? <div className="form-error">{error}</div> : null
+  const plans = data.nodes
+    .filter(node => !node.retired_at)
+    .flatMap(node => node.plans.map(plan => ({ id: plan.id, name: `${node.name} / ${plan.name}` })))
+  return (
+    <CouponManager
+      endpoint="/api/v1/customer/hosting/coupons"
+      plans={plans}
+      canCreate={data.enabled}
+      intro="优惠码只对你自己母机上的套餐有效，优惠从实付金额中扣除，平台按实付金额收取手续费。"
+    />
   )
 }
 

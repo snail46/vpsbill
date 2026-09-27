@@ -411,6 +411,11 @@ type hostedPlanInput struct {
 	// required, other cycles are optional.
 	Prices  map[string]int64 `json:"prices"`
 	Enabled bool             `json:"enabled"`
+	// Description is shown to buyers; PurchaseLimit caps instances per buyer
+	// (0 = unlimited); EarlyRefund allows a full refund within an hour.
+	Description   string `json:"description"`
+	PurchaseLimit int    `json:"purchase_limit"`
+	EarlyRefund   bool   `json:"early_refund"`
 }
 
 var hostedCycles = []string{"monthly", "quarterly", "semiannual", "annual"}
@@ -418,6 +423,7 @@ var hostedCycles = []string{"monthly", "quarterly", "semiannual", "annual"}
 func (in *hostedPlanInput) plan(node postgres.Node) (postgres.Plan, string) {
 	in.Name = strings.TrimSpace(in.Name)
 	in.DefaultTemplateID = strings.TrimSpace(in.DefaultTemplateID)
+	in.Description = strings.TrimSpace(in.Description)
 	switch {
 	case len([]rune(in.Name)) < 2 || len([]rune(in.Name)) > 40:
 		return postgres.Plan{}, "套餐名称需为 2-40 个字符"
@@ -433,6 +439,10 @@ func (in *hostedPlanInput) plan(node postgres.Node) (postgres.Plan, string) {
 		return postgres.Plan{}, "NAT 端口数量需在 1-100 之间"
 	case len(in.AllowedTemplateIDs) == 0 || len(in.AllowedTemplateIDs) > 50 || !containsString(in.AllowedTemplateIDs, in.DefaultTemplateID):
 		return postgres.Plan{}, "请至少选择一个系统镜像并设置默认镜像"
+	case len([]rune(in.Description)) > 1000:
+		return postgres.Plan{}, "套餐描述不能超过 1000 个字符"
+	case in.PurchaseLimit < 0 || in.PurchaseLimit > 100:
+		return postgres.Plan{}, "每人限购数量需在 0-100 之间（0 表示不限购）"
 	}
 	if amount, ok := in.Prices["monthly"]; !ok || amount < 100 || amount > 10_000_000 {
 		return postgres.Plan{}, "请设置月付价格（¥1 到 ¥100000）"
@@ -442,6 +452,7 @@ func (in *hostedPlanInput) plan(node postgres.Node) (postgres.Plan, string) {
 		TrafficGB: in.TrafficGB, NetworkDownMbps: in.NetworkDownMbps, NetworkUpMbps: in.NetworkUpMbps,
 		AssignNAT: true, PortMappingCount: in.PortMappingCount, IPv4Count: 1, IPv6Count: 1,
 		DefaultTemplateID: in.DefaultTemplateID, AllowedTemplateIDs: in.AllowedTemplateIDs, Enabled: in.Enabled,
+		Description: in.Description, PurchaseLimit: in.PurchaseLimit, EarlyRefund: in.EarlyRefund,
 	}
 	for _, cycle := range hostedCycles {
 		amount, ok := in.Prices[cycle]
