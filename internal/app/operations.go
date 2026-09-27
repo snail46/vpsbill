@@ -211,3 +211,65 @@ func writeTicketMutation(w http.ResponseWriter, message postgres.TicketMessage, 
 		writeJSON(w, http.StatusCreated, map[string]any{"data": message})
 	}
 }
+
+// Hosted-instance tickets as seen by the host: the host answers first and
+// never sees staff notes.
+
+func (a *operationsAPI) hostListTickets(w http.ResponseWriter, r *http.Request) {
+	rows, err := a.store.ListHostTickets(r.Context(), customerPrincipalFromContext(r.Context()).AccountID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "internal_error"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": rows})
+}
+
+func (a *operationsAPI) hostTicketDetail(w http.ResponseWriter, r *http.Request) {
+	result, err := a.store.HostTicketDetail(r.Context(), r.PathValue("id"), customerPrincipalFromContext(r.Context()).AccountID)
+	if errors.Is(err, postgres.ErrTicketNotFound) {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "ticket_not_found"})
+		return
+	}
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "internal_error"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": result})
+}
+
+func (a *operationsAPI) hostReplyTicket(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		Body string `json:"body"`
+	}
+	uploads, ok := readTicketRequest(w, r, a.maxAttachmentMB(), &input)
+	if !ok {
+		return
+	}
+	identity := customerPrincipalFromContext(r.Context())
+	ticketID := r.PathValue("id")
+	message, err := a.store.ReplyTicket(r.Context(), ticketID, identity.AccountID, "host", identity.UserID, input.Body, false, uploads...)
+	if err == nil {
+		a.notifyAsync(func(ctx context.Context, notifier *notify.Notifier) {
+			notifier.TicketReplied(ctx, ticketID, message.ID, "host", message.Body, false)
+		})
+	}
+	writeTicketMutation(w, message, err)
+}
+
+func (a *operationsAPI) hostAttachment(w http.ResponseWriter, r *http.Request) {
+	ticketID, attachmentID := r.PathValue("id"), r.PathValue("attachment")
+	if !uuidPattern.MatchString(ticketID) || !uuidPattern.MatchString(attachmentID) {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "attachment_not_found"})
+		return
+	}
+	item, data, err := a.store.HostTicketAttachmentData(r.Context(), ticketID, attachmentID, customerPrincipalFromContext(r.Context()).AccountID)
+	if errors.Is(err, postgres.ErrAttachmentNotFound) {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "attachment_not_found"})
+		return
+	}
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "internal_error"})
+		return
+	}
+	serveAttachment(w, item, data)
+}

@@ -190,15 +190,18 @@ type NodeWatch struct {
 	ExpiresAt      *time.Time
 	TrafficQuotaGB int
 	UsedBytes      int64
+	// OwnerEmail is set for hosted nodes, whose host gets the reminders.
+	OwnerEmail string
 }
 
 func (s *MailStore) NodeWatches(ctx context.Context) ([]NodeWatch, error) {
 	rows, err := s.db.Query(ctx, `
 		SELECT n.id,n.name,n.expires_at::timestamptz,n.traffic_quota_gb,
 		       coalesce((SELECT sum(s.traffic_used_bytes) FROM services s
-		                 WHERE s.node_id=n.id AND s.traffic_measured_at>=date_trunc('month',now())),0)::bigint
-		FROM nodes n
-		WHERE n.expires_at IS NOT NULL OR n.traffic_quota_gb>0
+		                 WHERE s.node_id=n.id AND s.traffic_measured_at>=date_trunc('month',now())),0)::bigint,
+		       coalesce(o.billing_email,'')
+		FROM nodes n LEFT JOIN accounts o ON o.id=n.owner_account_id
+		WHERE (n.expires_at IS NOT NULL OR n.traffic_quota_gb>0) AND n.retired_at IS NULL
 		ORDER BY n.name
 	`)
 	if err != nil {
@@ -208,7 +211,7 @@ func (s *MailStore) NodeWatches(ctx context.Context) ([]NodeWatch, error) {
 	result := make([]NodeWatch, 0)
 	for rows.Next() {
 		var row NodeWatch
-		if err := rows.Scan(&row.ID, &row.Name, &row.ExpiresAt, &row.TrafficQuotaGB, &row.UsedBytes); err != nil {
+		if err := rows.Scan(&row.ID, &row.Name, &row.ExpiresAt, &row.TrafficQuotaGB, &row.UsedBytes, &row.OwnerEmail); err != nil {
 			return nil, err
 		}
 		result = append(result, row)
@@ -223,14 +226,18 @@ type TicketMailContext struct {
 	Priority       string
 	CustomerName   string
 	RequesterEmail string
+	// HostName and HostEmail are set for tickets about a hosted instance.
+	HostName  string
+	HostEmail string
 }
 
 func (s *MailStore) TicketMailContext(ctx context.Context, ticketID string) (TicketMailContext, error) {
 	var result TicketMailContext
 	err := s.db.QueryRow(ctx, `
-		SELECT t.number,t.subject,t.priority,a.display_name,u.email
+		SELECT t.number,t.subject,t.priority,a.display_name,u.email,coalesce(h.display_name,''),coalesce(h.billing_email,'')
 		FROM support_tickets t JOIN accounts a ON a.id=t.account_id JOIN users u ON u.id=t.requester_user_id
+		LEFT JOIN accounts h ON h.id=t.host_account_id
 		WHERE t.id=$1
-	`, ticketID).Scan(&result.Number, &result.Subject, &result.Priority, &result.CustomerName, &result.RequesterEmail)
+	`, ticketID).Scan(&result.Number, &result.Subject, &result.Priority, &result.CustomerName, &result.RequesterEmail, &result.HostName, &result.HostEmail)
 	return result, err
 }

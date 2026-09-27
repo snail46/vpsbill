@@ -7,6 +7,7 @@ import {
   CheckCircle2,
   ChevronRight,
   CircleDollarSign,
+  Coins,
   Cpu,
   CreditCard,
   Headphones,
@@ -27,6 +28,7 @@ import {
   ShieldCheck,
   ShoppingCart,
   Square,
+  Store,
   UserCircle,
   Users,
   WalletCards,
@@ -59,10 +61,15 @@ import {
   TicketDetailRecord,
   TicketRecord,
   TransactionRecord,
+  WalletRecord,
 } from './api'
 import CustomerServicesPanel from './CustomerServices'
 import { AttachmentGallery, AttachmentPicker, ticketRequestBody, useAttachmentLimit } from './TicketAttachments'
 import HostDetailPanel from './HostDetail'
+import CustomerWallet from './Wallet'
+import HostingCenter from './Hosting'
+import AdminMarketplace from './AdminMarketplace'
+import { AdminWalletPanel, walletMoney } from './Wallet'
 
 type Meta = { name: string; environment: string; installed: boolean; capabilities: string[]; password_reset_mail?: boolean }
 type View =
@@ -76,6 +83,7 @@ type View =
   | 'hosts'
   | 'plans'
   | 'support'
+  | 'marketplace'
   | 'audit'
   | 'settings'
   | 'security'
@@ -102,6 +110,7 @@ const navItems: Array<{ id: View; label: string; icon: typeof LayoutDashboard }>
   { id: 'nodes', label: '节点对接', icon: ServerCog },
   { id: 'hosts', label: '宿主机探针', icon: Cpu },
   { id: 'support', label: '客户工单', icon: Headphones },
+  { id: 'marketplace', label: '托管管理', icon: Store },
   { id: 'audit', label: '审计日志', icon: ScrollText },
   { id: 'settings', label: '站点设置', icon: SlidersHorizontal },
   { id: 'security', label: '安全中心', icon: Settings },
@@ -118,6 +127,7 @@ const adminViews: View[] = [
   'hosts',
   'plans',
   'support',
+  'marketplace',
   'audit',
   'settings',
   'security',
@@ -462,8 +472,8 @@ function Field({
 }
 
 type CustomerAuthScreen = 'loading' | 'login' | 'register' | 'forgot' | 'reset' | 'ready'
-type PortalView = 'overview' | 'shop' | 'services' | 'billing' | 'support' | 'profile'
-const portalViews: PortalView[] = ['overview', 'shop', 'services', 'billing', 'support', 'profile']
+type PortalView = 'overview' | 'shop' | 'services' | 'billing' | 'wallet' | 'hosting' | 'support' | 'profile'
+const portalViews: PortalView[] = ['overview', 'shop', 'services', 'billing', 'wallet', 'hosting', 'support', 'profile']
 
 function portalViewFromPath(): PortalView {
   const candidate = window.location.pathname.split('/').filter(Boolean)[1] as PortalView
@@ -694,7 +704,7 @@ function CustomerShell({ customer, onLogout }: { customer: CustomerIdentity; onL
 
   useEffect(() => {
     if (window.location.pathname !== `/portal/${view}`) {
-      window.history.replaceState(null, '', `/portal/${view}`)
+      window.history.replaceState(null, '', `/portal/${view}${view === 'hosting' ? window.location.search : ''}`)
     }
     const pop = () => setView(portalViewFromPath())
     window.addEventListener('popstate', pop)
@@ -712,6 +722,8 @@ function CustomerShell({ customer, onLogout }: { customer: CustomerIdentity; onL
     ['shop', '选购 VPS', ShoppingCart],
     ['services', '我的 VPS', Boxes],
     ['billing', '订单与账单', WalletCards],
+    ['wallet', '账户余额', Coins],
+    ['hosting', '托管中心', Store],
     ['support', '支持工单', Headphones],
     ['profile', '账户资料', UserCircle],
   ]
@@ -721,6 +733,8 @@ function CustomerShell({ customer, onLogout }: { customer: CustomerIdentity; onL
     shop: '选购 VPS',
     services: '我的 VPS',
     billing: '订单与账单',
+    wallet: '账户余额',
+    hosting: '托管中心',
     support: '支持工单',
     profile: '账户资料',
   }
@@ -775,6 +789,8 @@ function CustomerShell({ customer, onLogout }: { customer: CustomerIdentity; onL
         {view === 'shop' && <CustomerShop customer={customer} />}
         {view === 'services' && <CustomerServicesPanel />}
         {view === 'billing' && <CustomerBilling />}
+        {view === 'wallet' && <CustomerWallet />}
+        {view === 'hosting' && <HostingCenter customer={customer} />}
         {view === 'support' && <CustomerSupport />}
         {view === 'profile' && <CustomerProfile customer={customer} />}
       </main>
@@ -1052,21 +1068,25 @@ function CustomerBilling() {
   const [transactions, setTransactions] = useState<CustomerTransactionRecord[]>([])
   const [orders, setOrders] = useState<OrderRecord[]>([])
   const [checkoutEnabled, setCheckoutEnabled] = useState(false)
+  const [balance, setBalance] = useState(0)
   const [paying, setPaying] = useState('')
   const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
 
   const load = async () => {
     try {
-      const [i, t, o, c] = await Promise.all([
+      const [i, t, o, c, w] = await Promise.all([
         api<CustomerInvoiceRecord[]>('/api/v1/customer/invoices'),
         api<CustomerTransactionRecord[]>('/api/v1/customer/transactions'),
         api<OrderRecord[]>('/api/v1/customer/orders'),
         api<CustomerCatalogRecord>('/api/v1/customer/catalog'),
+        api<WalletRecord>('/api/v1/customer/wallet'),
       ])
       setInvoices(i)
       setTransactions(t)
       setOrders(o)
       setCheckoutEnabled(c.checkout_enabled)
+      setBalance(w.balance_minor)
     } catch (err) {
       setError(err instanceof Error ? err.message : '加载失败')
     }
@@ -1090,6 +1110,21 @@ function CustomerBilling() {
     }
   }
 
+  async function payWithBalance(invoice: CustomerInvoiceRecord) {
+    setPaying(invoice.id)
+    setError('')
+    setNotice('')
+    try {
+      await api(`/api/v1/customer/invoices/${invoice.id}/pay-balance`, { method: 'POST' })
+      setNotice(`账单 ${invoice.number} 已用余额支付`)
+      await load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '余额支付失败')
+    } finally {
+      setPaying('')
+    }
+  }
+
   return (
     <section className="workspace-panel">
       <div className="page-actions">
@@ -1104,6 +1139,10 @@ function CustomerBilling() {
       </div>
 
       {error && <div className="form-error">{error}</div>}
+      {notice && <div className="form-success">{notice}</div>}
+      <div className="note-banner">
+        账户余额 <strong>{money(balance, invoices[0]?.currency || 'CNY')}</strong>，可直接用于支付新购和续费账单。<a href="/portal/wallet">充值或查看明细</a>
+      </div>
 
       <div className="panel">
         <div className="panel-heading">
@@ -1161,14 +1200,27 @@ function CustomerBilling() {
             <tbody>
               {invoices.map(item => (
                 <tr key={item.id}>
-                  <td><strong>{item.number}</strong></td>
+                  <td>
+                    <strong>{item.number}</strong>
+                    <small className="block">{({ initial: '新购', renewal: '续费', topup: '余额充值' } as Record<string, string>)[item.kind] || item.kind}</small>
+                  </td>
                   <td><strong>{money(item.total_minor, item.currency)}</strong></td>
                   <td style={{ color: item.balance_minor > 0 ? '#fbbf24' : 'inherit' }}>
                     <strong>{money(item.balance_minor, item.currency)}</strong>
                   </td>
                   <td><StatusBadge status={item.status} /></td>
                   <td>{new Date(item.due_at).toLocaleDateString()}</td>
-                  <td>
+                  <td className="row-actions">
+                    {item.status === 'open' && item.kind !== 'topup' && (
+                      <button
+                        className="primary-button compact"
+                        disabled={paying === item.id || balance < item.balance_minor}
+                        title={balance < item.balance_minor ? `余额 ${money(balance, item.currency)} 不足` : ''}
+                        onClick={() => void payWithBalance(item)}
+                      >
+                        余额支付
+                      </button>
+                    )}
                     {item.status === 'open' &&
                       (checkoutEnabled ? (
                         <button
@@ -1624,17 +1676,20 @@ function CustomerSupport() {
   )
 }
 
-function TicketConversation({
+export function TicketConversation({
   detail,
   onReply,
   admin = false,
   onStatus,
   maxMB,
   onError,
+  attachmentBase,
 }: {
   detail: TicketDetailRecord
   onReply: (body: string, internal: boolean, files: File[]) => Promise<boolean>
   admin?: boolean
+  // attachmentBase overrides where attachments load from (host view).
+  attachmentBase?: string
   onStatus?: (status: string) => void
   maxMB: number
   onError: (message: string) => void
@@ -1683,13 +1738,15 @@ function TicketConversation({
           <article key={message.id} className={`message ${message.author_type}${message.internal ? ' internal' : ''}`}>
             <header>
               <strong>{message.author_name || ticketAuthorLabel(message.author_type)}</strong>
+              {message.author_type === 'host' && <span className="chat-role host">机主</span>}
+              {message.author_type === 'staff' && detail.ticket.host_account_id && <span className="chat-role staff">平台</span>}
               <span>
                 {message.internal ? '内部备忘 · ' : ''}
                 {new Date(message.created_at).toLocaleString()}
               </span>
             </header>
             {!(message.attachments?.length && message.body === '（图片附件）') && <p>{message.body}</p>}
-            <AttachmentGallery ticketID={detail.ticket.id} attachments={message.attachments} admin={admin} />
+            <AttachmentGallery ticketID={detail.ticket.id} attachments={message.attachments} admin={admin} base={attachmentBase} />
           </article>
         ))}
       </div>
@@ -1739,6 +1796,7 @@ function TicketConversation({
 
 function AdminSupport() {
   const [tickets, setTickets] = useState<TicketRecord[]>([])
+  const [scope, setScope] = useState<'platform' | 'hosted'>('platform')
   const [detail, setDetail] = useState<TicketDetailRecord | null>(null)
   const [error, setError] = useState('')
   const maxMB = useAttachmentLimit()
@@ -1806,9 +1864,19 @@ function AdminSupport() {
 
       {error && <div className="form-error">{error}</div>}
 
+      <div className="segmented" role="tablist">
+        <button role="tab" aria-selected={scope === 'platform'} className={scope === 'platform' ? 'active' : ''} onClick={() => setScope('platform')}>
+          平台工单 <span className="count">{tickets.filter(ticket => !ticket.host_account_id).length}</span>
+        </button>
+        <button role="tab" aria-selected={scope === 'hosted'} className={scope === 'hosted' ? 'active' : ''} onClick={() => setScope('hosted')}>
+          托管工单 <span className="count">{tickets.filter(ticket => ticket.host_account_id).length}</span>
+        </button>
+      </div>
+      {scope === 'hosted' && <p className="muted-text">托管工单由母机机主作为第一处理人，平台可以查看并在必要时介入回复。</p>}
+
       <div className="support-layout">
         <div className="ticket-list">
-          {tickets.map(ticket => (
+          {tickets.filter(ticket => (scope === 'hosted') === Boolean(ticket.host_account_id)).map(ticket => (
             <button
               key={ticket.id}
               className={detail?.ticket.id === ticket.id ? 'ticket-row selected' : 'ticket-row'}
@@ -1818,6 +1886,7 @@ function AdminSupport() {
                 <strong>{ticket.subject}</strong>
                 <span>
                   {ticket.customer_name} · {ticket.number}
+                  {ticket.host_account_id ? ` · 机主 ${ticket.host_name}` : ''}
                 </span>
               </div>
               <span className={`ticket-state ${ticket.status}`}>{ticketStatusLabel(ticket.status)}</span>
@@ -2000,6 +2069,7 @@ function AdminShell({ meta, user, onLogout }: { meta: Meta | null; user: StaffUs
           ))}
         {view === 'plans' && <PlansView />}
         {view === 'support' && <AdminSupport />}
+        {view === 'marketplace' && <AdminMarketplace />}
         {view === 'audit' && <AuditView />}
         {view === 'security' && <SecuritySettings enabled={user.mfa_enabled} />}
       </main>
@@ -2160,6 +2230,7 @@ function CustomersView() {
   const [error, setError] = useState('')
   const [updating, setUpdating] = useState('')
   const [resetLink, setResetLink] = useState<{ name: string; email: string; link: string; expires_at: string } | null>(null)
+  const [walletFor, setWalletFor] = useState<AccountRecord | null>(null)
   const [copied, setCopied] = useState(false)
 
   async function issueResetLink(customer: AccountRecord) {
@@ -2244,6 +2315,10 @@ function CustomersView() {
         </div>
       )}
 
+      {walletFor && (
+        <AdminWalletPanel key={walletFor.id} accountID={walletFor.id} name={walletFor.display_name} onClose={() => setWalletFor(null)} onChanged={() => void load()} />
+      )}
+
       {showForm && (
         <CustomerForm
           onClose={() => setShowForm(false)}
@@ -2262,6 +2337,7 @@ function CustomersView() {
               <th>客户类型</th>
               <th>账单邮箱</th>
               <th>计费币种</th>
+              <th>账户余额</th>
               <th>账户状态</th>
               <th>注册时间</th>
               <th>操作</th>
@@ -2277,6 +2353,7 @@ function CustomersView() {
                 <td>{customer.kind === 'business' ? '企业客户' : '个人客户'}</td>
                 <td>{customer.billing_email}</td>
                 <td><code>{customer.default_currency}</code></td>
+                <td className={(customer.balance_minor || 0) < 0 ? 'amount-negative' : ''}>{walletMoney(customer.balance_minor || 0, customer.default_currency)}</td>
                 <td><StatusBadge status={customer.status} /></td>
                 <td>{new Date(customer.created_at).toLocaleString()}</td>
                 <td>
@@ -2295,13 +2372,16 @@ function CustomersView() {
                     >
                       重置密码链接
                     </button>
+                    <button className="text-button" onClick={() => setWalletFor(customer)}>
+                      余额明细
+                    </button>
                   </div>
                 </td>
               </tr>
             ))}
             {!customers.length && (
               <tr>
-                <td colSpan={7} className="empty-state">尚未创建任何客户账户</td>
+                <td colSpan={8} className="empty-state">尚未创建任何客户账户</td>
               </tr>
             )}
           </tbody>
@@ -2721,7 +2801,7 @@ function BillingView() {
                         disabled={paying === invoice.id}
                         onClick={() => pay(invoice)}
                       >
-                        {paying === invoice.id ? '入账处理中…' : '确认到账并开通'}
+                        {paying === invoice.id ? '入账处理中…' : invoice.kind === 'topup' ? '确认到账（充值）' : '确认到账并开通'}
                       </button>
                     )}
                   </td>
@@ -3022,7 +3102,10 @@ type SiteSettingsRecord = {
   password_reset_mail_enabled: boolean
   mail_notifications: MailNotificationSettings
   ticket_attachment_max_mb: number
+  marketplace: MarketplaceSettings
 }
+
+type MarketplaceSettings = { enabled: boolean; fee_percent: number; offline_hours: number }
 
 type MailNotificationSettings = {
   admin_emails: string
@@ -3074,6 +3157,7 @@ function SiteSettingsView() {
   const [clearPassword, setClearPassword] = useState(false)
   const [notifications, setNotifications] = useState<MailNotificationSettings>(defaultMailNotifications)
   const [attachmentMB, setAttachmentMB] = useState('5')
+  const [marketplace, setMarketplace] = useState<MarketplaceSettings>({ enabled: true, fee_percent: 20, offline_hours: 24 })
   const [saving, setSaving] = useState(false)
   const [testing, setTesting] = useState(false)
   const [error, setError] = useState('')
@@ -3104,6 +3188,7 @@ function SiteSettingsView() {
     setClearPassword(false)
     setNotifications({ ...defaultMailNotifications, ...value.mail_notifications })
     setAttachmentMB(String(value.ticket_attachment_max_mb || 5))
+    if (value.marketplace) setMarketplace(value.marketplace)
   }
 
   useEffect(() => {
@@ -3131,6 +3216,7 @@ function SiteSettingsView() {
           clear_smtp_password: clearPassword,
           mail_notifications: notifications,
           ticket_attachment_max_mb: Number(attachmentMB) || 0,
+          marketplace,
         }),
       })
       apply(value)
@@ -3372,6 +3458,22 @@ function SiteSettingsView() {
           <label>
             <span>单张图片大小上限（MB，1–20）</span>
             <input type="number" min={1} max={20} value={attachmentMB} onChange={event => setAttachmentMB(event.target.value)} />
+          </label>
+
+          <fieldset className="wide">
+            <legend>托管中心</legend>
+            <label className="notify-option">
+              <input type="checkbox" checked={marketplace.enabled} onChange={event => setMarketplace(current => ({ ...current, enabled: event.target.checked }))} />
+              允许用户发布和购买托管母机
+            </label>
+          </fieldset>
+          <label>
+            <span>每笔托管交易手续费（%，0–90）</span>
+            <input type="number" min={0} max={90} step={0.5} value={marketplace.fee_percent} onChange={event => setMarketplace(current => ({ ...current, fee_percent: Number(event.target.value) }))} />
+          </label>
+          <label>
+            <span>母鸡离线多少小时后自动清退（1–720）</span>
+            <input type="number" min={1} max={720} value={marketplace.offline_hours} onChange={event => setMarketplace(current => ({ ...current, offline_hours: Number(event.target.value) }))} />
           </label>
         </div>
 
@@ -4520,12 +4622,12 @@ function cycleLabel(cycle: string) {
   )
 }
 
-function ticketStatusLabel(status: string) {
+export function ticketStatusLabel(status: string) {
   return (
     ({
       open: '待处理',
       customer_reply: '客户已回复',
-      staff_reply: '客服已回复',
+      staff_reply: '已回复',
       resolved: '已解决',
       closed: '已关闭',
     } as Record<string, string>)[status] || status
@@ -4537,6 +4639,7 @@ function ticketAuthorLabel(type: string) {
     ({
       customer: '客户',
       staff: '工作人员',
+      host: '母机机主',
       system: '系统通知',
     } as Record<string, string>)[type] || type
   )
@@ -4555,6 +4658,7 @@ function viewTitle(view: View) {
       hosts: '宿主机探针',
       plans: '商品套餐管理',
       support: '工单管理',
+      marketplace: '托管管理',
       audit: '安全审计日志',
       settings: '站点设置',
       security: '账户安全设置',

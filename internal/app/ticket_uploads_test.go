@@ -82,3 +82,18 @@ func TestReadTicketRequestStillTakesJSON(t *testing.T) {
 		t.Fatalf("json request: ok=%v uploads=%d body=%q", ok, len(uploads), input.Body)
 	}
 }
+
+func TestHostedVirtualizationReadsDriverAndJSONShapes(t *testing.T) {
+	for _, raw := range []map[string]any{
+		{"runtimes": []string{"lxc", "podman", "kvm"}},
+		{"runtimes": []any{"podman", "lxc", "podman"}},
+	} {
+		got := hostedVirtualization(raw)
+		if len(got) != 2 || !containsString(got, "lxc") || !containsString(got, "podman") {
+			t.Fatalf("hostedVirtualization(%v) = %v", raw, got)
+		}
+	}
+	if got := hostedVirtualization(map[string]any{}); len(got) != 0 {
+		t.Fatalf("empty runtimes = %v", got)
+	}
+}

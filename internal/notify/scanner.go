@@ -137,8 +137,16 @@ func (n *Notifier) remindNodes(ctx context.Context) {
 	location := n.location()
 	now := n.now().In(location)
 	month := now.Format("2006-01")
-	var recipients []string
+	var admins []string
 	for _, node := range nodes {
+		// Hosted nodes remind their host; platform nodes the merchant staff.
+		recipients, manage := admins, n.link("/admin/nodes")
+		if node.OwnerEmail != "" {
+			recipients, manage = []string{node.OwnerEmail}, n.link("/portal/hosting")
+		} else if admins == nil {
+			admins = n.adminRecipients(ctx)
+			recipients = admins
+		}
 		if preferences.AdminNodeExpiry && node.ExpiresAt != nil {
 			date := node.ExpiresAt.UTC().Format("2006-01-02")
 			expires, _ := time.ParseInLocation("2006-01-02", date, location)
@@ -152,9 +160,10 @@ func (n *Notifier) remindNodes(ctx context.Context) {
 					stage = "final"
 				}
 				body := fmt.Sprintf("母鸡 %s 的租期到 %s。请及时续费，或提前迁出上面的实例，避免客户服务中断。\n\n节点管理：%s\n",
-					node.Name, date, n.link("/admin/nodes"))
-				if recipients == nil {
-					recipients = n.adminRecipients(ctx)
+					node.Name, date, manage)
+				if node.OwnerEmail != "" {
+					body = fmt.Sprintf("您托管的母机 %s 租期到 %s。续租后请在托管中心更新到期日期；如果不再续租，按托管准则需按实例剩余价值的 2 倍清退受影响的实例。\n\n托管中心：%s\n",
+						node.Name, date, manage)
 				}
 				for _, to := range recipients {
 					n.enqueue(ctx, to, subject, body, fmt.Sprintf("node-expiry:%s:%s:%s:%s", node.ID, date, stage, to))
@@ -166,10 +175,7 @@ func (n *Notifier) remindNodes(ctx context.Context) {
 			if crossed {
 				subject := fmt.Sprintf("[%s] 母鸡 %s 本月流量已用 %d%%", n.siteName(), node.Name, threshold)
 				body := fmt.Sprintf("母鸡 %s 上的实例本月合计使用 %s，月流量限额 %d GB。\n统计的是各实例流量之和，不含宿主机自身流量。\n\n节点管理：%s\n",
-					node.Name, formatBytes(node.UsedBytes), node.TrafficQuotaGB, n.link("/admin/nodes"))
-				if recipients == nil {
-					recipients = n.adminRecipients(ctx)
-				}
+					node.Name, formatBytes(node.UsedBytes), node.TrafficQuotaGB, manage)
 				for _, to := range recipients {
 					n.enqueue(ctx, to, subject, body, fmt.Sprintf("node-traffic:%s:%s:%d:%s", node.ID, month, threshold, to))
 				}

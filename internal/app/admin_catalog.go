@@ -221,7 +221,7 @@ func (a *adminCatalog) listPlans(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "internal_error"})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": plans})
+	writeJSON(w, http.StatusOK, map[string]any{"data": postgres.PlatformPlans(plans)})
 }
 
 type availableTemplate struct {
@@ -251,6 +251,10 @@ func (a *adminCatalog) listTemplates(w http.ResponseWriter, r *http.Request) {
 	results := make(chan result, len(nodes))
 	var wait sync.WaitGroup
 	for _, node := range nodes {
+		// Hosted nodes sell their owner's plans only.
+		if node.OwnerAccountID != "" {
+			continue
+		}
 		if _, registered := provider.Lookup(node.ProviderType); !registered || node.Status != "online" {
 			continue
 		}
@@ -314,6 +318,8 @@ func (a *adminCatalog) createPlan(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &input) {
 		return
 	}
+	// Hosted plans are created by their owners in the hosting center.
+	input.OwnerAccountID, input.NodeID = "", ""
 	if input.ProviderType = strings.TrimSpace(input.ProviderType); input.ProviderType == "" {
 		input.ProviderType = "clicd"
 	}

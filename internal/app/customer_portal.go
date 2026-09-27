@@ -480,7 +480,7 @@ func (p *customerPortal) catalogData(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	available := make([]postgres.Plan, 0)
-	for _, plan := range plans {
+	for _, plan := range postgres.PlatformPlans(plans) {
 		if plan.Enabled && len(plan.Prices) > 0 {
 			available = append(available, plan)
 		}
@@ -512,6 +512,11 @@ func (p *customerPortal) createOrder(w http.ResponseWriter, r *http.Request) {
 	}
 	identity := customerPrincipalFromContext(r.Context())
 	order, err := p.billing.CreateOrder(r.Context(), postgres.CreateOrderInput{AccountID: identity.AccountID, Items: input.Items, ActorType: "customer", ActorID: identity.UserID})
+	var hosted *postgres.HostedOrderError
+	if errors.As(err, &hosted) {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "hosted_unavailable", "message": hosted.Message})
+		return
+	}
 	if err != nil {
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "order_create_failed", "message": "地区、套餐、价格或配置无效"})
 		return

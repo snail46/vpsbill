@@ -108,13 +108,15 @@ export function AttachmentGallery({
   ticketID,
   attachments,
   admin,
+  base: override,
 }: {
   ticketID: string
   attachments?: TicketAttachmentRecord[]
   admin: boolean
+  base?: string
 }) {
   if (!attachments?.length) return null
-  const base = admin ? '/api/v1/admin/tickets' : '/api/v1/customer/tickets'
+  const base = override || (admin ? '/api/v1/admin/tickets' : '/api/v1/customer/tickets')
   return (
     <div className="attachment-gallery">
       {attachments.map(item => {

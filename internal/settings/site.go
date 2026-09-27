@@ -14,51 +14,53 @@ import (
 // SiteView is what the admin site settings page shows. Secrets are reported
 // only as configured or not.
 type SiteView struct {
-	AppName                  string            `json:"app_name"`
-	PublicURL                string            `json:"public_url"`
-	Timezone                 string            `json:"timezone"`
-	WorkerPollInterval       string            `json:"worker_poll_interval"`
-	ReconcileInterval        string            `json:"reconcile_interval"`
-	LifecycleInterval        string            `json:"lifecycle_interval"`
-	RenewalLeadTime          string            `json:"renewal_lead_time"`
-	OverdueGracePeriod       string            `json:"overdue_grace_period"`
-	TerminationRetention     string            `json:"termination_retention"`
-	NotificationWebhookURL   string            `json:"notification_webhook_url"`
-	NotificationSecretSet    bool              `json:"notification_webhook_secret_configured"`
-	SMTPHost                 string            `json:"smtp_host"`
-	SMTPPort                 int               `json:"smtp_port"`
-	SMTPUsername             string            `json:"smtp_username"`
-	SMTPPasswordConfigured   bool              `json:"smtp_password_configured"`
-	SMTPFrom                 string            `json:"smtp_from"`
-	SMTPSecurity             string            `json:"smtp_security"`
-	PasswordResetMailEnabled bool              `json:"password_reset_mail_enabled"`
-	MailNotifications        MailNotifications `json:"mail_notifications"`
-	TicketAttachmentMaxMB    int               `json:"ticket_attachment_max_mb"`
+	AppName                  string              `json:"app_name"`
+	PublicURL                string              `json:"public_url"`
+	Timezone                 string              `json:"timezone"`
+	WorkerPollInterval       string              `json:"worker_poll_interval"`
+	ReconcileInterval        string              `json:"reconcile_interval"`
+	LifecycleInterval        string              `json:"lifecycle_interval"`
+	RenewalLeadTime          string              `json:"renewal_lead_time"`
+	OverdueGracePeriod       string              `json:"overdue_grace_period"`
+	TerminationRetention     string              `json:"termination_retention"`
+	NotificationWebhookURL   string              `json:"notification_webhook_url"`
+	NotificationSecretSet    bool                `json:"notification_webhook_secret_configured"`
+	SMTPHost                 string              `json:"smtp_host"`
+	SMTPPort                 int                 `json:"smtp_port"`
+	SMTPUsername             string              `json:"smtp_username"`
+	SMTPPasswordConfigured   bool                `json:"smtp_password_configured"`
+	SMTPFrom                 string              `json:"smtp_from"`
+	SMTPSecurity             string              `json:"smtp_security"`
+	PasswordResetMailEnabled bool                `json:"password_reset_mail_enabled"`
+	MailNotifications        MailNotifications   `json:"mail_notifications"`
+	TicketAttachmentMaxMB    int                 `json:"ticket_attachment_max_mb"`
+	Marketplace              MarketplaceSettings `json:"marketplace"`
 }
 
 // SiteInput updates the site settings. Empty secrets keep the stored value;
 // ClearSMTPPassword removes the SMTP password.
 type SiteInput struct {
-	AppName                   string            `json:"app_name"`
-	PublicURL                 string            `json:"public_url"`
-	Timezone                  string            `json:"timezone"`
-	WorkerPollInterval        string            `json:"worker_poll_interval"`
-	ReconcileInterval         string            `json:"reconcile_interval"`
-	LifecycleInterval         string            `json:"lifecycle_interval"`
-	RenewalLeadTime           string            `json:"renewal_lead_time"`
-	OverdueGracePeriod        string            `json:"overdue_grace_period"`
-	TerminationRetention      string            `json:"termination_retention"`
-	NotificationWebhookURL    string            `json:"notification_webhook_url"`
-	NotificationWebhookSecret string            `json:"notification_webhook_secret"`
-	SMTPHost                  string            `json:"smtp_host"`
-	SMTPPort                  int               `json:"smtp_port"`
-	SMTPUsername              string            `json:"smtp_username"`
-	SMTPPassword              string            `json:"smtp_password"`
-	ClearSMTPPassword         bool              `json:"clear_smtp_password"`
-	SMTPFrom                  string            `json:"smtp_from"`
-	SMTPSecurity              string            `json:"smtp_security"`
-	MailNotifications         MailNotifications `json:"mail_notifications"`
-	TicketAttachmentMaxMB     int               `json:"ticket_attachment_max_mb"`
+	AppName                   string              `json:"app_name"`
+	PublicURL                 string              `json:"public_url"`
+	Timezone                  string              `json:"timezone"`
+	WorkerPollInterval        string              `json:"worker_poll_interval"`
+	ReconcileInterval         string              `json:"reconcile_interval"`
+	LifecycleInterval         string              `json:"lifecycle_interval"`
+	RenewalLeadTime           string              `json:"renewal_lead_time"`
+	OverdueGracePeriod        string              `json:"overdue_grace_period"`
+	TerminationRetention      string              `json:"termination_retention"`
+	NotificationWebhookURL    string              `json:"notification_webhook_url"`
+	NotificationWebhookSecret string              `json:"notification_webhook_secret"`
+	SMTPHost                  string              `json:"smtp_host"`
+	SMTPPort                  int                 `json:"smtp_port"`
+	SMTPUsername              string              `json:"smtp_username"`
+	SMTPPassword              string              `json:"smtp_password"`
+	ClearSMTPPassword         bool                `json:"clear_smtp_password"`
+	SMTPFrom                  string              `json:"smtp_from"`
+	SMTPSecurity              string              `json:"smtp_security"`
+	MailNotifications         MailNotifications   `json:"mail_notifications"`
+	TicketAttachmentMaxMB     int                 `json:"ticket_attachment_max_mb"`
+	Marketplace               MarketplaceSettings `json:"marketplace"`
 }
 
 func (m *Manager) SiteView() SiteView {
@@ -71,7 +73,7 @@ func (m *Manager) SiteView() SiteView {
 		NotificationWebhookURL: c.NotificationWebhookURL, NotificationSecretSet: c.NotificationWebhookSecret != "",
 		SMTPHost: c.SMTP.Host, SMTPPort: c.SMTP.Port, SMTPUsername: c.SMTP.Username, SMTPPasswordConfigured: c.SMTP.Password != "",
 		SMTPFrom: c.SMTP.From, SMTPSecurity: c.SMTP.Security, PasswordResetMailEnabled: c.SMTP.Configured(),
-		MailNotifications: c.MailNotifications, TicketAttachmentMaxMB: c.TicketAttachmentMaxMB,
+		MailNotifications: c.MailNotifications, TicketAttachmentMaxMB: c.TicketAttachmentMaxMB, Marketplace: c.Marketplace,
 	}
 }
 
@@ -161,6 +163,12 @@ func (m *Manager) UpdateSite(ctx context.Context, in SiteInput, actorID string) 
 	if in.TicketAttachmentMaxMB < 1 || in.TicketAttachmentMaxMB > 20 {
 		return invalid("工单附件大小上限必须在 1–20 MB 之间")
 	}
+	if in.Marketplace.FeePercent < 0 || in.Marketplace.FeePercent > 90 {
+		return invalid("托管手续费比例必须在 0–90% 之间")
+	}
+	if in.Marketplace.OfflineHours < 1 || in.Marketplace.OfflineHours > 720 {
+		return invalid("托管母机离线清退时限必须在 1–720 小时之间")
+	}
 	notificationsJSON, err := json.Marshal(notifications)
 	if err != nil {
 		return SiteView{}, err
@@ -187,12 +195,14 @@ func (m *Manager) UpdateSite(ctx context.Context, in SiteInput, actorID string) 
 		    renewal_lead_seconds=$7,overdue_grace_seconds=$8,termination_retention_seconds=$9,
 		    notification_webhook_url=$10,notification_webhook_secret_encrypted=$11,
 		    smtp_host=$12,smtp_port=$13,smtp_username=$14,smtp_password_encrypted=$15,smtp_from=$16,smtp_security=$17,
-		    mail_notifications=$18,ticket_attachment_max_mb=$19,updated_at=now()
+		    mail_notifications=$18,ticket_attachment_max_mb=$19,
+		    marketplace_enabled=$20,marketplace_fee_percent=$21,marketplace_offline_hours=$22,updated_at=now()
 		WHERE singleton=true
 	`, appName, publicURL, timezone,
 		seconds(*durations[0].target), seconds(*durations[1].target), seconds(*durations[2].target),
 		seconds(*durations[3].target), seconds(*durations[4].target), seconds(*durations[5].target),
-		notificationURL, notificationEnc, smtp.Host, smtp.Port, smtp.Username, smtpPasswordEnc, smtp.From, smtp.Security, notificationsJSON, in.TicketAttachmentMaxMB)
+		notificationURL, notificationEnc, smtp.Host, smtp.Port, smtp.Username, smtpPasswordEnc, smtp.From, smtp.Security, notificationsJSON, in.TicketAttachmentMaxMB,
+		in.Marketplace.Enabled, in.Marketplace.FeePercent, in.Marketplace.OfflineHours)
 	if err != nil {
 		return SiteView{}, err
 	}

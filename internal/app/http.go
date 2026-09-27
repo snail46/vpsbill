@@ -8,7 +8,9 @@ import (
 	"net/http"
 	"time"
 
+	"vpsbill/internal/chat"
 	"vpsbill/internal/config"
+	"vpsbill/internal/marketplace"
 	"vpsbill/internal/notify"
 	"vpsbill/internal/security"
 	"vpsbill/internal/settings"
@@ -28,6 +30,11 @@ type Dependencies struct {
 	AgentInternal http.Handler
 	// Notifier queues notification mail; nil builds one from DB and Settings.
 	Notifier *notify.Notifier
+	// Marketplace settles hosted-node clearances; nil builds one.
+	Marketplace *marketplace.Service
+	// ChatHub pushes hosted-node chat messages; nil disables live updates
+	// (messages still load over HTTP).
+	ChatHub *chat.Hub
 }
 
 func NewHandler(deps Dependencies) (http.Handler, error) {
@@ -57,6 +64,12 @@ func NewHandler(deps Dependencies) (http.Handler, error) {
 	}
 	operations := newOperationsAPI(operationsStore, deps.Settings, notifier)
 	metrics := newMetricsAPI(monitoringStore, deps.Settings)
+	marketStore := postgres.NewMarketplaceStore(deps.DB)
+	marketService := deps.Marketplace
+	if marketService == nil {
+		marketService = marketplace.New(marketStore, catalogStore, secretBox, deps.Settings, notifier, deps.Logger)
+	}
+	market := &marketplaceAPI{store: marketStore, catalog: catalogStore, billing: billingStore, settings: deps.Settings, box: secretBox, service: marketService, hub: deps.ChatHub}
 	install := &installer{settings: deps.Settings, auth: auth, logger: deps.Logger}
 
 	mux := http.NewServeMux()
@@ -80,8 +93,9 @@ func NewHandler(deps Dependencies) (http.Handler, error) {
 				"installed":                deps.Settings.Current().Installed,
 				"password_reset_mail":      deps.Settings.Current().SMTP.Configured(),
 				"ticket_attachment_max_mb": deps.Settings.Current().TicketAttachmentMaxMB,
+				"marketplace_enabled":      deps.Settings.Current().Marketplace.Enabled,
 				"capabilities": []string{
-					"accounts", "catalog", "billing", "provisioning", "clicd", "support", "audit", "notifications",
+					"accounts", "catalog", "billing", "provisioning", "clicd", "support", "audit", "notifications", "wallet", "marketplace",
 				},
 			},
 		})
@@ -127,6 +141,27 @@ func NewHandler(deps Dependencies) (http.Handler, error) {
 	mux.Handle("GET /api/v1/customer/tickets/{id}", auth.requireCustomer(http.HandlerFunc(operations.customerTicketDetail)))
 	mux.Handle("POST /api/v1/customer/tickets/{id}/messages", auth.requireCustomer(http.HandlerFunc(operations.customerReplyTicket)))
 	mux.Handle("GET /api/v1/customer/tickets/{id}/attachments/{attachment}", auth.requireCustomer(http.HandlerFunc(operations.customerAttachment)))
+	mux.Handle("GET /api/v1/customer/wallet", auth.requireCustomer(http.HandlerFunc(market.customerWallet)))
+	mux.Handle("POST /api/v1/customer/wallet/topup", auth.requireCustomer(http.HandlerFunc(market.customerTopup)))
+	mux.Handle("POST /api/v1/customer/invoices/{id}/pay-balance", auth.requireCustomer(http.HandlerFunc(market.customerPayWithBalance)))
+	mux.Handle("GET /api/v1/customer/market", auth.requireCustomer(http.HandlerFunc(market.market)))
+	mux.Handle("GET /api/v1/customer/hosting", auth.requireCustomer(http.HandlerFunc(market.hosting)))
+	mux.Handle("POST /api/v1/customer/hosting/nodes", auth.requireCustomer(http.HandlerFunc(market.publishNode)))
+	mux.Handle("PUT /api/v1/customer/hosting/nodes/{id}", auth.requireCustomer(http.HandlerFunc(market.updateHostedNode)))
+	mux.Handle("POST /api/v1/customer/hosting/nodes/{id}/listing", auth.requireCustomer(http.HandlerFunc(market.setHostedListing)))
+	mux.Handle("POST /api/v1/customer/hosting/nodes/{id}/retire", auth.requireCustomer(http.HandlerFunc(market.retireHostedNode)))
+	mux.Handle("GET /api/v1/customer/hosting/nodes/{id}/templates", auth.requireCustomer(http.HandlerFunc(market.hostedTemplates)))
+	mux.Handle("POST /api/v1/customer/hosting/nodes/{id}/plans", auth.requireCustomer(http.HandlerFunc(market.createHostedPlan)))
+	mux.Handle("PUT /api/v1/customer/hosting/plans/{id}", auth.requireCustomer(http.HandlerFunc(market.updateHostedPlan)))
+	mux.Handle("POST /api/v1/customer/hosting/plans/{id}/enabled", auth.requireCustomer(http.HandlerFunc(market.setHostedPlanEnabled)))
+	mux.Handle("GET /api/v1/customer/hosting/tickets", auth.requireCustomer(http.HandlerFunc(operations.hostListTickets)))
+	mux.Handle("GET /api/v1/customer/hosting/tickets/{id}", auth.requireCustomer(http.HandlerFunc(operations.hostTicketDetail)))
+	mux.Handle("POST /api/v1/customer/hosting/tickets/{id}/messages", auth.requireCustomer(http.HandlerFunc(operations.hostReplyTicket)))
+	mux.Handle("GET /api/v1/customer/hosting/tickets/{id}/attachments/{attachment}", auth.requireCustomer(http.HandlerFunc(operations.hostAttachment)))
+	mux.Handle("GET /api/v1/customer/chat/rooms", auth.requireCustomer(http.HandlerFunc(market.customerChatRooms)))
+	mux.Handle("GET /api/v1/customer/chat/rooms/{node}/messages", auth.requireCustomer(http.HandlerFunc(market.customerChatMessages)))
+	mux.Handle("POST /api/v1/customer/chat/rooms/{node}/messages", auth.requireCustomer(http.HandlerFunc(market.customerPostChat)))
+	mux.Handle("GET /api/v1/customer/chat/rooms/{node}/stream", auth.requireCustomer(http.HandlerFunc(market.customerChatStream)))
 	// Public on purpose: nodes fetch the agent before they hold any credential.
 	mux.HandleFunc("GET /api/v1/agent/download/{file}", agentDownloads(deps.Config.AgentDownloadDir))
 	if deps.AgentGateway != nil {
@@ -176,6 +211,16 @@ func NewHandler(deps Dependencies) (http.Handler, error) {
 	mux.Handle("POST /api/v1/admin/tickets/{id}/messages", auth.require("tickets:write", http.HandlerFunc(operations.adminReplyTicket)))
 	mux.Handle("GET /api/v1/admin/tickets/{id}/attachments/{attachment}", auth.require("tickets:read", http.HandlerFunc(operations.adminAttachment)))
 	mux.Handle("PATCH /api/v1/admin/tickets/{id}", auth.require("tickets:write", http.HandlerFunc(operations.adminUpdateTicket)))
+	mux.Handle("GET /api/v1/admin/marketplace/nodes", auth.require("nodes:read", http.HandlerFunc(market.adminHostedNodes)))
+	mux.Handle("POST /api/v1/admin/marketplace/nodes/{id}/clear", auth.require("nodes:write", http.HandlerFunc(market.adminClearNode)))
+	mux.Handle("PUT /api/v1/admin/marketplace/nodes/{id}/hold", auth.require("nodes:write", http.HandlerFunc(market.adminHoldClearance)))
+	mux.Handle("POST /api/v1/admin/marketplace/nodes/{id}/listing", auth.require("nodes:write", http.HandlerFunc(market.adminSetListing)))
+	mux.Handle("GET /api/v1/admin/chat/rooms", auth.require("tickets:read", http.HandlerFunc(market.adminChatRooms)))
+	mux.Handle("GET /api/v1/admin/chat/rooms/{node}/messages", auth.require("tickets:read", http.HandlerFunc(market.adminChatMessages)))
+	mux.Handle("POST /api/v1/admin/chat/rooms/{node}/messages", auth.require("tickets:write", http.HandlerFunc(market.adminPostChat)))
+	mux.Handle("GET /api/v1/admin/chat/rooms/{node}/stream", auth.require("tickets:read", http.HandlerFunc(market.adminChatStream)))
+	mux.Handle("GET /api/v1/admin/customers/{id}/wallet", auth.require("customers:read", http.HandlerFunc(market.adminWallet)))
+	mux.Handle("POST /api/v1/admin/customers/{id}/wallet/adjust", auth.require("billing:write", http.HandlerFunc(market.adminAdjustWallet)))
 	mux.Handle("GET /api/v1/admin/audit-logs", auth.require("audit:read", http.HandlerFunc(operations.adminAuditLogs)))
 	mux.HandleFunc("POST /api/v1/webhooks/payments/generic", billing.paymentWebhook)
 	mux.HandleFunc("GET /api/v1/webhooks/payments/epay", billing.epayWebhook)

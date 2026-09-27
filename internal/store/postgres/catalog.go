@@ -38,6 +38,9 @@ type Node struct {
 	TrafficQuotaGB int    `json:"traffic_quota_gb"`
 	// TrafficUsedBytes sums this calendar month's measured service traffic.
 	TrafficUsedBytes int64 `json:"traffic_used_bytes"`
+	// OwnerAccountID marks a hosted node published by a customer.
+	OwnerAccountID string     `json:"owner_account_id,omitempty"`
+	RetiredAt      *time.Time `json:"retired_at,omitempty"`
 }
 
 type CreateNode struct {
@@ -61,7 +64,8 @@ func (s *CatalogStore) ListNodes(ctx context.Context) ([]Node, error) {
 		       n.virtualization_types, n.capacity, n.capacity_vcpu, n.capacity_ram_mb,
 		       n.capacity_disk_gb, n.last_seen_at, n.created_at,
 		       coalesce(to_char(n.expires_at,'YYYY-MM-DD'),''), n.traffic_quota_gb,
-		       coalesce((SELECT sum(s.traffic_used_bytes) FROM services s WHERE s.node_id=n.id AND s.traffic_measured_at>=date_trunc('month',now())),0)::bigint
+		       coalesce((SELECT sum(s.traffic_used_bytes) FROM services s WHERE s.node_id=n.id AND s.traffic_measured_at>=date_trunc('month',now())),0)::bigint,
+		       coalesce(n.owner_account_id::text,''), n.retired_at
 		FROM nodes n JOIN regions r ON r.id=n.region_id
 		ORDER BY r.code, n.name
 	`)
@@ -73,7 +77,7 @@ func (s *CatalogStore) ListNodes(ctx context.Context) ([]Node, error) {
 	for rows.Next() {
 		var node Node
 		var capacity []byte
-		if err := rows.Scan(&node.ID, &node.RegionID, &node.RegionCode, &node.RegionName, &node.Name, &node.ProviderType, &node.BaseURL, &node.ProviderOptions, &node.Status, &node.VirtualizationTypes, &capacity, &node.CapacityVCPU, &node.CapacityRAMMB, &node.CapacityDiskGB, &node.LastSeenAt, &node.CreatedAt, &node.ExpiresAt, &node.TrafficQuotaGB, &node.TrafficUsedBytes); err != nil {
+		if err := rows.Scan(&node.ID, &node.RegionID, &node.RegionCode, &node.RegionName, &node.Name, &node.ProviderType, &node.BaseURL, &node.ProviderOptions, &node.Status, &node.VirtualizationTypes, &capacity, &node.CapacityVCPU, &node.CapacityRAMMB, &node.CapacityDiskGB, &node.LastSeenAt, &node.CreatedAt, &node.ExpiresAt, &node.TrafficQuotaGB, &node.TrafficUsedBytes, &node.OwnerAccountID, &node.RetiredAt); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal(capacity, &node.Capacity)
@@ -130,9 +134,10 @@ func (s *CatalogStore) NodeSecret(ctx context.Context, id string) (Node, error) 
 	err := s.db.QueryRow(ctx, `
 		SELECT n.id, n.region_id, r.code, r.name, n.name, n.provider_type, n.base_url, n.api_key_ciphertext,n.provider_options,
 		       n.status, n.virtualization_types, n.capacity, n.capacity_vcpu, n.capacity_ram_mb,
-		       n.capacity_disk_gb, n.last_seen_at, n.created_at
+		       n.capacity_disk_gb, n.last_seen_at, n.created_at,
+		       coalesce(n.owner_account_id::text,''), n.retired_at
 		FROM nodes n JOIN regions r ON r.id=n.region_id WHERE n.id=$1
-	`, id).Scan(&node.ID, &node.RegionID, &node.RegionCode, &node.RegionName, &node.Name, &node.ProviderType, &node.BaseURL, &node.APIKeyCiphertext, &node.ProviderOptions, &node.Status, &node.VirtualizationTypes, &capacity, &node.CapacityVCPU, &node.CapacityRAMMB, &node.CapacityDiskGB, &node.LastSeenAt, &node.CreatedAt)
+	`, id).Scan(&node.ID, &node.RegionID, &node.RegionCode, &node.RegionName, &node.Name, &node.ProviderType, &node.BaseURL, &node.APIKeyCiphertext, &node.ProviderOptions, &node.Status, &node.VirtualizationTypes, &capacity, &node.CapacityVCPU, &node.CapacityRAMMB, &node.CapacityDiskGB, &node.LastSeenAt, &node.CreatedAt, &node.OwnerAccountID, &node.RetiredAt)
 	_ = json.Unmarshal(capacity, &node.Capacity)
 	return node, err
 }
@@ -140,7 +145,8 @@ func (s *CatalogStore) NodeSecret(ctx context.Context, id string) (Node, error) 
 func (s *CatalogStore) ListNodeSecrets(ctx context.Context) ([]Node, error) {
 	rows, err := s.db.Query(ctx, `
 		SELECT n.id,n.region_id,r.code,r.name,n.name,n.provider_type,n.base_url,n.api_key_ciphertext,n.provider_options,n.status,
-		       n.virtualization_types,n.capacity,n.capacity_vcpu,n.capacity_ram_mb,n.capacity_disk_gb,n.last_seen_at,n.created_at
+		       n.virtualization_types,n.capacity,n.capacity_vcpu,n.capacity_ram_mb,n.capacity_disk_gb,n.last_seen_at,n.created_at,
+		       coalesce(n.owner_account_id::text,''),n.retired_at
 		FROM nodes n JOIN regions r ON r.id=n.region_id ORDER BY n.created_at
 	`)
 	if err != nil {
@@ -152,7 +158,7 @@ func (s *CatalogStore) ListNodeSecrets(ctx context.Context) ([]Node, error) {
 		var node Node
 		var capacity []byte
 		if err := rows.Scan(&node.ID, &node.RegionID, &node.RegionCode, &node.RegionName, &node.Name, &node.ProviderType, &node.BaseURL, &node.APIKeyCiphertext, &node.ProviderOptions,
-			&node.Status, &node.VirtualizationTypes, &capacity, &node.CapacityVCPU, &node.CapacityRAMMB, &node.CapacityDiskGB, &node.LastSeenAt, &node.CreatedAt); err != nil {
+			&node.Status, &node.VirtualizationTypes, &capacity, &node.CapacityVCPU, &node.CapacityRAMMB, &node.CapacityDiskGB, &node.LastSeenAt, &node.CreatedAt, &node.OwnerAccountID, &node.RetiredAt); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal(capacity, &node.Capacity)
@@ -189,30 +195,34 @@ type Price struct {
 }
 
 type Plan struct {
-	ID                 string    `json:"id"`
-	Code               string    `json:"code"`
-	Name               string    `json:"name"`
-	ProviderType       string    `json:"provider_type"`
-	Virtualization     string    `json:"virtualization"`
-	VCPU               int       `json:"vcpu"`
-	RAMMB              int       `json:"ram_mb"`
-	DiskGB             int       `json:"disk_gb"`
-	TrafficGB          int       `json:"traffic_gb"`
-	NetworkDownMbps    int       `json:"network_down_mbps"`
-	NetworkUpMbps      int       `json:"network_up_mbps"`
-	SnapshotLimit      int       `json:"snapshot_limit"`
-	AssignNAT          bool      `json:"assign_nat"`
-	PortMappingCount   int       `json:"port_mapping_count"`
-	AssignIPv4         bool      `json:"assign_ipv4"`
-	IPv4Count          int       `json:"ipv4_count"`
-	AssignIPv6         bool      `json:"assign_ipv6"`
-	IPv6Count          int       `json:"ipv6_count"`
-	DefaultTemplateID  string    `json:"default_template_id"`
-	AllowedTemplateIDs []string  `json:"allowed_template_ids"`
-	Enabled            bool      `json:"enabled"`
-	Version            int       `json:"version"`
-	Prices             []Price   `json:"prices"`
-	CreatedAt          time.Time `json:"created_at"`
+	ID                 string   `json:"id"`
+	Code               string   `json:"code"`
+	Name               string   `json:"name"`
+	ProviderType       string   `json:"provider_type"`
+	Virtualization     string   `json:"virtualization"`
+	VCPU               int      `json:"vcpu"`
+	RAMMB              int      `json:"ram_mb"`
+	DiskGB             int      `json:"disk_gb"`
+	TrafficGB          int      `json:"traffic_gb"`
+	NetworkDownMbps    int      `json:"network_down_mbps"`
+	NetworkUpMbps      int      `json:"network_up_mbps"`
+	SnapshotLimit      int      `json:"snapshot_limit"`
+	AssignNAT          bool     `json:"assign_nat"`
+	PortMappingCount   int      `json:"port_mapping_count"`
+	AssignIPv4         bool     `json:"assign_ipv4"`
+	IPv4Count          int      `json:"ipv4_count"`
+	AssignIPv6         bool     `json:"assign_ipv6"`
+	IPv6Count          int      `json:"ipv6_count"`
+	DefaultTemplateID  string   `json:"default_template_id"`
+	AllowedTemplateIDs []string `json:"allowed_template_ids"`
+	// OwnerAccountID and NodeID are set on hosted plans, which only sell
+	// their owner's node.
+	OwnerAccountID string    `json:"owner_account_id,omitempty"`
+	NodeID         string    `json:"node_id,omitempty"`
+	Enabled        bool      `json:"enabled"`
+	Version        int       `json:"version"`
+	Prices         []Price   `json:"prices"`
+	CreatedAt      time.Time `json:"created_at"`
 }
 
 func (s *CatalogStore) ListPlans(ctx context.Context) ([]Plan, error) {
@@ -220,7 +230,8 @@ func (s *CatalogStore) ListPlans(ctx context.Context) ([]Plan, error) {
 		SELECT id, code, name, provider_type, virtualization, vcpu, ram_mb, disk_gb, traffic_gb,
 		       network_down_mbps, network_up_mbps, snapshot_limit,
 		       assign_nat, port_mapping_count, assign_ipv4, ipv4_count, assign_ipv6, ipv6_count,
-		       default_template_id, allowed_template_ids, enabled, version, created_at
+		       default_template_id, allowed_template_ids, enabled, version, created_at,
+		       coalesce(owner_account_id::text,''), coalesce(node_id::text,'')
 		FROM plans ORDER BY created_at DESC
 	`)
 	if err != nil {
@@ -232,7 +243,7 @@ func (s *CatalogStore) ListPlans(ctx context.Context) ([]Plan, error) {
 		var plan Plan
 		if err := rows.Scan(&plan.ID, &plan.Code, &plan.Name, &plan.ProviderType, &plan.Virtualization, &plan.VCPU, &plan.RAMMB, &plan.DiskGB, &plan.TrafficGB, &plan.NetworkDownMbps, &plan.NetworkUpMbps, &plan.SnapshotLimit,
 			&plan.AssignNAT, &plan.PortMappingCount, &plan.AssignIPv4, &plan.IPv4Count, &plan.AssignIPv6, &plan.IPv6Count,
-			&plan.DefaultTemplateID, &plan.AllowedTemplateIDs, &plan.Enabled, &plan.Version, &plan.CreatedAt); err != nil {
+			&plan.DefaultTemplateID, &plan.AllowedTemplateIDs, &plan.Enabled, &plan.Version, &plan.CreatedAt, &plan.OwnerAccountID, &plan.NodeID); err != nil {
 			return nil, err
 		}
 		plan.Prices = []Price{}
@@ -274,12 +285,12 @@ func (s *CatalogStore) CreatePlan(ctx context.Context, input Plan) (Plan, error)
 		INSERT INTO plans(code, name, virtualization, vcpu, ram_mb, disk_gb, traffic_gb,
 		                  network_down_mbps, network_up_mbps, snapshot_limit,
 		                  assign_nat, port_mapping_count, assign_ipv4, ipv4_count, assign_ipv6, ipv6_count,
-		                  default_template_id, allowed_template_ids, enabled, provider_type)
-		VALUES(upper($1), $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+		                  default_template_id, allowed_template_ids, enabled, provider_type, owner_account_id, node_id)
+		VALUES(upper($1), $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, nullif($21,'')::uuid, nullif($22,'')::uuid)
 		RETURNING id, code, version, created_at
 	`, input.Code, input.Name, input.Virtualization, input.VCPU, input.RAMMB, input.DiskGB, input.TrafficGB, input.NetworkDownMbps, input.NetworkUpMbps, input.SnapshotLimit,
 		input.AssignNAT, input.PortMappingCount, input.AssignIPv4, input.IPv4Count, input.AssignIPv6, input.IPv6Count,
-		input.DefaultTemplateID, input.AllowedTemplateIDs, input.Enabled, input.ProviderType).Scan(&input.ID, &input.Code, &input.Version, &input.CreatedAt); err != nil {
+		input.DefaultTemplateID, input.AllowedTemplateIDs, input.Enabled, input.ProviderType, input.OwnerAccountID, input.NodeID).Scan(&input.ID, &input.Code, &input.Version, &input.CreatedAt); err != nil {
 		return Plan{}, fmt.Errorf("create plan: %w", err)
 	}
 	for i := range input.Prices {
@@ -376,4 +387,15 @@ func (s *CatalogStore) NodeExistsByEndpoint(ctx context.Context, baseURL string)
 	var exists bool
 	err := s.db.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM nodes WHERE base_url=$1)", baseURL).Scan(&exists)
 	return err == nil && exists
+}
+
+// PlatformPlans drops hosted plans, which are sold in the hosting market.
+func PlatformPlans(plans []Plan) []Plan {
+	result := make([]Plan, 0, len(plans))
+	for _, plan := range plans {
+		if plan.OwnerAccountID == "" {
+			result = append(result, plan)
+		}
+	}
+	return result
 }

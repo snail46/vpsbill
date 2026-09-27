@@ -39,12 +39,14 @@ type Account struct {
 	CountryCode     string    `json:"country_code,omitempty"`
 	DefaultCurrency string    `json:"default_currency"`
 	CreatedAt       time.Time `json:"created_at"`
+	// BalanceMinor is read-only here; balances change through wallet entries.
+	BalanceMinor int64 `json:"balance_minor"`
 }
 
 func (s *BillingStore) ListAccounts(ctx context.Context) ([]Account, error) {
 	rows, err := s.db.Query(ctx, `
 		SELECT id, kind, status, display_name, billing_email, coalesce(legal_name,''),
-		       coalesce(tax_id,''), coalesce(country_code,''), default_currency, created_at
+		       coalesce(tax_id,''), coalesce(country_code,''), default_currency, created_at, balance_minor
 		FROM accounts ORDER BY created_at DESC
 	`)
 	if err != nil {
@@ -54,7 +56,7 @@ func (s *BillingStore) ListAccounts(ctx context.Context) ([]Account, error) {
 	accounts := make([]Account, 0)
 	for rows.Next() {
 		var account Account
-		if err := rows.Scan(&account.ID, &account.Kind, &account.Status, &account.DisplayName, &account.BillingEmail, &account.LegalName, &account.TaxID, &account.CountryCode, &account.DefaultCurrency, &account.CreatedAt); err != nil {
+		if err := rows.Scan(&account.ID, &account.Kind, &account.Status, &account.DisplayName, &account.BillingEmail, &account.LegalName, &account.TaxID, &account.CountryCode, &account.DefaultCurrency, &account.CreatedAt, &account.BalanceMinor); err != nil {
 			return nil, err
 		}
 		accounts = append(accounts, account)
@@ -224,6 +226,9 @@ func (s *BillingStore) CreateOrder(ctx context.Context, input CreateOrderInput) 
 		templateID, _ := item.Configuration["template_id"].(string)
 		if !stringAllowed(templateID, priced.AllowedTemplateIDs) {
 			return Order{}, errors.New("selected template is unavailable for this plan")
+		}
+		if err := validateHostedOrder(ctx, tx, item.PlanID, input.AccountID, item.RegionID, item.BillingCycle, item.Quantity, priced.VCPU, priced.RAMMB, priced.DiskGB); err != nil {
+			return Order{}, err
 		}
 		quantity := int64(item.Quantity)
 		if priced.UnitAmountMinor > math.MaxInt64/quantity || priced.SetupFeeMinor > math.MaxInt64/quantity {
@@ -525,6 +530,7 @@ type PaymentResult struct {
 	OrderID       string   `json:"order_id,omitempty"`
 	ServiceIDs    []string `json:"service_ids,omitempty"`
 	TransactionID string   `json:"transaction_id,omitempty"`
+	Topup         bool     `json:"topup,omitempty"`
 }
 
 func (s *BillingStore) ProcessPayment(ctx context.Context, event PaymentEvent, actorType, actorID string) (PaymentResult, error) {
@@ -533,30 +539,44 @@ func (s *BillingStore) ProcessPayment(ctx context.Context, event PaymentEvent, a
 		return PaymentResult{}, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	result, err := s.processPayment(ctx, tx, event, actorType, actorID)
+	if err != nil {
+		return PaymentResult{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return PaymentResult{}, err
+	}
+	return result, nil
+}
 
+// processPayment records a payment and fulfils the invoice inside the
+// caller's transaction: top-ups credit the balance, renewals extend the
+// service and first invoices create services. Payments for hosted services
+// are also held in escrow for the host.
+func (s *BillingStore) processPayment(ctx context.Context, tx pgx.Tx, event PaymentEvent, actorType, actorID string) (PaymentResult, error) {
 	var paymentEventID string
-	err = tx.QueryRow(ctx, `
+	err := tx.QueryRow(ctx, `
 		INSERT INTO payment_events(provider, provider_event_id, event_type, payload)
 		VALUES($1, $2, $3, $4)
 		ON CONFLICT(provider, provider_event_id) DO NOTHING
 		RETURNING id
 	`, event.Provider, event.ProviderEventID, event.EventType, event.Payload).Scan(&paymentEventID)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return PaymentResult{Duplicate: true}, tx.Commit(ctx)
+		return PaymentResult{Duplicate: true}, nil
 	}
 	if err != nil {
 		return PaymentResult{}, err
 	}
 
 	var result PaymentResult
-	var accountID, status, currency string
+	var accountID, status, currency, kind string
 	var orderID, renewalServiceID *string
-	var periodEnd *time.Time
+	var periodStart, periodEnd *time.Time
 	var balance int64
 	if err := tx.QueryRow(ctx, `
-		SELECT id, account_id, order_id, service_id, period_end, status, currency, balance_minor
+		SELECT id, account_id, order_id, service_id, period_start, period_end, status, currency, balance_minor, kind
 		FROM invoices WHERE number=$1 FOR UPDATE
-	`, event.InvoiceNumber).Scan(&result.InvoiceID, &accountID, &orderID, &renewalServiceID, &periodEnd, &status, &currency, &balance); err != nil {
+	`, event.InvoiceNumber).Scan(&result.InvoiceID, &accountID, &orderID, &renewalServiceID, &periodStart, &periodEnd, &status, &currency, &balance, &kind); err != nil {
 		return PaymentResult{}, fmt.Errorf("load invoice: %w", err)
 	}
 	if status != "open" || balance != event.AmountMinor || !strings.EqualFold(currency, event.Currency) || event.AmountMinor <= 0 {
@@ -578,7 +598,13 @@ func (s *BillingStore) ProcessPayment(ctx context.Context, event PaymentEvent, a
 	`, result.InvoiceID, event.Provider, event.ProviderTransactionID); err != nil {
 		return PaymentResult{}, err
 	}
-	if renewalServiceID != nil {
+	if kind == "topup" {
+		if _, err := applyWalletChange(ctx, tx, walletChange{AccountID: accountID, Kind: "topup", AmountMinor: event.AmountMinor,
+			Description: "充值到账", ReferenceType: "invoice", ReferenceID: result.InvoiceID, DedupKey: "topup:" + result.InvoiceID}); err != nil {
+			return PaymentResult{}, err
+		}
+		result.Topup = true
+	} else if renewalServiceID != nil {
 		if periodEnd == nil {
 			return PaymentResult{}, errors.New("renewal invoice has no period end")
 		}
@@ -605,6 +631,13 @@ func (s *BillingStore) ProcessPayment(ctx context.Context, event PaymentEvent, a
 			needsStart = runtimeStatus != "running" || stopMayHaveRun
 		}
 		if _, err := tx.Exec(ctx, `UPDATE services SET status='active',next_due_at=$2,expires_at=$2,grace_until=NULL,termination_scheduled_at=NULL,suspended_at=NULL,desired_runtime_status=CASE WHEN $3::boolean THEN 'running' ELSE NULL END,updated_at=now() WHERE id=$1`, *renewalServiceID, *periodEnd, needsStart); err != nil {
+			return PaymentResult{}, err
+		}
+		start := time.Now().UTC()
+		if periodStart != nil {
+			start = *periodStart
+		}
+		if err := createEscrow(ctx, tx, *renewalServiceID, result.InvoiceID, event.AmountMinor, start, *periodEnd); err != nil {
 			return PaymentResult{}, err
 		}
 		if needsStart {
@@ -653,6 +686,12 @@ func (s *BillingStore) ProcessPayment(ctx context.Context, event PaymentEvent, a
 			var config map[string]any
 			_ = json.Unmarshal(item.configuration, &config)
 			cycle, _ := config["billing_cycle"].(string)
+			// Split the item's invoice lines (price and setup fee) across its
+			// units so each hosted service escrows what was paid for it.
+			var itemTotal int64
+			if err := tx.QueryRow(ctx, `SELECT coalesce(sum(total_minor),0)::bigint FROM invoice_lines WHERE invoice_id=$1 AND order_item_id=$2`, result.InvoiceID, item.id).Scan(&itemTotal); err != nil {
+				return PaymentResult{}, err
+			}
 			for index := 0; index < item.quantity; index++ {
 				var serviceID string
 				if err := tx.QueryRow(ctx, "SELECT gen_random_uuid()::text").Scan(&serviceID); err != nil {
@@ -680,6 +719,13 @@ func (s *BillingStore) ProcessPayment(ctx context.Context, event PaymentEvent, a
 			`, serviceID, deduplicationKey, payload); err != nil {
 					return PaymentResult{}, fmt.Errorf("write outbox: %w", err)
 				}
+				unitGross := itemTotal / int64(item.quantity)
+				if index == 0 {
+					unitGross += itemTotal % int64(item.quantity)
+				}
+				if err := createEscrow(ctx, tx, serviceID, result.InvoiceID, unitGross, time.Now().UTC(), nextDue); err != nil {
+					return PaymentResult{}, err
+				}
 				result.ServiceIDs = append(result.ServiceIDs, serviceID)
 			}
 		}
@@ -691,9 +737,6 @@ func (s *BillingStore) ProcessPayment(ctx context.Context, event PaymentEvent, a
 		INSERT INTO audit_logs(actor_type, actor_id, action, target_type, target_id, metadata)
 		VALUES($1, nullif($2,''), 'invoice.payment_recorded', 'invoice', $3, jsonb_build_object('provider',$4::text,'transaction_id',$5::text,'amount_minor',$6::bigint))
 	`, actorType, actorID, result.InvoiceID, event.Provider, result.TransactionID, event.AmountMinor); err != nil {
-		return PaymentResult{}, err
-	}
-	if err := tx.Commit(ctx); err != nil {
 		return PaymentResult{}, err
 	}
 	return result, nil

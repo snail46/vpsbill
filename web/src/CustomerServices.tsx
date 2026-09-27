@@ -164,10 +164,15 @@ function ServiceCard({ service, onReload }: { service: CustomerServiceRecord; on
         <div>
           <span className="tag">{service.virtualization.toUpperCase()}</span>
           <h3>{service.instance_name}</h3>
-          <p>{service.plan_name} · {service.region_name}</p>
+          <p>
+            {service.plan_name} · {service.region_name}
+            {service.host_name ? ` · 托管母机（机主 ${service.host_name}）` : ''}
+          </p>
         </div>
         <StatusBadge status={usable ? liveStatus : service.status} />
       </div>
+
+      {service.termination_reason && <div className="note-banner warn">{service.termination_reason}。实例已停止服务，按托管准则计算的补偿已存入账户余额。</div>}
 
       {service.status === 'overdue' && (
         <div className="service-notice warning">
@@ -181,7 +186,7 @@ function ServiceCard({ service, onReload }: { service: CustomerServiceRecord; on
           <a href="/portal/billing">前往支付</a>
         </div>
       )}
-      {(service.status === 'terminating' || service.status === 'terminated') && (
+      {(service.status === 'terminating' || service.status === 'terminated') && !service.termination_reason && (
         <div className="service-notice danger">
           {service.status === 'terminating' ? '服务正在终止，实例与数据即将删除。' : '服务已终止，实例与数据已删除。'}
         </div>

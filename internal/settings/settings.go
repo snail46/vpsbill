@@ -43,6 +43,20 @@ type Runtime struct {
 	SMTP                         mail.Config
 	MailNotifications            MailNotifications
 	TicketAttachmentMaxMB        int
+	Marketplace                  MarketplaceSettings
+}
+
+// MarketplaceSettings controls the hosting center: whether customers can
+// publish and buy hosted nodes, the platform fee on each hosted sale and how
+// long a hosted node may stay offline before it is cleared.
+type MarketplaceSettings struct {
+	Enabled      bool    `json:"enabled"`
+	FeePercent   float64 `json:"fee_percent"`
+	OfflineHours int     `json:"offline_hours"`
+}
+
+func DefaultMarketplaceSettings() MarketplaceSettings {
+	return MarketplaceSettings{Enabled: true, FeePercent: 20, OfflineHours: 24}
 }
 
 type PaymentGatewayConfig struct {
@@ -134,7 +148,7 @@ func NewManager(ctx context.Context, db *pgxpool.Pool, box *security.SecretBox, 
 		LifecycleInterval: fallback.LifecycleInterval, RenewalLeadTime: fallback.RenewalLeadTime,
 		OverdueGracePeriod: fallback.OverdueGracePeriod, TerminationRetention: fallback.TerminationRetention,
 		PaymentGateway:    legacyPaymentConfig(fallback.PaymentProviderName, fallback.PaymentCheckoutURL, fallback.PaymentWebhookSecret),
-		MailNotifications: DefaultMailNotifications(), TicketAttachmentMaxMB: 5,
+		MailNotifications: DefaultMailNotifications(), TicketAttachmentMaxMB: 5, Marketplace: DefaultMarketplaceSettings(),
 	})
 	if err := m.reload(ctx); err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return nil, err
@@ -239,11 +253,13 @@ func (m *Manager) reload(ctx context.Context) error {
 		worker_poll_interval_seconds,reconcile_interval_seconds,lifecycle_interval_seconds,renewal_lead_seconds,overdue_grace_seconds,termination_retention_seconds,
 		payment_gateway_type,payment_gateway_config_encrypted,
 		smtp_host,smtp_port,smtp_username,smtp_password_encrypted,smtp_from,smtp_security,
-		mail_notifications,ticket_attachment_max_mb
+		mail_notifications,ticket_attachment_max_mb,
+		marketplace_enabled,marketplace_fee_percent::float8,marketplace_offline_hours
 		FROM system_settings WHERE singleton=true`).Scan(&v.AppName, &v.PublicURL, &v.Timezone, &v.PaymentProviderName, &v.PaymentCheckoutURL,
 		&payment, &v.NotificationWebhookURL, &notification, &metrics, &poll, &reconcile, &lifecycle, &lead, &grace, &retention, &gatewayType, &gatewayConfig,
 		&v.SMTP.Host, &v.SMTP.Port, &v.SMTP.Username, &smtpPassword, &v.SMTP.From, &v.SMTP.Security,
-		&mailNotifications, &v.TicketAttachmentMaxMB)
+		&mailNotifications, &v.TicketAttachmentMaxMB,
+		&v.Marketplace.Enabled, &v.Marketplace.FeePercent, &v.Marketplace.OfflineHours)
 	if err != nil {
 		return err
 	}
@@ -380,7 +396,7 @@ func validate(in InstallInput) (Runtime, InstallResult, error) {
 		PaymentProviderName: strings.TrimSpace(in.PaymentProviderName), PaymentCheckoutURL: strings.TrimSpace(in.PaymentCheckoutURL), PaymentWebhookSecret: strings.TrimSpace(in.PaymentWebhookSecret),
 		NotificationWebhookURL: strings.TrimSpace(in.NotificationWebhookURL), NotificationWebhookSecret: strings.TrimSpace(in.NotificationWebhookSecret), MetricsToken: strings.TrimSpace(in.MetricsToken)}
 	v.PaymentGateway = PaymentGatewayConfig{Type: "disabled", AlipayGatewayURL: "https://openapi.alipay.com/gateway.do", EpayPaymentType: "alipay"}
-	v.MailNotifications, v.TicketAttachmentMaxMB = DefaultMailNotifications(), 5
+	v.MailNotifications, v.TicketAttachmentMaxMB, v.Marketplace = DefaultMailNotifications(), 5, DefaultMarketplaceSettings()
 	if v.AppName == "" || v.Timezone == "" || strings.TrimSpace(in.AdminDisplayName) == "" || strings.TrimSpace(in.AdminEmail) == "" {
 		return Runtime{}, InstallResult{}, errors.New("站点名称、时区和管理员信息不能为空")
 	}

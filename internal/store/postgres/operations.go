@@ -21,16 +21,20 @@ type OperationsStore struct{ db *pgxpool.Pool }
 func NewOperationsStore(db *pgxpool.Pool) *OperationsStore { return &OperationsStore{db: db} }
 
 type Ticket struct {
-	ID            string    `json:"id"`
-	Number        string    `json:"number"`
-	AccountID     string    `json:"account_id"`
-	CustomerName  string    `json:"customer_name"`
-	ServiceID     *string   `json:"service_id,omitempty"`
-	InstanceName  string    `json:"instance_name,omitempty"`
-	Subject       string    `json:"subject"`
-	Priority      string    `json:"priority"`
-	Status        string    `json:"status"`
-	AssignedStaff string    `json:"assigned_staff,omitempty"`
+	ID            string  `json:"id"`
+	Number        string  `json:"number"`
+	AccountID     string  `json:"account_id"`
+	CustomerName  string  `json:"customer_name"`
+	ServiceID     *string `json:"service_id,omitempty"`
+	InstanceName  string  `json:"instance_name,omitempty"`
+	Subject       string  `json:"subject"`
+	Priority      string  `json:"priority"`
+	Status        string  `json:"status"`
+	AssignedStaff string  `json:"assigned_staff,omitempty"`
+	// HostAccountID is set on tickets about a hosted instance; the host
+	// answers first and staff can step in.
+	HostAccountID string    `json:"host_account_id,omitempty"`
+	HostName      string    `json:"host_name,omitempty"`
 	MessageCount  int       `json:"message_count"`
 	LastReplyAt   time.Time `json:"last_reply_at"`
 	CreatedAt     time.Time `json:"created_at"`
@@ -55,17 +59,21 @@ func (s *OperationsStore) ListCustomerTickets(ctx context.Context, accountID str
 	return s.listTickets(ctx, "WHERE t.account_id=$1", accountID)
 }
 
+func (s *OperationsStore) ListHostTickets(ctx context.Context, hostAccountID string) ([]Ticket, error) {
+	return s.listTickets(ctx, "WHERE t.host_account_id=$1", hostAccountID)
+}
+
 func (s *OperationsStore) ListTickets(ctx context.Context) ([]Ticket, error) {
 	return s.listTickets(ctx, "", nil)
 }
 
 func (s *OperationsStore) listTickets(ctx context.Context, where string, argument any) ([]Ticket, error) {
 	query := `SELECT t.id,t.number,t.account_id,a.display_name,t.service_id,coalesce(s.instance_name,''),t.subject,t.priority,t.status,
-		coalesce(u.display_name,''),count(m.id),t.last_reply_at,t.created_at
-		FROM support_tickets t JOIN accounts a ON a.id=t.account_id
+		coalesce(u.display_name,''),count(m.id),t.last_reply_at,t.created_at,coalesce(t.host_account_id::text,''),coalesce(h.display_name,'')
+		FROM support_tickets t JOIN accounts a ON a.id=t.account_id LEFT JOIN accounts h ON h.id=t.host_account_id
 		LEFT JOIN services s ON s.id=t.service_id LEFT JOIN users u ON u.id=t.assigned_staff_id
 		LEFT JOIN support_messages m ON m.ticket_id=t.id ` + where + `
-		GROUP BY t.id,a.display_name,s.instance_name,u.display_name ORDER BY t.updated_at DESC LIMIT 500`
+		GROUP BY t.id,a.display_name,s.instance_name,u.display_name,h.display_name ORDER BY t.updated_at DESC LIMIT 500`
 	var rows pgx.Rows
 	var err error
 	if where == "" {
@@ -80,7 +88,7 @@ func (s *OperationsStore) listTickets(ctx context.Context, where string, argumen
 	result := make([]Ticket, 0)
 	for rows.Next() {
 		var row Ticket
-		if err := rows.Scan(&row.ID, &row.Number, &row.AccountID, &row.CustomerName, &row.ServiceID, &row.InstanceName, &row.Subject, &row.Priority, &row.Status, &row.AssignedStaff, &row.MessageCount, &row.LastReplyAt, &row.CreatedAt); err != nil {
+		if err := rows.Scan(&row.ID, &row.Number, &row.AccountID, &row.CustomerName, &row.ServiceID, &row.InstanceName, &row.Subject, &row.Priority, &row.Status, &row.AssignedStaff, &row.MessageCount, &row.LastReplyAt, &row.CreatedAt, &row.HostAccountID, &row.HostName); err != nil {
 			return nil, err
 		}
 		result = append(result, row)
@@ -104,16 +112,20 @@ func (s *OperationsStore) CreateTicket(ctx context.Context, accountID, userID, s
 		return TicketDetail{}, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	var hostAccountID string
 	if serviceID != "" {
 		var exists bool
 		if err := tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM services WHERE id=$1 AND account_id=$2)", serviceID, accountID).Scan(&exists); err != nil || !exists {
 			return TicketDetail{}, errors.New("invalid service")
 		}
+		if err := tx.QueryRow(ctx, "SELECT coalesce(p.owner_account_id::text,'') FROM services s JOIN plans p ON p.id=s.plan_id WHERE s.id=$1", serviceID).Scan(&hostAccountID); err != nil {
+			return TicketDetail{}, err
+		}
 	}
 	var result TicketDetail
 	result.Ticket.Number = newDocumentNumber("TKT")
-	err = tx.QueryRow(ctx, `INSERT INTO support_tickets(number,account_id,requester_user_id,service_id,subject,priority)
-		VALUES($1,$2,$3,nullif($4,'')::uuid,$5,$6) RETURNING id,status,last_reply_at,created_at`, result.Ticket.Number, accountID, userID, serviceID, subject, priority).Scan(&result.Ticket.ID, &result.Ticket.Status, &result.Ticket.LastReplyAt, &result.Ticket.CreatedAt)
+	err = tx.QueryRow(ctx, `INSERT INTO support_tickets(number,account_id,requester_user_id,service_id,subject,priority,host_account_id)
+		VALUES($1,$2,$3,nullif($4,'')::uuid,$5,$6,nullif($7,'')::uuid) RETURNING id,status,last_reply_at,created_at`, result.Ticket.Number, accountID, userID, serviceID, subject, priority, hostAccountID).Scan(&result.Ticket.ID, &result.Ticket.Status, &result.Ticket.LastReplyAt, &result.Ticket.CreatedAt)
 	if err != nil {
 		return TicketDetail{}, err
 	}
@@ -128,6 +140,7 @@ func (s *OperationsStore) CreateTicket(ctx context.Context, accountID, userID, s
 	message.AuthorType, message.Body = "customer", body
 	result.Messages = []TicketMessage{message}
 	result.Ticket.AccountID = accountID
+	result.Ticket.HostAccountID = hostAccountID
 	result.Ticket.Subject = subject
 	result.Ticket.Priority = priority
 	result.Ticket.MessageCount = 1
@@ -145,15 +158,28 @@ func (s *OperationsStore) CreateTicket(ctx context.Context, accountID, userID, s
 }
 
 func (s *OperationsStore) TicketDetail(ctx context.Context, ticketID, accountID string, includeInternal bool) (TicketDetail, error) {
+	return s.ticketDetail(ctx, ticketID, "t.account_id", accountID, includeInternal)
+}
+
+// HostTicketDetail shows a hosted-instance ticket to its host, without staff
+// notes.
+func (s *OperationsStore) HostTicketDetail(ctx context.Context, ticketID, hostAccountID string) (TicketDetail, error) {
+	if hostAccountID == "" {
+		return TicketDetail{}, ErrTicketNotFound
+	}
+	return s.ticketDetail(ctx, ticketID, "t.host_account_id", hostAccountID, false)
+}
+
+func (s *OperationsStore) ticketDetail(ctx context.Context, ticketID, scopeColumn, scopeID string, includeInternal bool) (TicketDetail, error) {
 	where := "t.id=$1"
 	args := []any{ticketID}
-	if accountID != "" {
-		where += " AND t.account_id=$2"
-		args = append(args, accountID)
+	if scopeID != "" {
+		where += " AND " + scopeColumn + "=$2"
+		args = append(args, scopeID)
 	}
 	var result TicketDetail
 	err := s.db.QueryRow(ctx, `SELECT t.id,t.number,t.account_id,a.display_name,t.service_id,coalesce(s.instance_name,''),t.subject,t.priority,t.status,coalesce(u.display_name,''),
-		(SELECT count(*) FROM support_messages WHERE ticket_id=t.id),t.last_reply_at,t.created_at FROM support_tickets t JOIN accounts a ON a.id=t.account_id LEFT JOIN services s ON s.id=t.service_id LEFT JOIN users u ON u.id=t.assigned_staff_id WHERE `+where, args...).Scan(&result.Ticket.ID, &result.Ticket.Number, &result.Ticket.AccountID, &result.Ticket.CustomerName, &result.Ticket.ServiceID, &result.Ticket.InstanceName, &result.Ticket.Subject, &result.Ticket.Priority, &result.Ticket.Status, &result.Ticket.AssignedStaff, &result.Ticket.MessageCount, &result.Ticket.LastReplyAt, &result.Ticket.CreatedAt)
+		(SELECT count(*) FROM support_messages WHERE ticket_id=t.id),t.last_reply_at,t.created_at,coalesce(t.host_account_id::text,''),coalesce(h.display_name,'') FROM support_tickets t JOIN accounts a ON a.id=t.account_id LEFT JOIN accounts h ON h.id=t.host_account_id LEFT JOIN services s ON s.id=t.service_id LEFT JOIN users u ON u.id=t.assigned_staff_id WHERE `+where, args...).Scan(&result.Ticket.ID, &result.Ticket.Number, &result.Ticket.AccountID, &result.Ticket.CustomerName, &result.Ticket.ServiceID, &result.Ticket.InstanceName, &result.Ticket.Subject, &result.Ticket.Priority, &result.Ticket.Status, &result.Ticket.AssignedStaff, &result.Ticket.MessageCount, &result.Ticket.LastReplyAt, &result.Ticket.CreatedAt, &result.Ticket.HostAccountID, &result.Ticket.HostName)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return TicketDetail{}, ErrTicketNotFound
 	}
@@ -211,8 +237,15 @@ func (s *OperationsStore) ReplyTicket(ctx context.Context, ticketID, accountID, 
 	defer func() { _ = tx.Rollback(ctx) }()
 	query := "SELECT status FROM support_tickets WHERE id=$1"
 	args := []any{ticketID}
+	scope := "account_id"
+	if actorType == "host" {
+		if accountID == "" {
+			return TicketMessage{}, ErrTicketNotFound
+		}
+		scope = "host_account_id"
+	}
 	if accountID != "" {
-		query += " AND account_id=$2"
+		query += " AND " + scope + "=$2"
 		args = append(args, accountID)
 	}
 	query += " FOR UPDATE"

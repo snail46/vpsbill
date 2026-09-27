@@ -83,6 +83,10 @@ func (r *Reconciler) reconcileNodes(ctx context.Context) {
 		return
 	}
 	for _, node := range nodes {
+		// Cleared hosted nodes are kept for history only.
+		if node.RetiredAt != nil {
+			continue
+		}
 		if _, registered := provider.Lookup(node.ProviderType); !registered {
 			continue
 		}

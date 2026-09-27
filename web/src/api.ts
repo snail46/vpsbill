@@ -100,6 +100,8 @@ export type PlanRecord = {
   enabled: boolean
   version: number
   prices: Price[]
+  owner_account_id?: string
+  node_id?: string
 }
 
 export type AvailableTemplateRecord = {
@@ -124,6 +126,7 @@ export type AccountRecord = {
   country_code?: string
   default_currency: string
   created_at: string
+  balance_minor?: number
 }
 
 export type RegionRecord = { id: string; code: string; name: string }
@@ -150,7 +153,7 @@ export type InvoiceRecord = {
   customer_name: string
   order_id: string | null
   service_id?: string
-  kind: 'initial' | 'renewal'
+  kind: 'initial' | 'renewal' | 'topup'
   status: string
   currency: string
   total_minor: number
@@ -228,6 +231,8 @@ export type CustomerServiceRecord = {
   termination_scheduled_at?: string
   last_reconciled_at?: string
   last_reconcile_error?: string
+  host_name?: string
+  termination_reason?: string
 }
 
 // Overdue services keep running through the grace period, so customers can
@@ -259,7 +264,7 @@ export type CustomerInvoiceRecord = {
   id: string
   number: string
   status: string
-  kind: 'initial' | 'renewal'
+  kind: 'initial' | 'renewal' | 'topup'
   service_id?: string
   currency: string
   total_minor: number
@@ -312,6 +317,8 @@ export type TicketRecord = {
   priority: 'low' | 'normal' | 'high' | 'urgent'
   status: 'open' | 'customer_reply' | 'staff_reply' | 'resolved' | 'closed'
   assigned_staff?: string
+  host_account_id?: string
+  host_name?: string
   message_count: number
   last_reply_at: string
   created_at: string
@@ -363,3 +370,111 @@ export function imageLabel(item: { name: string; release?: string; arch?: string
   const release = item.release && !item.name.includes(item.release) ? ` ${item.release}` : ''
   return `${item.name}${release}${item.arch ? ` · ${item.arch}` : ''}`
 }
+
+export type WalletEntryRecord = {
+  id: string
+  kind: 'topup' | 'earning' | 'payment' | 'clearance_refund' | 'clearance_penalty' | 'adjustment'
+  amount_minor: number
+  balance_after_minor: number
+  currency: string
+  description: string
+  reference_type?: string
+  reference_id?: string
+  created_at: string
+}
+export type WalletRecord = { balance_minor: number; currency: string; entries: WalletEntryRecord[] }
+export type TopupInvoiceRecord = { id: string; number: string; currency: string; total_minor: number; due_at: string }
+
+export type HostedServiceRecord = {
+  id: string
+  instance_name: string
+  plan_name: string
+  status: string
+  runtime_status: string
+  buyer_name: string
+  next_due_at?: string
+  created_at: string
+  remaining_value_minor: number
+}
+
+export type HostedNodeRecord = {
+  id: string
+  name: string
+  owner_account_id?: string
+  owner_name: string
+  owner_email?: string
+  owner_balance_minor: number
+  region_id: string
+  region_name: string
+  location: string
+  line_description: string
+  status: string
+  listing_status: 'listed' | 'paused' | 'retired'
+  virtualization_types: string[]
+  expires_at: string
+  traffic_quota_gb: number
+  capacity_vcpu: number
+  capacity_ram_mb: number
+  capacity_disk_gb: number
+  free_vcpu: number
+  free_ram_mb: number
+  free_disk_gb: number
+  last_seen_at?: string
+  clearance_hold_until?: string
+  retired_at?: string
+  retired_reason?: string
+  active_services: number
+  escrow_holding_minor: number
+  host_pending_minor: number
+  host_released_minor: number
+  fee_minor: number
+  created_at: string
+  plans: PlanRecord[]
+  services?: HostedServiceRecord[]
+  mine?: boolean
+}
+
+export type MarketRecord = { nodes: HostedNodeRecord[]; fee_percent: number }
+export type HostingRecord = {
+  enabled: boolean
+  fee_percent: number
+  offline_hours: number
+  rules: string[]
+  nodes: HostedNodeRecord[]
+  regions: RegionRecord[]
+  balance_minor: number
+  currency: string
+  install_command: string
+}
+export type NodeImageRecord = { id: string; name: string; type?: string; virtualization?: string; description?: string }
+
+export type ClearanceRecord = {
+  node_id: string
+  node_name: string
+  multiplier: number
+  reason: string
+  currency: string
+  refund_minor: number
+  penalty_minor: number
+  services: { service_id: string; instance_name: string; buyer_name: string; remaining_minor: number; refund_minor: number; penalty_minor: number }[]
+}
+
+export type ChatMessageRecord = {
+  id: number
+  node_id: string
+  author_type: 'host' | 'buyer' | 'staff' | 'system'
+  author_name: string
+  mine: boolean
+  body: string
+  created_at: string
+}
+export type ChatRoomRecord = {
+  node_id: string
+  node_name: string
+  host_name: string
+  role: 'host' | 'buyer' | 'staff'
+  retired: boolean
+  members: number
+  last_message?: ChatMessageRecord
+}
+export type ChatHistoryRecord = { messages: ChatMessageRecord[]; can_post: boolean; role: string }

@@ -14,8 +14,10 @@ import (
 	"vpsbill/internal/app"
 	"vpsbill/internal/automation"
 	"vpsbill/internal/billing"
+	"vpsbill/internal/chat"
 	"vpsbill/internal/config"
 	"vpsbill/internal/hatch/gateway"
+	"vpsbill/internal/marketplace"
 	"vpsbill/internal/notifications"
 	"vpsbill/internal/notify"
 	_ "vpsbill/internal/provider/clicd" // registers the CLICD node driver
@@ -95,6 +97,12 @@ func main() {
 	mailNotifier := notify.New(postgres.NewMailStore(db), runtime, secretBox, logger)
 	go mailNotifier.RunSender(ctx)
 	go mailNotifier.RunScanner(ctx)
+	marketStore := postgres.NewMarketplaceStore(db)
+	// Escrow release and clearance are idempotent, so every replica may run it.
+	marketService := marketplace.New(marketStore, catalogStore, secretBox, runtime, mailNotifier, logger)
+	go marketService.Run(ctx)
+	chatHub := chat.NewHub(db, marketStore, logger)
+	go chatHub.Run(ctx)
 
 	handler, err := app.NewHandler(app.Dependencies{
 		Config:        cfg,
@@ -104,6 +112,8 @@ func main() {
 		AgentGateway:  agentHub,
 		AgentInternal: agentInternal,
 		Notifier:      mailNotifier,
+		Marketplace:   marketService,
+		ChatHub:       chatHub,
 	})
 	if err != nil {
 		logger.Error("initialize application", "error", err)

@@ -82,3 +82,21 @@ func (s *OperationsStore) TicketAttachmentData(ctx context.Context, ticketID, at
 	}
 	return item, data, err
 }
+
+// HostTicketAttachmentData serves attachments of a hosted-instance ticket to
+// its host, excluding staff notes.
+func (s *OperationsStore) HostTicketAttachmentData(ctx context.Context, ticketID, attachmentID, hostAccountID string) (TicketAttachment, []byte, error) {
+	var item TicketAttachment
+	var data []byte
+	err := s.db.QueryRow(ctx, `
+		SELECT a.id,a.file_name,a.content_type,a.size_bytes,a.data
+		FROM support_attachments a
+		JOIN support_messages m ON m.id=a.message_id
+		JOIN support_tickets t ON t.id=a.ticket_id
+		WHERE a.id=$1 AND a.ticket_id=$2 AND t.host_account_id::text=$3 AND m.internal=false
+	`, attachmentID, ticketID, hostAccountID).Scan(&item.ID, &item.FileName, &item.ContentType, &item.SizeBytes, &data)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return TicketAttachment{}, nil, ErrAttachmentNotFound
+	}
+	return item, data, err
+}

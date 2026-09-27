@@ -43,6 +43,10 @@ type CustomerService struct {
 	TerminationAt        *time.Time `json:"termination_scheduled_at,omitempty"`
 	LastReconciledAt     *time.Time `json:"last_reconciled_at,omitempty"`
 	LastReconcileError   string     `json:"last_reconcile_error,omitempty"`
+	// HostName is set for instances on a hosted node; TerminationReason
+	// explains a clearance.
+	HostName          string `json:"host_name,omitempty"`
+	TerminationReason string `json:"termination_reason,omitempty"`
 }
 
 type CustomerServiceAccess struct {
@@ -143,8 +147,9 @@ func (s *PortalStore) ListServices(ctx context.Context, accountID string) ([]Cus
 	rows, err := s.db.Query(ctx, `
 		SELECT s.id,p.name,r.name,s.status,s.runtime_status,coalesce(s.desired_runtime_status,''),s.instance_name,
 		       p.virtualization,p.vcpu,p.ram_mb,p.disk_gb,p.traffic_gb,coalesce(host(s.primary_ipv4),''),coalesce(host(s.primary_ipv6),''),
-		       s.next_due_at,s.grace_until,s.termination_scheduled_at,s.last_reconciled_at,coalesce(s.last_reconcile_error,'')
-		FROM services s JOIN plans p ON p.id=s.plan_id JOIN regions r ON r.id=s.region_id
+		       s.next_due_at,s.grace_until,s.termination_scheduled_at,s.last_reconciled_at,coalesce(s.last_reconcile_error,''),
+		       coalesce(h.display_name,''),coalesce(s.termination_reason,'')
+		FROM services s JOIN plans p ON p.id=s.plan_id JOIN regions r ON r.id=s.region_id LEFT JOIN accounts h ON h.id=p.owner_account_id
 		WHERE s.account_id=$1 ORDER BY s.created_at DESC
 	`, accountID)
 	if err != nil {
@@ -154,7 +159,7 @@ func (s *PortalStore) ListServices(ctx context.Context, accountID string) ([]Cus
 	result := make([]CustomerService, 0)
 	for rows.Next() {
 		var row CustomerService
-		if err := rows.Scan(&row.ID, &row.PlanName, &row.RegionName, &row.Status, &row.RuntimeStatus, &row.DesiredRuntimeStatus, &row.InstanceName, &row.Virtualization, &row.VCPU, &row.RAMMB, &row.DiskGB, &row.TrafficGB, &row.PrimaryIPv4, &row.PrimaryIPv6, &row.NextDueAt, &row.GraceUntil, &row.TerminationAt, &row.LastReconciledAt, &row.LastReconcileError); err != nil {
+		if err := rows.Scan(&row.ID, &row.PlanName, &row.RegionName, &row.Status, &row.RuntimeStatus, &row.DesiredRuntimeStatus, &row.InstanceName, &row.Virtualization, &row.VCPU, &row.RAMMB, &row.DiskGB, &row.TrafficGB, &row.PrimaryIPv4, &row.PrimaryIPv6, &row.NextDueAt, &row.GraceUntil, &row.TerminationAt, &row.LastReconciledAt, &row.LastReconcileError, &row.HostName, &row.TerminationReason); err != nil {
 			return nil, err
 		}
 		result = append(result, row)
