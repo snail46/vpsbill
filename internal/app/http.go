@@ -148,6 +148,7 @@ func NewHandler(deps Dependencies) (http.Handler, error) {
 	mux.Handle("GET /api/v1/admin/services", auth.require("services:read", http.HandlerFunc(automation.listServices)))
 	mux.Handle("GET /api/v1/admin/jobs", auth.require("services:read", http.HandlerFunc(automation.listJobs)))
 	mux.Handle("POST /api/v1/admin/jobs/{id}/retry", auth.require("services:write", http.HandlerFunc(automation.retryJob)))
+	mux.Handle("POST /api/v1/admin/services/{id}/actions/{action}", auth.require("services:write", http.HandlerFunc(automation.serviceAction)))
 	mux.Handle("GET /api/v1/admin/tickets", auth.require("tickets:read", http.HandlerFunc(operations.adminListTickets)))
 	mux.Handle("GET /api/v1/admin/tickets/{id}", auth.require("tickets:read", http.HandlerFunc(operations.adminTicketDetail)))
 	mux.Handle("POST /api/v1/admin/tickets/{id}/messages", auth.require("tickets:write", http.HandlerFunc(operations.adminReplyTicket)))

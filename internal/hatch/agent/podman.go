@@ -236,11 +236,14 @@ func (p *Podman) Exec(ctx context.Context, name, script string, env map[string]s
 		ID string `json:"Id"`
 	}
 	if err := p.request(ctx, http.MethodPost, containerPath(name)+"/exec", map[string]any{
-		"Cmd": []string{"/bin/sh", "-c", script}, "Env": variables, "AttachStdout": false, "AttachStderr": false,
+		"Cmd": []string{"/bin/sh", "-c", script}, "Env": variables, "AttachStdout": true, "AttachStderr": true,
 	}, &created); err != nil {
 		return err
 	}
-	if err := p.request(ctx, http.MethodPost, "/exec/"+created.ID+"/start", map[string]bool{"Detach": true}, nil); err != nil {
+	// Start attached: the response streams the (discarded) output and ends
+	// when the command exits. Detached sessions are unusable here because
+	// Podman 4.x can report them as running forever after they finish.
+	if _, err := p.client.do(ctx, http.MethodPost, libpod+"/exec/"+created.ID+"/start", map[string]bool{"Detach": false}); err != nil {
 		return err
 	}
 	for {

@@ -1,5 +1,5 @@
 /* ==========================================================================
-   CLICD Billing - Modern Minimalist Design System
+   VPSBill - Modern Minimalist Design System
    Principle: Readability First, Clean Hierarchy, Subtle Modern Dark Palette
    ========================================================================== */
 
@@ -2927,4 +2927,45 @@ textarea {
   .installer-grid {
     grid-template-columns: 1fr;
   }
+}
+
+/* Business-state notices on a service card (overdue, suspended, ...) */
+.service-notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-top: 12px;
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  font-size: 12.5px;
+  line-height: 1.6;
+  background: var(--info-bg);
+  color: var(--info-text);
+}
+
+.service-notice.warning {
+  background: var(--warning-bg);
+  color: var(--warning-text);
+}
+
+.service-notice.danger {
+  background: var(--danger-bg);
+  color: var(--danger-text);
+}
+
+.service-notice a {
+  color: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+}
+
+.row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+}
+
+.text-button.danger {
+  color: var(--danger-text);
 }

@@ -44,3 +44,21 @@ func (a *adminAutomation) retryJob(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
+
+// serviceAction lets staff power a service or terminate it immediately.
+func (a *adminAutomation) serviceAction(w http.ResponseWriter, r *http.Request) {
+	identity := principalFromContext(r.Context())
+	jobID, err := a.store.QueueAdminServiceAction(r.Context(), identity.UserID, r.PathValue("id"), r.PathValue("action"), remoteIP(r), r.UserAgent())
+	switch {
+	case errors.Is(err, postgres.ErrServiceNotFound):
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "service_not_found"})
+	case errors.Is(err, postgres.ErrServiceActionUnavailable):
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "action_unavailable", "message": "当前服务状态不允许此操作"})
+	case errors.Is(err, postgres.ErrActionInProgress):
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "action_in_progress", "message": "该服务已有同类任务在执行"})
+	case err != nil:
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "internal_error"})
+	default:
+		writeJSON(w, http.StatusAccepted, map[string]any{"data": map[string]string{"job_id": jobID}})
+	}
+}

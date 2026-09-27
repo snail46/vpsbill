@@ -154,6 +154,13 @@ func (l *LXD) Create(ctx context.Context, spec RuntimeSpec) error {
 
 func (l *LXD) State(ctx context.Context, name string) (RuntimeState, error) {
 	metadata, err := l.request(ctx, http.MethodGet, instancePath(name)+"/state", nil)
+	if err != nil && !errors.Is(err, ErrInstanceNotFound) {
+		// Incus answers /state with 500 "Invalid PID" while a container is
+		// stopping; the instance record still carries a usable status.
+		if status, statusErr := l.status(ctx, name); statusErr == nil {
+			return RuntimeState{Status: status}, nil
+		}
+	}
 	if err != nil {
 		return RuntimeState{}, err
 	}
@@ -274,4 +281,37 @@ func (l *LXD) Exec(ctx context.Context, name, script string, env map[string]stri
 		return fmt.Errorf("command exited with status %d", result.Return)
 	}
 	return nil
+}
+
+// DiskCapacityGB reports the total size of the storage pool instances use.
+func (l *LXD) DiskCapacityGB(ctx context.Context) (int64, error) {
+	metadata, err := l.request(ctx, http.MethodGet, "/1.0/storage-pools/"+url.PathEscape(l.config.StoragePool)+"/resources", nil)
+	if err != nil {
+		return 0, err
+	}
+	var resources struct {
+		Space struct {
+			Total int64 `json:"total"`
+		} `json:"space"`
+	}
+	if err := json.Unmarshal(metadata, &resources); err != nil {
+		return 0, err
+	}
+	return resources.Space.Total >> 30, nil
+}
+
+// status reads the status from the instance record, which does not need the
+// running container's PID.
+func (l *LXD) status(ctx context.Context, name string) (string, error) {
+	metadata, err := l.request(ctx, http.MethodGet, instancePath(name), nil)
+	if err != nil {
+		return "", err
+	}
+	var instance struct {
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal(metadata, &instance); err != nil {
+		return "", err
+	}
+	return lxdStatus(instance.Status), nil
 }

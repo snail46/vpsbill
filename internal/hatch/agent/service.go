@@ -150,9 +150,21 @@ func (s *Service) Handle(ctx context.Context, method string, params json.RawMess
 	case protocol.MethodDelete:
 		return nil, s.delete(ctx, name.Name)
 	case protocol.MethodSuspend:
-		return nil, s.withInstance(ctx, name.Name, func(runtime Runtime, _ InstanceRecord) error { return runtime.Pause(ctx, name.Name) })
+		// Pause and resume are idempotent so a retried job after a lost
+		// reply succeeds instead of failing on "already frozen".
+		return nil, s.withInstance(ctx, name.Name, func(runtime Runtime, _ InstanceRecord) error {
+			if state, err := runtime.State(ctx, name.Name); err == nil && state.Status == "paused" {
+				return nil
+			}
+			return runtime.Pause(ctx, name.Name)
+		})
 	case protocol.MethodResume:
-		return nil, s.withInstance(ctx, name.Name, func(runtime Runtime, _ InstanceRecord) error { return runtime.Resume(ctx, name.Name) })
+		return nil, s.withInstance(ctx, name.Name, func(runtime Runtime, _ InstanceRecord) error {
+			if state, err := runtime.State(ctx, name.Name); err == nil && state.Status != "paused" {
+				return nil
+			}
+			return runtime.Resume(ctx, name.Name)
+		})
 	case protocol.MethodUsage:
 		return s.usage(ctx, name.Name)
 	case protocol.MethodTraffic:
@@ -187,6 +199,13 @@ func (s *Service) runtime(virtualization string) (Runtime, error) {
 func (s *Service) hostInfo(ctx context.Context) (protocol.HostInfo, error) {
 	hostname, _ := os.Hostname()
 	capacity := detectCapacity(s.config.StateDir)
+	for _, runtime := range s.runtimes {
+		if reporter, ok := runtime.(DiskReporter); ok {
+			if size, err := reporter.DiskCapacityGB(ctx); err == nil && size > 0 {
+				capacity.DiskGB = size
+			}
+		}
+	}
 	if s.config.Capacity.VCPU > 0 {
 		capacity.VCPU = s.config.Capacity.VCPU
 	}

@@ -12,7 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-var ErrNoCapacity = errors.New("no node has enough available capacity")
+var ErrNoCapacity = errors.New("no online node in the region has enough available capacity")
 
 type ProvisioningStore struct {
 	db *pgxpool.Pool

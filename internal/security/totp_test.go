@@ -20,7 +20,7 @@ func TestVerifyTOTPRFCVector(t *testing.T) {
 }
 
 func TestTOTPUri(t *testing.T) {
-	uri := TOTPUri("CLICD Billing", "user@example.com", "ABC")
+	uri := TOTPUri("VPSBill", "user@example.com", "ABC")
 	if uri == "" || uri[:7] != "otpauth" {
 		t.Fatalf("unexpected uri %q", uri)
 	}

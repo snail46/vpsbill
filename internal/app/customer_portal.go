@@ -79,7 +79,7 @@ func (p *customerPortal) serviceDriver(r *http.Request) (postgres.CustomerServic
 	if err != nil {
 		return access, nil, err
 	}
-	if _, registered := provider.Lookup(access.ProviderType); access.Status != "active" || !registered {
+	if _, registered := provider.Lookup(access.ProviderType); !postgres.CustomerUsable(access.Status) || !registered {
 		return access, nil, postgres.ErrServiceActionUnavailable
 	}
 	driver, err := provider.OpenSealed(p.box, access.Sealed(), 20*time.Second)
@@ -144,6 +144,10 @@ func (p *customerPortal) serviceRuntime(w http.ResponseWriter, r *http.Request) 
 	if instance.Name == "" {
 		p.writeServiceError(w, errors.New(errorsBySource["container"]))
 		return
+	}
+	switch status := provider.NormalizeStatus(instance.Status); status {
+	case "running", "stopped", "suspended":
+		_ = p.store.ObserveRuntime(ctx, access.ServiceID, status)
 	}
 	allowed := make(map[string]bool, len(access.AllowedTemplateIDs))
 	for _, id := range access.AllowedTemplateIDs {
@@ -270,6 +274,9 @@ func (p *customerPortal) reinstallService(w http.ResponseWriter, r *http.Request
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "invalid_password", "message": "请设置 8-64 位且同时包含字母和数字的新 root 密码"})
 		return
 	}
+	// Agent-driven reinstalls finish before replying and can outlast the
+	// server's default write timeout.
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(15 * time.Minute))
 	taskID, err := reinstaller.Reinstall(r.Context(), access.InstanceName, provider.ReinstallSpec{TemplateID: input.TemplateID, Password: input.Password})
 	if err != nil {
 		p.writeServiceError(w, err)

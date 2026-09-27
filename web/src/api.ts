@@ -221,9 +221,15 @@ export type CustomerServiceRecord = {
   primary_ipv4?: string
   primary_ipv6?: string
   next_due_at?: string
+  grace_until?: string
+  termination_scheduled_at?: string
   last_reconciled_at?: string
   last_reconcile_error?: string
 }
+
+// Overdue services keep running through the grace period, so customers can
+// still manage them; suspended and terminating ones are read-only.
+export const serviceUsable = (status: string) => status === 'active' || status === 'overdue'
 
 export type PortMappingRecord = { container_port: number; host_port: number; host_ip?: string; protocol: string; description: string }
 export type ServiceRuntimeRecord = {
@@ -337,4 +343,11 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
     throw error
   }
   return payload.data as T
+}
+
+// imageLabel names a system image; release and arch are optional because
+// some node types (Hatch, LXDAPI) only report an alias.
+export function imageLabel(item: { name: string; release?: string; arch?: string }) {
+  const release = item.release && !item.name.includes(item.release) ? ` ${item.release}` : ''
+  return `${item.name}${release}${item.arch ? ` · ${item.arch}` : ''}`
 }

@@ -235,3 +235,28 @@ func TestIPv6AssignmentAndNeighbourProxy(t *testing.T) {
 		t.Fatalf("neighbour proxy not withdrawn: %v", commands)
 	}
 }
+
+func TestSuspendAndResumeAreIdempotent(t *testing.T) {
+	runtime, nat := agenttest.NewRuntime("lxc"), &agenttest.NAT{}
+	service := newService(t, t.TempDir(), runtime, nat)
+	if _, err := call[protocol.EnsureResult](t, service, protocol.MethodEnsure, spec); err != nil {
+		t.Fatal(err)
+	}
+	name := protocol.NameParams{Name: "svc-1"}
+	for i := 0; i < 2; i++ {
+		if _, err := call[any](t, service, protocol.MethodSuspend, name); err != nil {
+			t.Fatalf("suspend #%d: %v", i+1, err)
+		}
+	}
+	if instance, _ := runtime.Get("svc-1"); instance.Status != "paused" {
+		t.Fatalf("status after suspend = %q", instance.Status)
+	}
+	for i := 0; i < 2; i++ {
+		if _, err := call[any](t, service, protocol.MethodResume, name); err != nil {
+			t.Fatalf("resume #%d: %v", i+1, err)
+		}
+	}
+	if instance, _ := runtime.Get("svc-1"); instance.Status != "running" {
+		t.Fatalf("status after resume = %q", instance.Status)
+	}
+}

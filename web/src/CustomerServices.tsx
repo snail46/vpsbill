@@ -20,7 +20,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react'
-import { api, CustomerServiceRecord, PortMappingRecord, ServiceCredentialRecord, ServiceRuntimeRecord } from './api'
+import { api, imageLabel, serviceUsable, CustomerServiceRecord, PortMappingRecord, ServiceCredentialRecord, ServiceRuntimeRecord } from './api'
 
 const ServiceConsole = lazy(() => import('./ServiceConsole').then(module => ({ default: module.ServiceConsole })))
 
@@ -73,25 +73,41 @@ function ServiceCard({ service, onReload }: { service: CustomerServiceRecord; on
   const [consoleKind, setConsoleKind] = useState<'ssh' | 'vnc' | null>(null)
   const [dialog, setDialog] = useState<'password' | 'reinstall' | 'ports' | null>(null)
 
+  const [runtimeError, setRuntimeError] = useState('')
+  const busy = Boolean(service.desired_runtime_status)
+
   const load = (brief = true) =>
     api<ServiceRuntimeRecord>(`/api/v1/customer/services/${service.id}/runtime${brief ? '?brief=1' : ''}`)
-      .then(setRuntime)
-      .catch(err => setError(err.message))
+      .then(value => {
+        // Brief polls omit templates and history; keep the last full load's.
+        setRuntime(previous =>
+          brief && previous ? { ...value, templates: previous.templates, history: previous.history } : value,
+        )
+        setRuntimeError('')
+      })
+      .catch(err => setRuntimeError(err.message))
+
+  const usable = serviceUsable(service.status)
 
   useEffect(() => {
-    if (service.status !== 'active') return
+    if (!usable) return
     void load()
-    const timer = window.setInterval(() => void load(), 10000)
+    // While a power action is pending, poll faster and refresh the service
+    // list too: the server clears the pending state once the node reports it.
+    const timer = window.setInterval(() => {
+      void load()
+      if (busy) onReload()
+    }, busy ? 3000 : 10000)
     return () => window.clearInterval(timer)
-  }, [service.id, service.status])
+  }, [service.id, usable, busy])
 
   useEffect(() => {
-    if (service.status === 'active') {
+    if (usable) {
       void api<ServiceCredentialRecord>(`/api/v1/customer/services/${service.id}/credential`)
         .then(setCredential)
         .catch(() => {})
     }
-  }, [service.id, service.status])
+  }, [service.id, usable])
 
   const copyToClipboard = (text: string | undefined, key: string) => {
     if (!text) return
@@ -124,8 +140,8 @@ function ServiceCard({ service, onReload }: { service: CustomerServiceRecord; on
   const diskUsed = Number(usage.disk_usage_bytes) || 0
   const trafficUsed = Number(traffic.total_used_bytes) || 0
   const trafficLimit = (Number(traffic.limit_gb) || service.traffic_gb) * 1024 ** 3
-  const busy = Boolean(service.desired_runtime_status)
-  const available = service.status === 'active' && !busy
+  const available = usable && !busy
+  const formatDate = (value?: string) => (value ? new Date(value).toLocaleString() : '—')
 
   return (
     <article className="service-card enhanced">
@@ -135,8 +151,31 @@ function ServiceCard({ service, onReload }: { service: CustomerServiceRecord; on
           <h3>{service.instance_name}</h3>
           <p>{service.plan_name} · {service.region_name}</p>
         </div>
-        <StatusBadge status={runtime?.container.status || service.runtime_status} />
+        <StatusBadge status={usable ? runtime?.container.status || service.runtime_status : service.status} />
       </div>
+
+      {service.status === 'overdue' && (
+        <div className="service-notice warning">
+          续费账单已逾期，请在 {formatDate(service.grace_until)} 前完成支付，否则实例将被暂停。
+          <a href="/portal/billing">前往支付</a>
+        </div>
+      )}
+      {service.status === 'suspended' && (
+        <div className="service-notice danger">
+          服务已因欠费暂停，支付续费账单后将自动恢复运行；未续费的实例将于 {formatDate(service.termination_scheduled_at)} 删除。
+          <a href="/portal/billing">前往支付</a>
+        </div>
+      )}
+      {(service.status === 'terminating' || service.status === 'terminated') && (
+        <div className="service-notice danger">
+          {service.status === 'terminating' ? '服务正在终止，实例与数据即将删除。' : '服务已终止，实例与数据已删除。'}
+        </div>
+      )}
+      {(service.status === 'provisioning' || service.status === 'pending_payment') && (
+        <div className="service-notice">
+          {service.status === 'provisioning' ? '实例正在开通，通常需要 1–2 分钟。' : '订单待支付，支付完成后自动开通。'}
+        </div>
+      )}
 
       <div className="service-specs">
         <span><strong>{service.vcpu}</strong>vCPU</span>
@@ -145,6 +184,7 @@ function ServiceCard({ service, onReload }: { service: CustomerServiceRecord; on
         <span><strong>{service.traffic_gb}</strong>GB 流量</span>
       </div>
 
+      {usable && (<>
       <div className="runtime-grid">
         <Meter
           label="CPU"
@@ -195,6 +235,21 @@ function ServiceCard({ service, onReload }: { service: CustomerServiceRecord; on
             </button>
           )}
         </div>
+        {service.primary_ipv4 && Number(runtime?.container.ssh_port) > 0 && (
+          <div>
+            <span>SSH 登录</span>
+            <strong>{service.primary_ipv4}:{runtime?.container.ssh_port}</strong>
+            <button
+              type="button"
+              className="button-link"
+              onClick={() => copyToClipboard(`ssh root@${service.primary_ipv4} -p ${runtime?.container.ssh_port}`, 'ssh')}
+              title="复制 SSH 命令"
+            >
+              {copiedKey === 'ssh' ? <Check size={13} /> : <Copy size={13} />}
+              {copiedKey === 'ssh' ? '已复制' : '复制命令'}
+            </button>
+          </div>
+        )}
         <div>
           <span>IPv6 地址</span>
           <strong>{service.primary_ipv6 || '未分配'}</strong>
@@ -240,8 +295,8 @@ function ServiceCard({ service, onReload }: { service: CustomerServiceRecord; on
           <RefreshCw size={14} />正在切换至 {service.desired_runtime_status === 'running' ? '运行' : '关机'} 状态…
         </div>
       )}
-      {(error || service.last_reconcile_error) && (
-        <div className="service-warning">{error || service.last_reconcile_error}</div>
+      {(error || runtimeError || (usable && service.last_reconcile_error)) && (
+        <div className="service-warning">{error || runtimeError || '节点状态同步暂时异常，系统会自动重试。'}</div>
       )}
 
       <div className="service-actions primary-row">
@@ -306,6 +361,7 @@ function ServiceCard({ service, onReload }: { service: CustomerServiceRecord; on
           </button>
         )}
       </div>
+      </>)}
 
       <footer>
         <span>业务状态：<StatusBadge status={service.status} /></span>
@@ -355,7 +411,9 @@ function ServiceDialog({
 
   const submit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault()
-    const data = new FormData(e.currentTarget)
+    // React clears currentTarget once the handler yields, so keep the form.
+    const form = e.currentTarget
+    const data = new FormData(form)
     setSaving(true)
     setError('')
     try {
@@ -385,7 +443,7 @@ function ServiceDialog({
       }
       await onChanged()
       if (kind !== 'ports') onClose()
-      else e.currentTarget.reset()
+      else form.reset()
     } catch (err) {
       setError(err instanceof Error ? err.message : '操作失败')
     } finally {
@@ -468,7 +526,7 @@ function ServiceDialog({
                 <select name="template_id" required defaultValue="">
                   <option value="" disabled>请选择系统镜像</option>
                   {runtime?.templates.map(t => (
-                    <option value={t.id} key={t.id}>{t.name} · {t.release} ({t.arch})</option>
+                    <option value={t.id} key={t.id}>{imageLabel(t)}</option>
                   ))}
                 </select>
               </label>
@@ -524,7 +582,8 @@ export default function CustomerServices() {
 
   const load = () =>
     api<CustomerServiceRecord[]>('/api/v1/customer/services')
-      .then(setServices)
+      // Keep terminated services for reference, below the live ones.
+      .then(rows => setServices([...rows].sort((a, b) => Number(a.status === 'terminated') - Number(b.status === 'terminated'))))
       .catch(err => setError(err.message))
 
   useEffect(() => {

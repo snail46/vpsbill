@@ -7,7 +7,7 @@ import (
 
 func TestValidateInstallDefaultsAndGeneratedSecrets(t *testing.T) {
 	value, generated, err := validate(InstallInput{
-		AppName: "CLICD Billing", PublicURL: "https://billing.example.com/", Timezone: "Asia/Shanghai",
+		AppName: "VPSBill", PublicURL: "https://billing.example.com/", Timezone: "Asia/Shanghai",
 		NotificationWebhookURL: "https://notify.example.com/events",
 		AdminDisplayName:       "Administrator", AdminEmail: "admin@example.com",
 	})
@@ -29,7 +29,7 @@ func TestValidateInstallDefaultsAndGeneratedSecrets(t *testing.T) {
 }
 
 func TestValidateInstallRejectsInvalidURLAndDuration(t *testing.T) {
-	base := InstallInput{AppName: "CLICD Billing", PublicURL: "not-a-url", Timezone: "UTC", AdminDisplayName: "Admin", AdminEmail: "admin@example.com"}
+	base := InstallInput{AppName: "VPSBill", PublicURL: "not-a-url", Timezone: "UTC", AdminDisplayName: "Admin", AdminEmail: "admin@example.com"}
 	if _, _, err := validate(base); err == nil {
 		t.Fatal("invalid public URL accepted")
 	}

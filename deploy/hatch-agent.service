@@ -2,7 +2,7 @@
 Description=VPSBill Hatch agent
 Documentation=https://github.com/snail46/vpsbill/blob/main/docs/HATCH-AGENT.md
 Wants=network-online.target
-After=network-online.target snap.lxd.daemon.service lxd.service podman.socket
+After=network-online.target snap.lxd.daemon.service lxd.service incus.service podman.socket
 
 [Service]
 Type=simple

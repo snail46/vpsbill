@@ -83,8 +83,20 @@ func (r *Runtime) setStatus(name, status string) error {
 func (r *Runtime) Start(_ context.Context, name string) error   { return r.setStatus(name, "running") }
 func (r *Runtime) Stop(_ context.Context, name string) error    { return r.setStatus(name, "stopped") }
 func (r *Runtime) Restart(_ context.Context, name string) error { return r.setStatus(name, "running") }
-func (r *Runtime) Pause(_ context.Context, name string) error   { return r.setStatus(name, "paused") }
-func (r *Runtime) Resume(_ context.Context, name string) error  { return r.setStatus(name, "running") }
+// Pause and Resume reject repeated calls, like Incus and Podman do.
+func (r *Runtime) Pause(ctx context.Context, name string) error {
+	if state, err := r.State(ctx, name); err == nil && state.Status == "paused" {
+		return errors.New("the container is already frozen")
+	}
+	return r.setStatus(name, "paused")
+}
+
+func (r *Runtime) Resume(ctx context.Context, name string) error {
+	if state, err := r.State(ctx, name); err == nil && state.Status != "paused" {
+		return errors.New("the container is not frozen")
+	}
+	return r.setStatus(name, "running")
+}
 
 func (r *Runtime) Delete(_ context.Context, name string) error {
 	r.mu.Lock()

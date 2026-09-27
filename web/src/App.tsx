@@ -34,6 +34,7 @@ import {
 import {
   AccountRecord,
   api,
+  imageLabel,
   AuditLogRecord,
   AvailableTemplateRecord,
   CustomerCatalogRecord,
@@ -80,7 +81,7 @@ type AuthScreen = 'loading' | 'install' | 'login' | 'ready'
 function SessionLoading({ portal }: { portal: 'admin' | 'customer' }) {
   return (
     <main className="session-loading">
-      <div className="brand-mark">CB</div>
+      <div className="brand-mark">VB</div>
       <div className="spinner" />
       <strong>正在恢复{portal === 'admin' ? '商家控制中心' : '客户中心'}会话…</strong>
     </main>
@@ -133,7 +134,8 @@ function adminRoutePath(route: AdminRoute) {
 }
 
 export function App() {
-  return window.location.pathname.startsWith('/portal') ? <CustomerPortalApp /> : <AdminApp />
+  // Customers land on the site root; the merchant console lives under /admin.
+  return window.location.pathname.startsWith('/admin') ? <AdminApp /> : <CustomerPortalApp />
 }
 
 function AdminApp() {
@@ -177,7 +179,7 @@ function AdminApp() {
   if (authScreen !== 'ready' || !user) {
     return (
       <AuthPage
-        appName={meta?.name ?? 'CLICD Billing'}
+        appName={meta?.name ?? 'VPSBill'}
         mode={authScreen}
         onAuthenticated={current => {
           setUser(current)
@@ -236,7 +238,7 @@ function AuthPage({
     <main className="auth-page">
       <section className="auth-brand-panel">
         <div className="brand auth-brand">
-          <div className="brand-mark">CB</div>
+          <div className="brand-mark">VB</div>
           <div>
             <strong>{appName}</strong>
             <span>VPS 商业运营控制平面</span>
@@ -283,7 +285,7 @@ type InstallResponse = { user: StaffUser; generated_secrets: Record<string, stri
 
 function InstallPage({ onInstalled }: { onInstalled: (user: StaffUser, appName: string) => void }) {
   const [form, setForm] = useState({
-    app_name: 'CLICD Billing',
+    app_name: 'VPSBill',
     public_url: window.location.origin,
     timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Shanghai',
     notification_webhook_url: '',
@@ -323,7 +325,7 @@ function InstallPage({ onInstalled }: { onInstalled: (user: StaffUser, appName: 
       <main className="installer-page">
         <section className="installer-card installer-complete">
           <div className="brand">
-            <div className="brand-mark">CB</div>
+            <div className="brand-mark">VB</div>
             <div>
               <strong>{form.app_name}</strong>
               <span>首次初始化已完成</span>
@@ -356,7 +358,7 @@ function InstallPage({ onInstalled }: { onInstalled: (user: StaffUser, appName: 
         <header className="installer-header">
           <div>
             <p className="eyebrow">FIRST-RUN INITIALIZATION</p>
-            <h1>初始化 CLICD Billing</h1>
+            <h1>初始化 VPSBill</h1>
             <p>系统基础环境与数据表已就绪。在此配置站点基础参数与初始超级管理员账号。</p>
           </div>
           <div className="installer-step">
@@ -471,7 +473,7 @@ function CustomerPortalApp() {
     api<{ required: boolean }>('/api/v1/install')
       .then(installation => {
         if (installation.required) {
-          window.location.replace('/')
+          window.location.replace('/admin')
           return
         }
         return api<CustomerIdentity>('/api/v1/customer/auth/me')
@@ -549,9 +551,9 @@ function CustomerAuthPage({
     <main className="auth-page customer-auth-page">
       <section className="auth-brand-panel customer-brand-panel">
         <div className="brand auth-brand">
-          <div className="brand-mark">CB</div>
+          <div className="brand-mark">VB</div>
           <div>
-            <strong>CLICD Billing</strong>
+            <strong>VPSBill</strong>
             <span>客户服务中心</span>
           </div>
         </div>
@@ -603,9 +605,6 @@ function CustomerAuthPage({
           >
             {register ? '已有账号？返回登录' : '还没有账号？立即注册'}
           </button>
-          <a className="auth-switch" href="/">
-            <ArrowLeft size={15} />返回商家后台
-          </a>
         </form>
       </section>
     </main>
@@ -652,7 +651,7 @@ function CustomerShell({ customer, onLogout }: { customer: CustomerIdentity; onL
     <div className="app-shell customer-shell">
       <aside className="sidebar">
         <div className="brand">
-          <div className="brand-mark">CB</div>
+          <div className="brand-mark">VB</div>
           <div>
             <strong>客户中心</strong>
             <span>Customer Portal</span>
@@ -714,7 +713,8 @@ function CustomerOverview({ customer }: { customer: CustomerIdentity }) {
       api<CustomerServiceRecord[]>('/api/v1/customer/services'),
       api<CustomerInvoiceRecord[]>('/api/v1/customer/invoices'),
     ]).then(([s, i]) => {
-      setServices(s)
+      // Terminated services stay listed on the services page but are not counted here.
+      setServices(s.filter(item => item.status !== 'terminated'))
       setInvoices(i)
     })
   }, [])
@@ -1355,9 +1355,10 @@ function CustomerSupport() {
           body: data.get('body'),
         }),
       })
-      setDetail(result)
       setCreating(false)
       await load()
+      // Re-read so the view has the joined customer and instance names.
+      await open(result.ticket.id)
     } catch (err) {
       setError(err instanceof Error ? err.message : '创建失败')
     }
@@ -1490,8 +1491,10 @@ function TicketConversation({
           <p className="eyebrow">{detail.ticket.number}</p>
           <h3>{detail.ticket.subject}</h3>
           <small>
-            客户：{detail.ticket.customer_name}
-            {detail.ticket.instance_name ? ` · 关联实例：${detail.ticket.instance_name}` : ''}
+            {[
+              detail.ticket.customer_name && `客户：${detail.ticket.customer_name}`,
+              detail.ticket.instance_name && `关联实例：${detail.ticket.instance_name}`,
+            ].filter(Boolean).join(' · ') || `创建于 ${new Date(detail.ticket.created_at).toLocaleString()}`}
           </small>
         </div>
         <span className={`ticket-state ${detail.ticket.status}`}>{ticketStatusLabel(detail.ticket.status)}</span>
@@ -1752,9 +1755,9 @@ function AdminShell({ meta, user, onLogout }: { meta: Meta | null; user: StaffUs
     <div className="app-shell">
       <aside className="sidebar">
         <div className="brand">
-          <div className="brand-mark">CB</div>
+          <div className="brand-mark">VB</div>
           <div>
-            <strong>{meta?.name ?? 'CLICD Billing'}</strong>
+            <strong>{meta?.name ?? 'VPSBill'}</strong>
             <span>商家控制中心</span>
           </div>
         </div>
@@ -2782,6 +2785,26 @@ function ServicesView() {
     return () => window.clearInterval(timer)
   }, [])
 
+  async function serviceAction(service: ServiceRecord, action: 'start' | 'stop' | 'restart' | 'terminate') {
+    const prompts = {
+      start: `确认开机实例【${service.instance_name}】？`,
+      stop: `确认关机实例【${service.instance_name}】？`,
+      restart: `确认重启实例【${service.instance_name}】？`,
+      terminate: `确认立即终止【${service.customer_name}】的实例【${service.instance_name}】？实例与数据将被删除，未付账单作废，此操作不可撤销。`,
+    }
+    if (!window.confirm(prompts[action])) return
+    setRetrying(service.id)
+    setError('')
+    try {
+      await api(`/api/v1/admin/services/${service.id}/actions/${action}`, { method: 'POST' })
+      await load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '操作失败')
+    } finally {
+      setRetrying('')
+    }
+  }
+
   async function retry(job: ProvisioningJobRecord) {
     if (!window.confirm(`确认重新提交实例【${job.instance_name}】的自动化开通任务？`)) return
     setRetrying(job.id)
@@ -2827,6 +2850,7 @@ function ServicesView() {
                 <th>运行状态</th>
                 <th>分配 IP</th>
                 <th>下次到期</th>
+                <th>操作</th>
               </tr>
             </thead>
             <tbody>
@@ -2858,11 +2882,28 @@ function ServicesView() {
                     <small>{service.primary_ipv6}</small>
                   </td>
                   <td>{service.next_due_at ? new Date(service.next_due_at).toLocaleDateString() : '—'}</td>
+                  <td>
+                    <div className="row-actions">
+                      {(service.status === 'active' || service.status === 'overdue') && (
+                        service.runtime_status === 'stopped' ? (
+                          <button className="text-button" disabled={retrying === service.id} onClick={() => void serviceAction(service, 'start')}>开机</button>
+                        ) : (
+                          <>
+                            <button className="text-button" disabled={retrying === service.id} onClick={() => void serviceAction(service, 'stop')}>关机</button>
+                            <button className="text-button" disabled={retrying === service.id} onClick={() => void serviceAction(service, 'restart')}>重启</button>
+                          </>
+                        )
+                      )}
+                      {service.status !== 'terminating' && service.status !== 'terminated' && (
+                        <button className="text-button danger" disabled={retrying === service.id} onClick={() => void serviceAction(service, 'terminate')}>终止</button>
+                      )}
+                    </div>
+                  </td>
                 </tr>
               ))}
               {!services.length && (
                 <tr>
-                  <td colSpan={7} className="empty-state">暂无已开通服务，账单支付后会自动进入队列开通</td>
+                  <td colSpan={8} className="empty-state">暂无已开通服务，账单支付后会自动进入队列开通</td>
                 </tr>
               )}
             </tbody>
@@ -2934,6 +2975,11 @@ function NodesView() {
   const [showForm, setShowForm] = useState(false)
   const [error, setError] = useState('')
   const [testing, setTesting] = useState('')
+  const [providers, setProviders] = useState<ProviderTypeRecord[]>([])
+
+  useEffect(() => {
+    api<ProviderTypeRecord[]>('/api/v1/admin/provider-types').then(setProviders).catch(() => undefined)
+  }, [])
 
   const load = () =>
     api<NodeRecord[]>('/api/v1/admin/nodes')
@@ -2962,7 +3008,7 @@ function NodesView() {
       <PageActions
         eyebrow="PROVIDER INTEGRATIONS"
         title="虚拟化节点对接"
-        description="统一纳管底层宿主机面板连接。支持 CLICD，后续适配器完全复用统一资源调度与账务模型。"
+        description="统一纳管宿主机：CLICD 与 LXDAPI 通过 API 对接，Hatch Agent 由宿主机主动连入。所有对接方式共用调度与账务模型。"
         action={() => setShowForm(true)}
         actionLabel="新增节点对接"
       />
@@ -2980,18 +3026,12 @@ function NodesView() {
       )}
 
       <div className="provider-strip">
-        <article className="available">
-          <strong>CLICD 官方面板</strong>
-          <span>LXC / KVM 容器与硬件级虚拟化 · 官方适配</span>
-        </article>
-        <article>
-          <strong>Proxmox VE</strong>
-          <span>PVE 适配器开发计划中</span>
-        </article>
-        <article>
-          <strong>Virtualizor</strong>
-          <span>第三方适配协议规划中</span>
-        </article>
+        {providers.map(item => (
+          <article className="available" key={item.type}>
+            <strong>{item.name}</strong>
+            <span>{item.virtualization_types.map(virtualizationLabel).join(' / ')} · {item.agent_managed ? 'Agent 主动连入' : 'API 对接'}</span>
+          </article>
+        ))}
       </div>
 
       <div className="table-wrap">
@@ -3220,7 +3260,7 @@ function HostsView({ onOpen }: { onOpen?: (id: string) => void }) {
         <div>
           <p className="eyebrow">HOST TELEMETRY</p>
           <h2>宿主机硬件探针</h2>
-          <p>展示集群节点总容量与分配情况；点击探针卡片可深入查阅 CPU、内存条、磁盘健康度及实时曲线。</p>
+          <p>展示集群节点总容量与分配情况；CLICD 节点可进一步查看 CPU、内存条、磁盘健康度与实时曲线。</p>
         </div>
         <button className="secondary-button" onClick={() => void load()}>
           <RefreshCw size={15} />刷新
@@ -3439,7 +3479,7 @@ function PlanForm({
 
   const templateLabel = (id: string) => {
     const item = templates.find(candidate => candidate.id === id)
-    return item ? `${item.name}${item.release && !item.name.includes(item.release) ? ` ${item.release}` : ''} · ${item.arch}` : id
+    return item ? imageLabel(item) : id
   }
 
   function toggleTemplate(id: string, checked: boolean) {

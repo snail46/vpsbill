@@ -68,11 +68,12 @@ func LoadConfig(path string) (Config, error) {
 	if err := json.Unmarshal(data, &config); err != nil {
 		return Config{}, fmt.Errorf("parse %s: %w", path, err)
 	}
-	config.applyDefaults()
+	config.ApplyDefaults()
 	return config, config.Validate()
 }
 
-func (c *Config) applyDefaults() {
+// ApplyDefaults fills unset fields, detecting the LXD or Incus socket.
+func (c *Config) ApplyDefaults() {
 	if c.StateDir == "" {
 		c.StateDir = "/var/lib/hatch"
 	}
@@ -81,9 +82,11 @@ func (c *Config) applyDefaults() {
 	}
 	if c.LXD != nil {
 		if c.LXD.Socket == "" {
-			c.LXD.Socket = firstExisting("/var/snap/lxd/common/lxd/unix.socket", "/var/lib/lxd/unix.socket")
+			c.LXD.Socket = firstExisting("/var/snap/lxd/common/lxd/unix.socket", "/var/lib/lxd/unix.socket", "/var/lib/incus/unix.socket")
 		}
-		if c.LXD.Network == "" {
+		if c.LXD.Network == "" && strings.Contains(c.LXD.Socket, "incus") {
+			c.LXD.Network = "incusbr0"
+		} else if c.LXD.Network == "" {
 			c.LXD.Network = "lxdbr0"
 		}
 		if c.LXD.StoragePool == "" {

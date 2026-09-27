@@ -163,7 +163,7 @@ export function ServiceConsole({
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             {kind === 'ssh' ? <TerminalSquare size={18} /> : <Monitor size={18} />}
             <strong>{kind.toUpperCase()} 控制台 · {name}</strong>
-            <span className={status === '已连接' ? 'status-badge online' : 'status-badge'}>{status}</span>
+            <span className={status === '已连接' ? 'status-badge online' : status === '连接失败' ? 'status-badge error' : 'status-badge'}>{status}</span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             {kind === 'vnc' && (

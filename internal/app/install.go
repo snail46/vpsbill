@@ -21,7 +21,7 @@ func (i *installer) status(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"data": map[string]any{
 		"required": !runtime.Installed,
 		"defaults": map[string]string{
-			"app_name": "CLICD Billing", "timezone": "Asia/Shanghai",
+			"app_name": "VPSBill", "timezone": "Asia/Shanghai",
 			"worker_poll_interval": "3s",
 			"reconcile_interval":   "5m", "lifecycle_interval": "1m",
 			"renewal_lead_time": "168h", "overdue_grace_period": "72h",

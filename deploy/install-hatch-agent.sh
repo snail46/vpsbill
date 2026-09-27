@@ -4,6 +4,9 @@
 #   ./install-hatch-agent.sh --binary ./hatch-agent-linux-amd64 \
 #       --server https://billing.example.com --runtime lxd --public-ip 203.0.113.10
 #
+# Optional: --lxd-network NAME and --podman-network NAME pick the bridges that
+# instances attach to (defaults: lxdbr0 or incusbr0, and podman).
+#
 # Run as root. The binary comes from the CI "hatch-agent" artifact; verify it
 # against SHA256SUMS before installing.
 set -eu
@@ -12,6 +15,7 @@ BINARY=""
 SERVER=""
 RUNTIME="lxd"
 PUBLIC_IP=""
+EXTRA=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -19,6 +23,7 @@ while [ $# -gt 0 ]; do
     --server) SERVER="$2"; shift 2 ;;
     --runtime) RUNTIME="$2"; shift 2 ;;
     --public-ip) PUBLIC_IP="$2"; shift 2 ;;
+    --lxd-network|--podman-network) EXTRA="$EXTRA $1 $2"; shift 2 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
@@ -34,7 +39,7 @@ install -d -m 0700 /etc/hatch /var/lib/hatch
 
 if [ ! -f /etc/hatch/agent.json ]; then
   /usr/local/bin/hatch-agent init --config /etc/hatch/agent.json \
-    --server "$SERVER" --runtime "$RUNTIME" --public-ip "$PUBLIC_IP"
+    --server "$SERVER" --runtime "$RUNTIME" --public-ip "$PUBLIC_IP" $EXTRA
 else
   echo "Keeping existing /etc/hatch/agent.json; token:"
   /usr/local/bin/hatch-agent token --config /etc/hatch/agent.json

@@ -104,3 +104,10 @@ fi
 type Maintainer interface {
 	Maintain(ctx context.Context, name string) error
 }
+
+// DiskReporter is implemented by runtimes that keep instances in their own
+// storage pool; its size replaces the state directory's file system as the
+// host's disk capacity.
+type DiskReporter interface {
+	DiskCapacityGB(ctx context.Context) (int64, error)
+}

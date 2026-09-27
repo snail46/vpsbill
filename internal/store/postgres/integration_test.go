@@ -245,6 +245,21 @@ func TestBillingLifecycleIntegration(t *testing.T) {
 	if err = provisioning.CompleteAction(ctx, actionJob.ID, "integration-worker", "clicd-task-1", ""); err != nil {
 		t.Fatal(err)
 	}
+	// Overdue suspension on pausing nodes records "suspended" as the target,
+	// and a live read of the paused instance clears it.
+	if _, err = db.Exec(ctx, `UPDATE services SET desired_runtime_status='suspended' WHERE id=$1`, serviceID); err != nil {
+		t.Fatalf("desired suspended rejected: %v", err)
+	}
+	if err = portal.ObserveRuntime(ctx, serviceID, "suspended"); err != nil {
+		t.Fatal(err)
+	}
+	var runtimeStatus, desired string
+	if err = db.QueryRow(ctx, `SELECT runtime_status,coalesce(desired_runtime_status,'') FROM services WHERE id=$1`, serviceID).Scan(&runtimeStatus, &desired); err != nil || runtimeStatus != "suspended" || desired != "" {
+		t.Fatalf("observe runtime: runtime=%q desired=%q err=%v", runtimeStatus, desired, err)
+	}
+	if _, err = db.Exec(ctx, `UPDATE services SET runtime_status='running' WHERE id=$1`, serviceID); err != nil {
+		t.Fatal(err)
+	}
 	var transactions int
 	if err = db.QueryRow(ctx, `SELECT count(*) FROM transactions WHERE account_id=$1`, account.ID).Scan(&transactions); err != nil {
 		t.Fatal(err)
@@ -260,5 +275,24 @@ func TestBillingLifecycleIntegration(t *testing.T) {
 	hosts, err := monitoring.Hosts(ctx)
 	if err != nil || len(hosts) != 1 || hosts[0].ProviderType != "clicd" || hosts[0].ReservedVCPU != 1 {
 		t.Fatalf("host probes: %+v err=%v", hosts, err)
+	}
+
+	// Staff can terminate a service immediately; the worker then deletes it.
+	terminateID, err := provisioning.QueueAdminServiceAction(ctx, "staff-1", serviceID, "terminate", "203.0.113.9", "integration-test")
+	if err != nil || terminateID == "" {
+		t.Fatalf("queue admin terminate: id=%s err=%v", terminateID, err)
+	}
+	if _, err = provisioning.QueueAdminServiceAction(ctx, "staff-1", serviceID, "terminate", "", ""); !errors.Is(err, ErrServiceActionUnavailable) {
+		t.Fatalf("second terminate must be rejected, got %v", err)
+	}
+	terminateJob, claimed, err := provisioning.ClaimJob(ctx, "integration-worker")
+	if err != nil || !claimed || terminateJob.ID != terminateID || terminateJob.Action != "terminate" {
+		t.Fatalf("claim admin terminate: claimed=%v job=%+v err=%v", claimed, terminateJob, err)
+	}
+	if err = provisioning.CompleteTermination(ctx, terminateJob.ID, "integration-worker"); err != nil {
+		t.Fatal(err)
+	}
+	if err = db.QueryRow(ctx, `SELECT status FROM services WHERE id=$1`, serviceID).Scan(&serviceStatus); err != nil || serviceStatus != "terminated" {
+		t.Fatalf("admin terminate: status=%q err=%v", serviceStatus, err)
 	}
 }

@@ -52,9 +52,11 @@ func initConfig(args []string) error {
 	flags := flag.NewFlagSet("init", flag.ExitOnError)
 	path := flags.String("config", agent.DefaultConfigPath, "config file to create")
 	server := flags.String("server", "", "billing site URL, e.g. https://billing.example.com")
-	runtimes := flags.String("runtime", "lxd", "comma separated runtimes: lxd, podman")
+	runtimes := flags.String("runtime", "lxd", "comma separated runtimes: lxd (or incus), podman")
 	publicIP := flags.String("public-ip", "", "public IPv4 shown for NAT port forwards")
 	force := flags.Bool("force", false, "overwrite an existing config and rotate the token")
+	lxdNetwork := flags.String("lxd-network", "", "LXD/Incus bridge for instances (default lxdbr0 or incusbr0)")
+	podmanNetwork := flags.String("podman-network", "", "Podman network for instances (default podman)")
 	_ = flags.Parse(args)
 	if _, err := os.Stat(*path); err == nil && !*force {
 		return fmt.Errorf("%s exists; use --force to rotate the token", *path)
@@ -66,15 +68,16 @@ func initConfig(args []string) error {
 	config := agent.Config{ServerURL: *server, Token: token, PublicIPv4: *publicIP, PortRangeStart: 20000, PortRangeEnd: 60000, StateDir: "/var/lib/hatch"}
 	for _, runtime := range strings.Split(*runtimes, ",") {
 		switch strings.TrimSpace(runtime) {
-		case "lxd":
-			config.LXD = &agent.LXDConfig{}
+		case "lxd", "incus":
+			config.LXD = &agent.LXDConfig{Network: *lxdNetwork}
 		case "podman":
-			config.Podman = &agent.PodmanConfig{}
+			config.Podman = &agent.PodmanConfig{Network: *podmanNetwork}
 		case "":
 		default:
 			return fmt.Errorf("unknown runtime %q", runtime)
 		}
 	}
+	config.ApplyDefaults()
 	if err := config.Validate(); err != nil {
 		return err
 	}
