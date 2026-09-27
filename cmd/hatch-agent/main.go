@@ -68,8 +68,11 @@ func initConfig(args []string) error {
 	config := agent.Config{ServerURL: *server, Token: token, PublicIPv4: *publicIP, PortRangeStart: 20000, PortRangeEnd: 60000, StateDir: "/var/lib/hatch"}
 	for _, runtime := range strings.Split(*runtimes, ",") {
 		switch strings.TrimSpace(runtime) {
-		case "lxd", "incus":
+		case "lxd":
 			config.LXD = &agent.LXDConfig{Network: *lxdNetwork}
+		case "incus":
+			// Pin the socket: hosts may run the LXD snap next to Incus.
+			config.LXD = &agent.LXDConfig{Socket: "/var/lib/incus/unix.socket", Network: *lxdNetwork}
 		case "podman":
 			config.Podman = &agent.PodmanConfig{Network: *podmanNetwork}
 		case "":
@@ -134,7 +137,14 @@ func run(args []string) error {
 		return err
 	}
 	go service.Meter(ctx, time.Minute)
-	logger.Info("hatch agent started", "version", version, "runtimes", config.Runtimes())
+	attrs := []any{"version", version, "runtimes", config.Runtimes()}
+	if config.LXD != nil {
+		attrs = append(attrs, "lxd_socket", config.LXD.Socket, "lxd_network", config.LXD.Network)
+	}
+	if config.Podman != nil {
+		attrs = append(attrs, "podman_network", config.Podman.Network)
+	}
+	logger.Info("hatch agent started", attrs...)
 	client.Run(ctx)
 	return nil
 }

@@ -74,7 +74,11 @@ function ServiceCard({ service, onReload }: { service: CustomerServiceRecord; on
   const [dialog, setDialog] = useState<'password' | 'reinstall' | 'ports' | null>(null)
 
   const [runtimeError, setRuntimeError] = useState('')
-  const busy = Boolean(service.desired_runtime_status)
+  // A restart can finish on the node before the instance has gone down, so
+  // the card tracks it until it has seen the instance leave and return to
+  // running (or a minute passes).
+  const [restart, setRestart] = useState<{ until: number; sawDown: boolean } | null>(null)
+  const busy = Boolean(service.desired_runtime_status) || restart !== null
 
   const load = (brief = true) =>
     api<ServiceRuntimeRecord>(`/api/v1/customer/services/${service.id}/runtime${brief ? '?brief=1' : ''}`)
@@ -84,6 +88,14 @@ function ServiceCard({ service, onReload }: { service: CustomerServiceRecord; on
           brief && previous ? { ...value, templates: previous.templates, history: previous.history } : value,
         )
         setRuntimeError('')
+        const running = value.container.status.toLowerCase() === 'running'
+        setRestart(current => {
+          // Fast restarts may never be observed down; accept "running" again
+          // once the node has had a few seconds to act.
+          const settled = current && Date.now() > current.until - 50000
+          if (!current || Date.now() > current.until || (running && (current.sawDown || settled))) return null
+          return running ? current : { ...current, sawDown: true }
+        })
       })
       .catch(err => setRuntimeError(err.message))
 
@@ -121,6 +133,7 @@ function ServiceCard({ service, onReload }: { service: CustomerServiceRecord; on
     setError('')
     try {
       await api(`/api/v1/customer/services/${service.id}/actions/${value}`, { method: 'POST' })
+      if (value === 'restart') setRestart({ until: Date.now() + 60000, sawDown: false })
       onReload()
     } catch (err) {
       setError(err instanceof Error ? err.message : '操作失败')
@@ -140,6 +153,8 @@ function ServiceCard({ service, onReload }: { service: CustomerServiceRecord; on
   const diskUsed = Number(usage.disk_usage_bytes) || 0
   const trafficUsed = Number(traffic.total_used_bytes) || 0
   const trafficLimit = (Number(traffic.limit_gb) || service.traffic_gb) * 1024 ** 3
+  // Prefer the live node status; the list's copy only refreshes on reload.
+  const liveStatus = (runtime?.container.status || service.runtime_status).toLowerCase()
   const available = usable && !busy
   const formatDate = (value?: string) => (value ? new Date(value).toLocaleString() : '—')
 
@@ -151,7 +166,7 @@ function ServiceCard({ service, onReload }: { service: CustomerServiceRecord; on
           <h3>{service.instance_name}</h3>
           <p>{service.plan_name} · {service.region_name}</p>
         </div>
-        <StatusBadge status={usable ? runtime?.container.status || service.runtime_status : service.status} />
+        <StatusBadge status={usable ? liveStatus : service.status} />
       </div>
 
       {service.status === 'overdue' && (
@@ -292,7 +307,8 @@ function ServiceCard({ service, onReload }: { service: CustomerServiceRecord; on
 
       {busy && (
         <div className="pending-action">
-          <RefreshCw size={14} />正在切换至 {service.desired_runtime_status === 'running' ? '运行' : '关机'} 状态…
+          <RefreshCw size={14} />
+          {restart ? '正在重启…' : `正在切换至 ${service.desired_runtime_status === 'running' ? '运行' : '关机'} 状态…`}
         </div>
       )}
       {(error || runtimeError || (usable && service.last_reconcile_error)) && (
@@ -300,7 +316,7 @@ function ServiceCard({ service, onReload }: { service: CustomerServiceRecord; on
       )}
 
       <div className="service-actions primary-row">
-        {service.runtime_status === 'stopped' ? (
+        {liveStatus === 'stopped' ? (
           <button
             className="primary-button compact"
             disabled={!available || !!acting}
@@ -319,7 +335,7 @@ function ServiceCard({ service, onReload }: { service: CustomerServiceRecord; on
         )}
         <button
           className="secondary-button"
-          disabled={!available || service.runtime_status === 'stopped' || !!acting}
+          disabled={!available || liveStatus === 'stopped' || !!acting}
           onClick={() => void action('restart')}
         >
           <RotateCw size={13} />重启
@@ -327,7 +343,7 @@ function ServiceCard({ service, onReload }: { service: CustomerServiceRecord; on
         {hasConsole('ssh') && (
           <button
             className="secondary-button"
-            disabled={!available || service.runtime_status === 'stopped'}
+            disabled={!available || liveStatus === 'stopped'}
             onClick={() => setConsoleKind('ssh')}
           >
             <TerminalSquare size={14} />WebSSH
@@ -336,7 +352,7 @@ function ServiceCard({ service, onReload }: { service: CustomerServiceRecord; on
         {service.virtualization === 'kvm' && hasConsole('vnc') && (
           <button
             className="secondary-button"
-            disabled={!available || service.runtime_status === 'stopped'}
+            disabled={!available || liveStatus === 'stopped'}
             onClick={() => setConsoleKind('vnc')}
           >
             <Monitor size={14} />VNC 控制台

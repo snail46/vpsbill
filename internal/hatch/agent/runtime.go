@@ -84,13 +84,32 @@ type RuntimeState struct {
 }
 
 // passwordScript sets the root password and allows password SSH logins.
-// It tolerates images without sshd so the password still works on the
-// console.
+// Stock images from images.linuxcontainers.org (the /cloud variants too)
+// ship without an SSH server, so it installs one once the instance has a
+// default route; when that fails the password still works on the console.
+// sshd keeps the first value it reads, so the drop-in sorts before cloud
+// images' 60-cloudimg-settings.conf (PasswordAuthentication no).
 const passwordScript = `set -e
 printf 'root:%s\n' "$HATCH_PASSWORD" | chpasswd
-if [ -d /etc/ssh ]; then
+if [ ! -x /usr/sbin/sshd ] && ! command -v sshd >/dev/null 2>&1; then
+  i=0
+  while [ $i -lt 30 ] && ! awk '$2 == "00000000" { found = 1 } END { exit !found }' /proc/net/route 2>/dev/null; do
+    sleep 1; i=$((i + 1))
+  done
+  if command -v apt-get >/dev/null 2>&1; then
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get -o DPkg::Lock::Timeout=120 -qq update >/dev/null 2>&1 || true
+    apt-get -o DPkg::Lock::Timeout=120 -qq install -y openssh-server >/dev/null 2>&1 || true
+  elif command -v dnf >/dev/null 2>&1; then
+    (dnf -q install -y openssh-server && systemctl enable --now sshd) >/dev/null 2>&1 || true
+  elif command -v apk >/dev/null 2>&1; then
+    (apk add -q openssh && rc-update add sshd default) >/dev/null 2>&1 || true
+  fi
+fi
+if [ -f /etc/ssh/sshd_config ]; then
   mkdir -p /etc/ssh/sshd_config.d
-  printf 'PermitRootLogin yes\nPasswordAuthentication yes\n' > /etc/ssh/sshd_config.d/99-hatch.conf
+  rm -f /etc/ssh/sshd_config.d/99-hatch.conf
+  printf 'PermitRootLogin yes\nPasswordAuthentication yes\n' > /etc/ssh/sshd_config.d/00-hatch.conf
   if ! grep -qs '^Include /etc/ssh/sshd_config.d' /etc/ssh/sshd_config; then
     sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin yes/; s/^#\?PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
   fi

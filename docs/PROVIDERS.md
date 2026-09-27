@@ -46,6 +46,17 @@
 - 创建、删除、重装为异步任务。适配器轮询 `GET /api/system/tasks/detail?id=` 直到完成；创建前先查 `GET /api/system/tasks?name=`，若有进行中的创建任务就继续等待它，不会重复提交。
 - 端口映射使用 `/api/system/port-mapping`（`version=v4`），按映射 ID 升序对应计费系统的映射序号。修改映射 = 释放旧规则 + 在同一公网端口分配新规则，失败时恢复旧规则。
 - 系统接口不提供镜像列表和宿主机容量，因此需要在节点设置中填写：NAT 公网 IPv4、出口网卡、端口范围、可售镜像别名、可分配 vCPU/内存/磁盘。
+- 端口范围要与 LXDAPI 后台「NAT 配置」里的端口段一致，并开启其中的「自动分配 22 端口」，开通后客户才有 SSH 映射。
+- 服务商做 1:1 NAT 的机器（网卡上只有内网 IP，公网 IP 在上游）要额外填「NAT 网卡 IP」为网卡上的内网地址，与 LXDAPI NAT 配置里的「网卡 IP」一致。LXDAPI 的 DNAT 规则按这个地址匹配；只填公网 IP 时新建的端口映射在外网不通。客户中心仍显示公网 IP。
+- LXDAPI 镜像脚本提供的 Ubuntu 24.04 镜像带有云镜像的 `/etc/ssh/sshd_config.d/60-cloudimg-settings.conf`（`PasswordAuthentication no`），开通或重装后 root 密码无法 SSH 登录。导入后先修正一次镜像：
+
+  ```sh
+  lxc init ubuntu-2404-lxc imgfix
+  lxc file delete imgfix/etc/ssh/sshd_config.d/60-cloudimg-settings.conf
+  lxc image alias rename ubuntu-2404-lxc ubuntu-2404-lxc-orig
+  lxc publish imgfix --alias ubuntu-2404-lxc
+  lxc delete imgfix
+  ```
 - LXDAPI 默认使用自签名证书。节点必须二选一：开启「校验 HTTPS 证书」（受信任证书），或填写证书 SHA-256 指纹进行固定。获取指纹：
 
   ```sh

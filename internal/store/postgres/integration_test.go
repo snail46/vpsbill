@@ -295,4 +295,41 @@ func TestBillingLifecycleIntegration(t *testing.T) {
 	if err = db.QueryRow(ctx, `SELECT status FROM services WHERE id=$1`, serviceID).Scan(&serviceStatus); err != nil || serviceStatus != "terminated" {
 		t.Fatalf("admin terminate: status=%q err=%v", serviceStatus, err)
 	}
+
+	// A node that only hosted terminated services can be removed.
+	catalog := NewCatalogStore(db)
+	if err = catalog.UpdateNode(ctx, nodeID, UpdateNode{Name: "renamed-node", BaseURL: "https://node.example.test/", VirtualizationTypes: []string{"lxc"}, CapacityVCPU: 4, CapacityRAMMB: 4096, CapacityDiskGB: 500}); err != nil {
+		t.Fatalf("update node: %v", err)
+	}
+	var nodeName string
+	var keyKept bool
+	if err = db.QueryRow(ctx, `SELECT name, api_key_ciphertext=$2 FROM nodes WHERE id=$1`, nodeID, testNodeAPIKey).Scan(&nodeName, &keyKept); err != nil || nodeName != "renamed-node" || !keyKept {
+		t.Fatalf("updated node: name=%q keyKept=%v err=%v", nodeName, keyKept, err)
+	}
+	if err = catalog.DeleteNode(ctx, nodeID); err != nil {
+		t.Fatalf("delete node: %v", err)
+	}
+	if err = catalog.DeleteNode(ctx, nodeID); !errors.Is(err, ErrNodeNotFound) {
+		t.Fatalf("second delete must report not found, got %v", err)
+	}
+
+	// Changing a password keeps the current session and ends the others.
+	if err = auth.CreateSession(ctx, admin.UserID, []byte("keep-token"), []byte("csrf-1"), time.Now().Add(time.Hour), "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if err = auth.CreateSession(ctx, admin.UserID, []byte("other-token"), []byte("csrf-2"), time.Now().Add(time.Hour), "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if err = auth.ChangePassword(ctx, admin.UserID, "new-password-hash", []byte("keep-token")); err != nil {
+		t.Fatal(err)
+	}
+	if hash, hashErr := auth.PasswordHash(ctx, admin.UserID); hashErr != nil || hash != "new-password-hash" {
+		t.Fatalf("password hash=%q err=%v", hash, hashErr)
+	}
+	if _, err = auth.SessionByToken(ctx, []byte("keep-token")); err != nil {
+		t.Fatalf("current session must survive: %v", err)
+	}
+	if _, err = auth.SessionByToken(ctx, []byte("other-token")); err == nil {
+		t.Fatal("other sessions must be revoked")
+	}
 }

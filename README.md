@@ -19,7 +19,7 @@ chmod +x deploy.sh
 
 首次打开页面时会进入一次性安装向导，图形化设置站点、通知、Metrics、自动化周期和唯一的初始超级管理员。支付网关在登录后的「支付网关」菜单配置。节点 API Key 与支付密钥等敏感参数均使用 AES-256-GCM 主密钥加密保存。
 
-客户中心入口为 `http://服务器IP:8080/portal`。客户身份与商家管理员身份在服务端分别校验；客户只能读取和操作所属账户的服务。
+站点根路径就是客户中心（`/portal/...`），商家后台在 `/admin`。客户身份与商家管理员身份在服务端分别校验；客户只能读取和操作所属账户的服务。
 
 「我的 VPS」提供开关机、重启、同源代理的 WebSSH/KVM VNC、root 密码查看与重置、套餐白名单重装、IPv4 NAT 端口映射，以及每 10 秒刷新的 CPU、内存、磁盘、流量和 I/O 速率。初始及重置后的 root 密码使用 AES-256-GCM 加密，旧实例未留存密码时需先重置。
 
@@ -53,17 +53,7 @@ docker-compose.yml   # 使用 deploy/docker-compose.image.yml 的内容
 
 镜像版 Compose 内嵌了 Caddy 配置，要求 Docker Compose 2.23.1 或更高版本。
 
-### 私有 GHCR 登录
-
-仓库及 GHCR 镜像保持私有时，先在 GitHub 创建仅含 `read:packages` 权限的 Personal access token (classic)，然后在服务器执行一次：
-
-```sh
-export CR_PAT='粘贴只读Token'
-printf '%s' "$CR_PAT" | docker login ghcr.io -u snail46 --password-stdin
-unset CR_PAT
-```
-
-不要把 Token 写入 `.env` 或 Compose。若以后把两个 GHCR Package 单独设为 Public，则拉取镜像不需要登录，GitHub 源码仓库仍可保持 Private；但任何人都能下载镜像。
+两个 GHCR 镜像都是公开的，拉取不需要 `docker login`。API 镜像同时内置了同版本的 Hatch Agent，母鸡可以直接从 `https://计费域名/api/v1/agent/download/install.sh` 安装，见 [Hatch Agent](docs/HATCH-AGENT.md)。
 
 ### HTTPS 一条命令启动
 
@@ -178,4 +168,4 @@ chmod +x verify.sh integration-test.sh
 
 HTTPS、备份恢复和 AES 主密钥轮换见 [运维手册](docs/OPERATIONS.md)。
 
-私有 GitHub 仓库、Deploy Key、Docker 安装和首次上线步骤见 [全新服务器部署教程](docs/DEPLOYMENT.md)。
+从空服务器到客户开通 VPS 的完整步骤见 [全新服务器部署教程](docs/DEPLOYMENT.md)。

@@ -85,6 +85,7 @@ func NewHandler(deps Dependencies) (http.Handler, error) {
 	mux.Handle("POST /api/v1/auth/mfa/setup", auth.require("", http.HandlerFunc(auth.staffMFASetup)))
 	mux.Handle("POST /api/v1/auth/mfa/confirm", auth.require("", http.HandlerFunc(auth.staffMFAConfirm)))
 	mux.Handle("POST /api/v1/auth/mfa/disable", auth.require("", http.HandlerFunc(auth.staffMFADisable)))
+	mux.Handle("POST /api/v1/auth/password", auth.require("", http.HandlerFunc(auth.staffChangePassword)))
 	mux.HandleFunc("POST /api/v1/customer/auth/register", auth.customerRegister)
 	mux.HandleFunc("POST /api/v1/customer/auth/login", auth.customerLogin)
 	mux.Handle("GET /api/v1/customer/auth/me", auth.requireCustomer(http.HandlerFunc(auth.customerMe)))
@@ -92,6 +93,7 @@ func NewHandler(deps Dependencies) (http.Handler, error) {
 	mux.Handle("POST /api/v1/customer/auth/mfa/setup", auth.requireCustomer(http.HandlerFunc(auth.customerMFASetup)))
 	mux.Handle("POST /api/v1/customer/auth/mfa/confirm", auth.requireCustomer(http.HandlerFunc(auth.customerMFAConfirm)))
 	mux.Handle("POST /api/v1/customer/auth/mfa/disable", auth.requireCustomer(http.HandlerFunc(auth.customerMFADisable)))
+	mux.Handle("POST /api/v1/customer/auth/password", auth.requireCustomer(http.HandlerFunc(auth.customerChangePassword)))
 	mux.Handle("GET /api/v1/customer/services", auth.requireCustomer(http.HandlerFunc(portal.listServices)))
 	mux.Handle("POST /api/v1/customer/services/{id}/actions/{action}", auth.requireCustomer(http.HandlerFunc(portal.serviceAction)))
 	mux.Handle("GET /api/v1/customer/services/{id}/runtime", auth.requireCustomer(http.HandlerFunc(portal.serviceRuntime)))
@@ -113,6 +115,8 @@ func NewHandler(deps Dependencies) (http.Handler, error) {
 	mux.Handle("POST /api/v1/customer/tickets", auth.requireCustomer(http.HandlerFunc(operations.customerCreateTicket)))
 	mux.Handle("GET /api/v1/customer/tickets/{id}", auth.requireCustomer(http.HandlerFunc(operations.customerTicketDetail)))
 	mux.Handle("POST /api/v1/customer/tickets/{id}/messages", auth.requireCustomer(http.HandlerFunc(operations.customerReplyTicket)))
+	// Public on purpose: nodes fetch the agent before they hold any credential.
+	mux.HandleFunc("GET /api/v1/agent/download/{file}", agentDownloads(deps.Config.AgentDownloadDir))
 	if deps.AgentGateway != nil {
 		// Authenticated by the agent bearer token inside the gateway.
 		mux.Handle("GET /api/v1/agent/connect", deps.AgentGateway)
@@ -129,6 +133,8 @@ func NewHandler(deps Dependencies) (http.Handler, error) {
 	mux.Handle("GET /api/v1/admin/overview", auth.require("customers:read", http.HandlerFunc(metrics.overview)))
 	mux.Handle("POST /api/v1/admin/nodes", auth.require("nodes:write", http.HandlerFunc(admin.createNode)))
 	mux.Handle("POST /api/v1/admin/nodes/{id}/test", auth.require("nodes:write", http.HandlerFunc(admin.testNode)))
+	mux.Handle("PUT /api/v1/admin/nodes/{id}", auth.require("nodes:write", http.HandlerFunc(admin.updateNode)))
+	mux.Handle("DELETE /api/v1/admin/nodes/{id}", auth.require("nodes:write", http.HandlerFunc(admin.deleteNode)))
 	mux.Handle("GET /api/v1/admin/plans", auth.require("plans:read", http.HandlerFunc(admin.listPlans)))
 	mux.Handle("GET /api/v1/admin/templates", auth.require("plans:read", http.HandlerFunc(admin.listTemplates)))
 	mux.Handle("POST /api/v1/admin/plans", auth.require("plans:write", http.HandlerFunc(admin.createPlan)))

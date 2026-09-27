@@ -1164,7 +1164,7 @@ function CustomerProfile({ customer }: { customer: CustomerIdentity }) {
         <div>
           <p className="eyebrow">ACCOUNT</p>
           <h2>账户资料与安全</h2>
-          <p>管理个人账户身份及 TOTP 二步验证设置。</p>
+          <p>管理个人账户身份、登录密码及 TOTP 二步验证设置。</p>
         </div>
       </div>
 
@@ -1240,6 +1240,8 @@ function SecuritySettings({ enabled: initialEnabled, customer = false }: { enabl
   }
 
   return (
+    <>
+    <PasswordSettings customer={customer} />
     <div className="panel security-panel">
       <div className="panel-heading">
         <div>
@@ -1306,6 +1308,62 @@ function SecuritySettings({ enabled: initialEnabled, customer = false }: { enabl
         </>
       )}
     </div>
+    </>
+  )
+}
+
+function PasswordSettings({ customer }: { customer: boolean }) {
+  const [current, setCurrent] = useState('')
+  const [next, setNext] = useState('')
+  const [repeat, setRepeat] = useState('')
+  const [message, setMessage] = useState('')
+  const [error, setError] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  async function submit(event: FormEvent) {
+    event.preventDefault()
+    setMessage('')
+    if (next !== repeat) {
+      setError('两次输入的新密码不一致')
+      return
+    }
+    setSaving(true)
+    setError('')
+    try {
+      await api(customer ? '/api/v1/customer/auth/password' : '/api/v1/auth/password', {
+        method: 'POST',
+        body: JSON.stringify({ current_password: current, new_password: next }),
+      })
+      setCurrent('')
+      setNext('')
+      setRepeat('')
+      setMessage('密码已更新，其他设备上的登录已全部退出。')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '修改失败')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <form className="panel security-panel" onSubmit={submit}>
+      <div className="panel-heading">
+        <div>
+          <p className="eyebrow">PASSWORD</p>
+          <h3>修改登录密码</h3>
+        </div>
+      </div>
+      {error && <div className="form-error">{error}</div>}
+      {message && <div className="form-success">{message}</div>}
+      <div className="password-fields">
+        <Field label="当前密码" value={current} onChange={setCurrent} type="password" autoComplete="current-password" />
+        <Field label="新密码" value={next} onChange={setNext} type="password" autoComplete="new-password" hint="至少 12 个字符" />
+        <Field label="确认新密码" value={repeat} onChange={setRepeat} type="password" autoComplete="new-password" />
+      </div>
+      <button className="primary-button compact" disabled={saving || !current || !next || !repeat}>
+        {saving ? '正在保存…' : '更新密码'}
+      </button>
+    </form>
   )
 }
 
@@ -2865,7 +2923,7 @@ function ServicesView() {
                     <small>{service.plan_name}</small>
                   </td>
                   <td>
-                    {service.node_name || '等待调度'}
+                    {service.node_name || (service.status === 'terminated' ? '—' : '等待调度')}
                     <small>{service.region_name}</small>
                   </td>
                   <td><StatusBadge status={service.status} /></td>
@@ -2881,7 +2939,7 @@ function ServicesView() {
                     <code>{service.primary_ipv4 || '—'}</code>
                     <small>{service.primary_ipv6}</small>
                   </td>
-                  <td>{service.next_due_at ? new Date(service.next_due_at).toLocaleDateString() : '—'}</td>
+                  <td>{service.next_due_at && service.status !== 'terminated' ? new Date(service.next_due_at).toLocaleDateString() : '—'}</td>
                   <td>
                     <div className="row-actions">
                       {(service.status === 'active' || service.status === 'overdue') && (
@@ -2975,7 +3033,19 @@ function NodesView() {
   const [showForm, setShowForm] = useState(false)
   const [error, setError] = useState('')
   const [testing, setTesting] = useState('')
+  const [editing, setEditing] = useState<NodeRecord | null>(null)
   const [providers, setProviders] = useState<ProviderTypeRecord[]>([])
+
+  async function removeNode(node: NodeRecord) {
+    if (!window.confirm(`确认删除节点【${node.name}】？仅在节点上没有未终止的服务时才能删除。`)) return
+    setError('')
+    try {
+      await api(`/api/v1/admin/nodes/${node.id}`, { method: 'DELETE' })
+      await load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '删除失败')
+    }
+  }
 
   useEffect(() => {
     api<ProviderTypeRecord[]>('/api/v1/admin/provider-types').then(setProviders).catch(() => undefined)
@@ -3009,17 +3079,23 @@ function NodesView() {
         eyebrow="PROVIDER INTEGRATIONS"
         title="虚拟化节点对接"
         description="统一纳管宿主机：CLICD 与 LXDAPI 通过 API 对接，Hatch Agent 由宿主机主动连入。所有对接方式共用调度与账务模型。"
-        action={() => setShowForm(true)}
+        action={() => { setEditing(null); setShowForm(true) }}
         actionLabel="新增节点对接"
       />
 
       {error && <div className="form-error" role="alert">{error}</div>}
 
-      {showForm && (
+      {(showForm || editing) && (
         <NodeForm
-          onClose={() => setShowForm(false)}
+          key={editing?.id ?? 'new'}
+          node={editing ?? undefined}
+          onClose={() => {
+            setShowForm(false)
+            setEditing(null)
+          }}
           onCreated={() => {
             setShowForm(false)
+            setEditing(null)
             load()
           }}
         />
@@ -3078,6 +3154,10 @@ function NodesView() {
                     <RefreshCw size={13} />
                     {testing === node.id ? '测试连通中…' : '测试连通性'}
                   </button>
+                  <div className="row-actions">
+                    <button className="text-button" onClick={() => { setShowForm(false); setEditing(node) }}>编辑</button>
+                    <button className="text-button danger" onClick={() => void removeNode(node)}>删除</button>
+                  </div>
                 </td>
               </tr>
             ))}
@@ -3093,17 +3173,22 @@ function NodesView() {
   )
 }
 
-function NodeForm({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
+function NodeForm({ node, onClose, onCreated }: { node?: NodeRecord; onClose: () => void; onCreated: () => void }) {
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
   const [types, setTypes] = useState<ProviderTypeRecord[]>([])
-  const [selected, setSelected] = useState('clicd')
+  const [selected, setSelected] = useState(node?.provider_type ?? 'clicd')
+  const editing = Boolean(node)
+  const existingOption = (key: string) => {
+    const value = node?.provider_options?.[key]
+    return Array.isArray(value) ? value.join(',') : value === undefined || value === null ? '' : String(value)
+  }
 
   useEffect(() => {
     api<ProviderTypeRecord[]>('/api/v1/admin/provider-types')
       .then((items) => {
         setTypes(items)
-        if (items.length > 0 && !items.some((item) => item.type === 'clicd')) setSelected(items[0].type)
+        if (!node && items.length > 0 && !items.some((item) => item.type === 'clicd')) setSelected(items[0].type)
       })
       .catch((err: Error) => setError(err.message))
   }, [])
@@ -3123,12 +3208,11 @@ function NodeForm({ onClose, onCreated }: { onClose: () => void; onCreated: () =
       providerOptions[field.key] = field.kind === 'bool' ? data.get(name) === 'on' : String(data.get(name) ?? '')
     }
     try {
-      await api('/api/v1/admin/nodes', {
-        method: 'POST',
+      await api(node ? `/api/v1/admin/nodes/${node.id}` : '/api/v1/admin/nodes', {
+        method: node ? 'PUT' : 'POST',
         body: JSON.stringify({
-          provider_type: descriptor.type,
-          region_code: data.get('region_code'),
-          region_name: data.get('region_name'),
+          // Provider and region are fixed once a node exists.
+          ...(node ? {} : { provider_type: descriptor.type, region_code: data.get('region_code'), region_name: data.get('region_name') }),
           name: data.get('name'),
           base_url: descriptor.agent_managed ? '' : data.get('base_url'),
           api_key: data.get('api_key'),
@@ -3148,16 +3232,16 @@ function NodeForm({ onClose, onCreated }: { onClose: () => void; onCreated: () =
     <div className="inline-form">
       <div className="inline-form-heading">
         <div>
-          <h3>新增虚拟化节点对接</h3>
-          <p>配置节点访问端点并验证连通性，所有通信密钥将加密存储。</p>
+          <h3>{editing ? `编辑节点 ${node?.name}` : '新增虚拟化节点对接'}</h3>
+          <p>{editing ? '保存前会用新配置重新验证节点连接；对接方式与地域不可修改。' : '配置节点访问端点并验证连通性，所有通信密钥将加密存储。'}</p>
         </div>
         <button className="icon-button" onClick={onClose}><X size={18} /></button>
       </div>
 
-      <form className="form-grid" onSubmit={submit} key={selected}>
+      <form className="form-grid" onSubmit={submit} key={`${selected}-${types.length}`}>
         <label>
           <span>对接方式</span>
-          <select name="provider_type" value={selected} onChange={(event) => setSelected(event.target.value)}>
+          <select name="provider_type" value={selected} disabled={editing} onChange={(event) => setSelected(event.target.value)}>
             {types.map((item) => (
               <option key={item.type} value={item.type}>
                 {item.name}（{item.virtualization_types.join(' / ').toUpperCase()}）
@@ -3167,25 +3251,25 @@ function NodeForm({ onClose, onCreated }: { onClose: () => void; onCreated: () =
         </label>
         <label>
           <span>节点标识名称</span>
-          <input name="name" required placeholder="node-sha-01" />
+          <input name="name" required placeholder="node-sha-01" defaultValue={node?.name} />
         </label>
         <label>
           <span>地域标识代号</span>
-          <input name="region_code" required placeholder="SHA" />
+          <input name="region_code" required placeholder="SHA" defaultValue={node?.region_code} disabled={editing} />
         </label>
         <label>
           <span>地域中文名称</span>
-          <input name="region_name" required placeholder="华东上海" />
+          <input name="region_name" required placeholder="华东上海" defaultValue={node?.region_name} disabled={editing} />
         </label>
         {descriptor && !descriptor.agent_managed && (
           <label>
             <span>API 接口根地址</span>
-            <input name="base_url" type="url" required placeholder={descriptor.base_url_hint} />
+            <input name="base_url" type="url" required placeholder={descriptor.base_url_hint} defaultValue={node?.base_url} />
           </label>
         )}
         <label>
-          <span>{descriptor?.credential_label ?? 'API Key'}</span>
-          <input name="api_key" type="password" required autoComplete="off" />
+          <span>{descriptor?.credential_label ?? 'API Key'}{editing ? '（留空保持不变）' : ''}</span>
+          <input name="api_key" type="password" required={!editing} autoComplete="off" />
         </label>
         {descriptor?.agent_managed && (
           <p className="form-hint wide">该节点由 Agent 主动连入。先在宿主机安装 Agent 并连接到本站，再填写 Agent 安装时显示的令牌完成接入。</p>
@@ -3193,7 +3277,7 @@ function NodeForm({ onClose, onCreated }: { onClose: () => void; onCreated: () =
         {options.map((field) =>
           field.kind === 'bool' ? (
             <label className="checkbox" key={field.key} title={field.help}>
-              <input type="checkbox" name={`option_${field.key}`} /> {field.label}
+              <input type="checkbox" name={`option_${field.key}`} defaultChecked={node?.provider_options?.[field.key] === true} /> {field.label}
             </label>
           ) : (
             <label key={field.key} title={field.help}>
@@ -3203,6 +3287,7 @@ function NodeForm({ onClose, onCreated }: { onClose: () => void; onCreated: () =
                 type={field.kind === 'number' ? 'number' : 'text'}
                 required={field.required}
                 placeholder={field.placeholder}
+                defaultValue={existingOption(field.key)}
               />
               {field.help && <small>{field.help}</small>}
             </label>
@@ -3212,7 +3297,7 @@ function NodeForm({ onClose, onCreated }: { onClose: () => void; onCreated: () =
           <legend>支持的虚拟化技术</legend>
           {(descriptor?.virtualization_types ?? []).map((kind, index) => (
             <label className="checkbox" key={kind}>
-              <input type="checkbox" name="virtualization_types" value={kind} defaultChecked={index === 0} /> {virtualizationLabel(kind)}
+              <input type="checkbox" name="virtualization_types" value={kind} defaultChecked={node ? node.virtualization_types.includes(kind) : index === 0} /> {virtualizationLabel(kind)}
             </label>
           ))}
         </fieldset>
@@ -3222,7 +3307,7 @@ function NodeForm({ onClose, onCreated }: { onClose: () => void; onCreated: () =
         <div className="form-actions wide">
           <button type="button" className="secondary-button" onClick={onClose}>取消</button>
           <button className="primary-button" disabled={saving || !descriptor}>
-            {saving ? '正在测试并接入…' : '验证并接入节点'}
+            {saving ? '正在验证…' : editing ? '验证并保存' : '验证并接入节点'}
           </button>
         </div>
       </form>

@@ -306,3 +306,27 @@ func (s *AuthStore) WriteSecurityAudit(ctx context.Context, userID, actorType, a
 	_, err := s.db.Exec(ctx, `INSERT INTO audit_logs(actor_type,actor_id,action,target_type,target_id,ip,user_agent) VALUES($2,$1,$3,'user',$1,nullif($4,'')::inet,$5)`, userID, actorType, action, ip, userAgent)
 	return err
 }
+
+// PasswordHash returns a user's current password hash.
+func (s *AuthStore) PasswordHash(ctx context.Context, userID string) (string, error) {
+	var hash string
+	err := s.db.QueryRow(ctx, `SELECT password_hash FROM users WHERE id=$1`, userID).Scan(&hash)
+	return hash, err
+}
+
+// ChangePassword replaces the password and signs out every other session,
+// keeping only the one identified by keepTokenHash.
+func (s *AuthStore) ChangePassword(ctx context.Context, userID, passwordHash string, keepTokenHash []byte) error {
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, `UPDATE users SET password_hash=$2,updated_at=now() WHERE id=$1`, userID, passwordHash); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM login_sessions WHERE user_id=$1 AND token_hash<>$2`, userID, keepTokenHash); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}

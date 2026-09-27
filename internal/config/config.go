@@ -29,7 +29,9 @@ type Config struct {
 	// InternalURL is how other API instances reach this one to forward Hatch
 	// agent requests. Empty disables forwarding (single instance); "auto"
 	// uses this host's first private IPv4 and the HTTP port.
-	InternalURL          string
+	InternalURL string
+	// AgentDownloadDir holds the Hatch agent release bundled with the image.
+	AgentDownloadDir     string
 	WorkerPollInterval   time.Duration
 	ReconcileInterval    time.Duration
 	LifecycleInterval    time.Duration
@@ -54,6 +56,7 @@ func Load() (Config, error) {
 		MetricsToken:              strings.TrimSpace(os.Getenv("METRICS_TOKEN")),
 		PublicURL:                 env("PUBLIC_URL", "http://localhost:8080"),
 		InternalURL:               strings.TrimSpace(os.Getenv("INTERNAL_URL")),
+		AgentDownloadDir:          env("AGENT_DOWNLOAD_DIR", "/app/hatch-agent"),
 	}
 	var err error
 	cfg.WorkerPollInterval, err = durationEnv("WORKER_POLL_INTERVAL", 3*time.Second)

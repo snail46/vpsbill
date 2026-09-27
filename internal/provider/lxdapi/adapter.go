@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"math/big"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"sort"
 	"strconv"
@@ -21,6 +22,7 @@ const Type = "lxdapi"
 // Options are the per-node settings LXDAPI's system API cannot report itself.
 type Options struct {
 	PublicIPv4     string   `json:"public_ipv4"`
+	NATForwardIP   string   `json:"nat_forward_ip"`
 	NATInterface   string   `json:"nat_interface"`
 	PortRangeStart int      `json:"port_range_start"`
 	PortRangeEnd   int      `json:"port_range_end"`
@@ -40,6 +42,7 @@ func init() {
 		Options: []provider.OptionField{
 			{Key: "public_ipv4", Label: "NAT 公网 IPv4", Kind: "text", Required: true, Placeholder: "203.0.113.10"},
 			{Key: "nat_interface", Label: "NAT 出口网卡", Kind: "text", Required: true, Placeholder: "eth0"},
+			{Key: "nat_forward_ip", Label: "NAT 网卡 IP", Kind: "text", Placeholder: "10.0.0.5", Help: "网卡上的 IP 与公网 IP 不同时填写（服务商 1:1 NAT，如甲骨文），与 LXDAPI NAT 配置的「网卡IP」一致；留空则使用公网 IPv4"},
 			{Key: "port_range_start", Label: "端口映射起始端口", Kind: "number", Required: true, Placeholder: "20000"},
 			{Key: "port_range_end", Label: "端口映射结束端口", Kind: "number", Required: true, Placeholder: "60000"},
 			{Key: "images", Label: "可售镜像别名", Kind: "list", Required: true, Placeholder: "debian12,ubuntu24", Help: "LXDAPI 系统接口不提供镜像列表，填写节点上已导入的镜像别名，逗号分隔"},
@@ -196,20 +199,20 @@ func (d *Driver) GetInstance(ctx context.Context, name string) (provider.Instanc
 	if status == "" {
 		status = value.Status
 	}
+	// /api/system/ip lists dedicated addresses only; the container's own
+	// IPv4/IPv6 fields are interface addresses (bridge-private, link-local),
+	// so NAT instances are shown with the node's public address instead.
 	addresses := d.client.addresses(ctx, name)
-	ip := firstOf(addresses.IPv4, firstAddress(value.IPv4))
-	if ip == "" {
-		ip = d.options.PublicIPv4
-	}
-	ipv6 := firstOf(addresses.IPv6, firstAddress(value.IPv6))
+	ip := firstOf(addresses.IPv4, d.options.PublicIPv4)
+	ipv6 := firstOf(addresses.IPv6, publicIPv6(value.IPv6))
 	instance := provider.Instance{
-		ExternalID: strconv.FormatUint(uint64(value.ID), 10), Name: value.Name, Virtualization: "lxc", Status: status,
+		ExternalID: strconv.FormatUint(uint64(value.ID), 10), Name: value.Name, Virtualization: "lxc", Status: strings.ToLower(status),
 		Template: value.Image, IP: ip, IPv6: ipv6, VCPU: value.CPU, RAMMB: value.Memory,
 		DiskGB: value.Disk / 1024, PortMappingLimit: value.IPv4MappingLimit, MonthlyTrafficGB: value.TrafficLimit,
 		NetworkDownMbps: value.Ingress, NetworkUpMbps: value.Egress, InitialPassword: value.Password,
 	}
 	for _, mapping := range mappings {
-		instance.PortMappings = append(instance.PortMappings, toPortMapping(mapping))
+		instance.PortMappings = append(instance.PortMappings, d.toPortMapping(mapping))
 		if mapping.ContainerPort == 22 && instance.SSHPort == 0 {
 			instance.SSHPort = mapping.PublicPort
 		}
@@ -340,7 +343,7 @@ func (d *Driver) UpdatePortMapping(ctx context.Context, name string, index int, 
 	}
 	mapping.HostPort = existing.PublicPort
 	if err := d.allocate(ctx, name, mapping); err != nil {
-		if restoreErr := d.allocate(ctx, name, toPortMapping(existing)); restoreErr != nil {
+		if restoreErr := d.allocate(ctx, name, d.toPortMapping(existing)); restoreErr != nil {
 			return nil, fmt.Errorf("%w; restoring the previous mapping also failed: %v", err, restoreErr)
 		}
 		return nil, err
@@ -372,7 +375,7 @@ func (d *Driver) mappingAt(ctx context.Context, name string, index int) (portMap
 
 func (d *Driver) allocate(ctx context.Context, name string, mapping provider.PortMapping) error {
 	return d.client.do(ctx, http.MethodPost, "/api/system/port-mapping/allocate?version=v4", map[string]any{
-		"container_name": name, "interface": d.options.NATInterface, "public_ip": d.options.PublicIPv4,
+		"container_name": name, "interface": d.options.NATInterface, "public_ip": d.options.forwardIP(),
 		"public_port": mapping.HostPort, "container_port": mapping.ContainerPort,
 		"protocol": mapping.Protocol, "description": mapping.Description,
 	}, nil)
@@ -389,7 +392,7 @@ func (d *Driver) listMappings(ctx context.Context, name string) ([]provider.Port
 	}
 	result := make([]provider.PortMapping, 0, len(mappings))
 	for _, mapping := range mappings {
-		result = append(result, toPortMapping(mapping))
+		result = append(result, d.toPortMapping(mapping))
 	}
 	return result, nil
 }
@@ -420,22 +423,12 @@ func (d *Driver) InstanceTraffic(ctx context.Context, name string) (any, error) 
 // InstanceHistory is not offered by the LXDAPI system API.
 func (d *Driver) InstanceHistory(context.Context, string) (any, error) { return nil, nil }
 
-func toPortMapping(value portMapping) provider.PortMapping {
+func (d *Driver) toPortMapping(value portMapping) provider.PortMapping {
 	description := value.Description
 	if description == "" && value.ContainerPort == 22 {
 		description = "SSH"
 	}
-	return provider.PortMapping{ContainerPort: value.ContainerPort, HostPort: value.PublicPort, HostIP: value.PublicIP, Protocol: value.Protocol, Description: description}
-}
-
-// firstAddress returns the first address of LXDAPI's free-form address list.
-func firstAddress(value string) string {
-	for _, field := range strings.FieldsFunc(value, func(r rune) bool { return r == ',' || r == ' ' || r == ';' || r == '\n' }) {
-		if field = strings.Trim(field, `[]"`); field != "" {
-			return field
-		}
-	}
-	return ""
+	return provider.PortMapping{ContainerPort: value.ContainerPort, HostPort: value.PublicPort, HostIP: d.displayIP(value.PublicIP), Protocol: value.Protocol, Description: description}
 }
 
 const passwordAlphabet = "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"
@@ -489,4 +482,34 @@ func firstOf(values []string, fallback string) string {
 		return values[0]
 	}
 	return fallback
+}
+
+// publicIPv6 returns the first globally routable address in LXDAPI's
+// address list, skipping link-local and unique-local ones.
+func publicIPv6(value string) string {
+	for _, field := range strings.FieldsFunc(value, func(r rune) bool { return r == ',' || r == ' ' || r == ';' || r == '\n' }) {
+		addr, err := netip.ParseAddr(strings.Trim(field, `[]"`))
+		if err == nil && addr.Is6() && addr.IsGlobalUnicast() && !addr.IsPrivate() {
+			return addr.String()
+		}
+	}
+	return ""
+}
+
+// forwardIP is the address LXDAPI matches in its DNAT rules: the NIC address
+// when the provider maps the public IP 1:1 onto a private one (NAT hosts,
+// Oracle-style), otherwise the public address itself.
+func (o Options) forwardIP() string {
+	if o.NATForwardIP != "" {
+		return o.NATForwardIP
+	}
+	return o.PublicIPv4
+}
+
+// displayIP shows the public address for mappings bound to the forward IP.
+func (d *Driver) displayIP(ip string) string {
+	if ip == "" || ip == d.options.forwardIP() {
+		return d.options.PublicIPv4
+	}
+	return ip
 }

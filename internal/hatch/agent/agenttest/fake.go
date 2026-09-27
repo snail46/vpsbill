@@ -83,6 +83,7 @@ func (r *Runtime) setStatus(name, status string) error {
 func (r *Runtime) Start(_ context.Context, name string) error   { return r.setStatus(name, "running") }
 func (r *Runtime) Stop(_ context.Context, name string) error    { return r.setStatus(name, "stopped") }
 func (r *Runtime) Restart(_ context.Context, name string) error { return r.setStatus(name, "running") }
+
 // Pause and Resume reject repeated calls, like Incus and Podman do.
 func (r *Runtime) Pause(ctx context.Context, name string) error {
 	if state, err := r.State(ctx, name); err == nil && state.Status == "paused" {

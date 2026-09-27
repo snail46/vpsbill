@@ -417,3 +417,48 @@ func remoteIP(r *http.Request) string {
 	}
 	return ""
 }
+
+// changePassword checks the current password, stores the new one and signs
+// out the user's other sessions.
+func (a *authenticator) changePassword(w http.ResponseWriter, r *http.Request, userID, actorType string) {
+	var input struct {
+		CurrentPassword string `json:"current_password"`
+		NewPassword     string `json:"new_password"`
+	}
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	current, err := a.store.PasswordHash(r.Context(), userID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "internal_error"})
+		return
+	}
+	if valid, err := security.VerifyPassword(current, input.CurrentPassword); err != nil || !valid {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "invalid_password", "message": "当前密码不正确"})
+		return
+	}
+	hash, err := security.HashPassword(input.NewPassword)
+	if err != nil {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "validation_error", "message": err.Error()})
+		return
+	}
+	cookie, _ := r.Cookie(sessionCookieName)
+	var keep []byte
+	if cookie != nil {
+		keep = security.HashToken(cookie.Value)
+	}
+	if err := a.store.ChangePassword(r.Context(), userID, hash, keep); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "internal_error"})
+		return
+	}
+	_ = a.store.WriteSecurityAudit(r.Context(), userID, actorType, "password.changed", remoteIP(r), r.UserAgent())
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (a *authenticator) staffChangePassword(w http.ResponseWriter, r *http.Request) {
+	a.changePassword(w, r, principalFromContext(r.Context()).UserID, "staff")
+}
+
+func (a *authenticator) customerChangePassword(w http.ResponseWriter, r *http.Request) {
+	a.changePassword(w, r, customerPrincipalFromContext(r.Context()).UserID, "customer")
+}

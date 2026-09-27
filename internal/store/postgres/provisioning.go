@@ -293,7 +293,10 @@ func (s *ProvisioningStore) CompleteAction(ctx context.Context, jobID, workerID,
 	if err != nil {
 		return fmt.Errorf("complete leased action: %w", err)
 	}
-	if _, err := tx.Exec(ctx, "UPDATE services SET desired_runtime_status=CASE WHEN $3<>'' THEN $3 WHEN $2='restart' THEN NULL ELSE desired_runtime_status END,last_reconcile_error=NULL,updated_at=now() WHERE id=$1", serviceID, action, desired); err != nil {
+	// The target stays set until a runtime observation (portal read or
+	// reconcile) reaches it; a restart is only "done" once the instance is
+	// seen running again, not when the node accepts the request.
+	if _, err := tx.Exec(ctx, "UPDATE services SET desired_runtime_status=CASE WHEN $2<>'' THEN $2 ELSE desired_runtime_status END,last_reconcile_error=NULL,updated_at=now() WHERE id=$1", serviceID, desired); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)

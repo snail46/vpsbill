@@ -52,27 +52,28 @@ fib daddr type local tcp dport 20022 dnat to 10.20.30.254:22
 ## 宿主机准备
 
 - Linux + systemd + nftables（`nft` 命令）。Podman 限速还需要 `tc` 和 `nsenter`（iproute2、util-linux）。
-- **LXD**：网桥必须设置静态 `ipv4.address`（例如 `lxc network set lxdbr0 ipv4.address 10.20.30.1/24`）。Agent 从子网高位向下分配静态 IP，低位留给网桥 DHCP。在 LXD 中导入可售镜像并设置别名（`lxc image copy images:debian/12 local: --alias debian12`），别名就是套餐里的系统模板 ID。镜像需要带 sshd，推荐 `/cloud` 变体，或自行制作。
-- **Podman**：启用 rootful API 套接字（`systemctl enable --now podman.socket`）和开机拉起（`systemctl enable podman-restart.service`）。网络默认使用 `podman`，也可以用 `podman network create` 另建。镜像需要以 systemd 等 init 为入口并带 sshd，否则无法当作 VPS 使用。
+- **LXD**：网桥必须设置静态 `ipv4.address`（例如 `lxc network set lxdbr0 ipv4.address 10.20.30.1/24`）。Agent 从子网高位向下分配静态 IP，低位留给网桥 DHCP。在 LXD 中导入可售镜像并设置别名（`lxc image copy images:debian/12 local: --alias debian12`），别名就是套餐里的系统模板 ID。`images:` 上的官方镜像（包括 `/cloud` 变体）都不带 SSH 服务端；Agent 设置 root 密码时发现没有 sshd，会用镜像自带的包管理器（apt / dnf / apk）安装 `openssh-server`，所以实例需要能访问软件源，首次开通会多花半分钟左右。已经预装 sshd 的自制镜像不受影响。
+- **Incus**：与 LXD 相同，网桥也要有静态 `ipv4.address`（例如 `incus network create hatchbr0 ipv4.address=10.77.0.1/24 ipv4.nat=true ipv6.address=none`）。安装 Agent 时用 `--runtime incus --lxd-network hatchbr0`。
+- **Podman**：启用 rootful API 套接字（`systemctl enable --now podman.socket`）和开机拉起（`systemctl enable podman-restart.service`）。网络默认使用 `podman`，也可以用 `podman network create` 另建。Podman 默认网络是 `10.88.0.0/16`，如果宿主机已有网桥占用这个网段（例如某些 Incus 面板），请另建网络（`podman network create --subnet 10.89.0.0/24 hatchpod`），构建镜像时也加 `--network host`。镜像需要以 systemd 等 init 为入口并带 sshd，否则无法当作 VPS 使用。
 - 宿主机的 FORWARD 策略需要放行 DNAT 后的流量（Agent 自己的 forward 链已放行 `ct status dnat`）。
 - **IPv6**（可选）：给网桥配置公网 IPv6 前缀，例如 `lxc network set lxdbr0 ipv6.address 2001:db8:1::1/64 ipv6.nat false`，或 `podman network create --ipv6 --subnet 2001:db8:2::/64 vps`。Agent 在前缀内随机分配地址，防止被顺序扫描。前缀最好由服务商路由到宿主机；如果服务商把 /64 直接放在网卡链路上（on-link），在配置里设置 `"ipv6_ndp_interface": "eth0"`，Agent 会开启 `proxy_ndp` 并为每个实例地址发布邻居代理。套餐勾选 IPv6 后，节点网桥必须有 IPv6 子网，否则开通会被拒绝。
 
 ## 安装
 
-1. 从 CI 的 `hatch-agent` 构件下载对应架构的二进制和 `SHA256SUMS`，并校验：
+1. 在母鸡上以 root 执行。计费站的 API 镜像自带同版本的 Agent（amd64 / arm64），安装脚本会从 `/api/v1/agent/download/` 下载并按 `SHA256SUMS` 校验：
 
    ```sh
-   sha256sum -c SHA256SUMS --ignore-missing
+   curl -fsSL https://billing.example.com/api/v1/agent/download/install.sh | \
+     sh -s -- --server https://billing.example.com --runtime lxd,podman --public-ip 203.0.113.10
    ```
 
-2. 安装并生成令牌：
+   - `--runtime`：`lxd`、`incus`、`podman` 任意组合。宿主机用 Incus 时写 `incus`，Agent 会固定使用 `/var/lib/incus/unix.socket`；同一台机器同时装了 LXD snap 和 Incus 时必须这样写，否则自动探测会优先选中 LXD。
+   - `--lxd-network`、`--podman-network`：实例接入的网桥 / Podman 网络，默认 `lxdbr0`（Incus 为 `incusbr0`）和 `podman`。
+   - 计费站与母鸡是同一台机器时，`--server` 用 `http://127.0.0.1:端口`（只有回环地址允许 HTTP）。
 
-   ```sh
-   ./deploy/install-hatch-agent.sh --binary ./hatch-agent-linux-amd64 \
-     --server https://billing.example.com --runtime lxd,podman --public-ip 203.0.113.10
-   ```
+   也可以自己下载二进制后运行仓库里的 `deploy/install-hatch-agent.sh --binary ./hatch-agent-linux-amd64 ...`，参数相同。
 
-   脚本会写入 `/etc/hatch/agent.json`，打印令牌，并启用 `hatch-agent.service`。
+   脚本会写入 `/etc/hatch/agent.json`，打印令牌，并启用 `hatch-agent.service`。已有配置时保留原配置并重新打印令牌，所以同一条命令也用于升级 Agent。启动日志里的 `lxd_socket`、`lxd_network`、`podman_network` 是实际生效的值。
 
 3. 在计费后台「节点对接 → 新增节点」选择 **Hatch Agent**，填入令牌、地区和虚拟化类型（`lxc` / `podman`）。接入时会实时调用 Agent 验证连接。
 
@@ -98,7 +99,7 @@ fib daddr type local tcp dport 20022 dnat to 10.20.30.254:22
 }
 ```
 
-- `capacity` 不填时自动探测整机 CPU、内存和 `state_dir` 所在磁盘。建议按可售额度填写，给宿主机留余量。
+- `capacity` 不填时自动探测整机 CPU、内存；磁盘取 LXD/Incus 存储池的容量（只启用 Podman 时取 `state_dir` 所在磁盘）。建议按可售额度填写，给宿主机留余量。另外 `port_range_start`/`port_range_end` 不要和同机其他 NAT 面板（如 LXDAPI）的端口段重叠。
 - `server_url` 必须是 HTTPS（仅回环地址允许 HTTP，用于测试）。计费站点使用私有 CA 时，可以用 `ca_file` 指定。
 - 删除 `lxd` 或 `podman` 段落即可禁用对应运行时。
 

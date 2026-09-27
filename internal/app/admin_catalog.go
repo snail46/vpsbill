@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"sort"
 	"strings"
@@ -417,4 +418,96 @@ func validatePlan(plan postgres.Plan) string {
 
 func validVirtualization(value string) bool {
 	return value == "lxc" || value == "kvm" || value == "podman"
+}
+
+// updateNode edits a node's connection settings and re-verifies them against
+// the node before saving. The provider type and region cannot change; an empty
+// api_key keeps the stored credential.
+func (a *adminCatalog) updateNode(w http.ResponseWriter, r *http.Request) {
+	existing, err := a.store.NodeSecret(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "node_not_found"})
+		return
+	}
+	var input struct {
+		Name                string         `json:"name"`
+		BaseURL             string         `json:"base_url"`
+		APIKey              string         `json:"api_key"`
+		VirtualizationTypes []string       `json:"virtualization_types"`
+		ProviderOptions     map[string]any `json:"provider_options"`
+	}
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	descriptor, ok := provider.Lookup(existing.ProviderType)
+	if !ok {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "provider_unsupported", "message": "此对接方式在当前版本中不可用"})
+		return
+	}
+	if strings.TrimSpace(input.Name) == "" || len(input.VirtualizationTypes) == 0 || (!descriptor.AgentManaged && strings.TrimSpace(input.BaseURL) == "") {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "validation_error", "message": "节点名称、API 地址和虚拟化类型不能为空"})
+		return
+	}
+	for _, virtualization := range input.VirtualizationTypes {
+		if !containsString(descriptor.VirtualizationTypes, virtualization) {
+			writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "validation_error", "message": descriptor.Name + " 支持的虚拟化类型为 " + strings.Join(descriptor.VirtualizationTypes, " / ")})
+			return
+		}
+	}
+	credential, ciphertext := strings.TrimSpace(input.APIKey), []byte(nil)
+	if credential == "" {
+		if credential, err = a.box.Open(existing.APIKeyCiphertext); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "internal_error"})
+			return
+		}
+	} else if ciphertext, err = a.box.Seal(credential); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "internal_error"})
+		return
+	}
+	if descriptor.AgentManaged {
+		input.BaseURL = provider.AgentEndpoint(credential)
+		if input.BaseURL != existing.BaseURL && a.store.NodeExistsByEndpoint(r.Context(), input.BaseURL) {
+			writeJSON(w, http.StatusConflict, map[string]any{"error": "node_update_failed", "message": "该 Agent 令牌已接入其他节点"})
+			return
+		}
+	}
+	options, err := provider.NormalizeOptions(descriptor, input.ProviderOptions)
+	if err != nil {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "validation_error", "message": err.Error()})
+		return
+	}
+	driver, err := provider.Open(existing.ProviderType, provider.Config{BaseURL: input.BaseURL, Credential: credential, Options: options, Timeout: 12 * time.Second})
+	if err != nil {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "validation_error", "message": err.Error()})
+		return
+	}
+	info, err := driver.HostInfo(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "node_unreachable", "message": "无法验证 " + descriptor.Name + " 节点连接：" + err.Error()})
+		return
+	}
+	err = a.store.UpdateNode(r.Context(), existing.ID, postgres.UpdateNode{
+		Name: input.Name, BaseURL: input.BaseURL, APIKeyCiphertext: ciphertext, ProviderOptions: options,
+		VirtualizationTypes: input.VirtualizationTypes, Capacity: info.Raw,
+		CapacityVCPU: info.Capacity.VCPU, CapacityRAMMB: info.Capacity.RAMMB, CapacityDiskGB: info.Capacity.DiskGB,
+	})
+	if err != nil {
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "node_update_failed", "message": "节点名称可能已存在"})
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (a *adminCatalog) deleteNode(w http.ResponseWriter, r *http.Request) {
+	err := a.store.DeleteNode(r.Context(), r.PathValue("id"))
+	switch {
+	case errors.Is(err, postgres.ErrNodeNotFound):
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "node_not_found"})
+	case errors.Is(err, postgres.ErrNodeInUse):
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "node_in_use", "message": "节点上仍有未终止的服务，请先迁出或终止"})
+	case err != nil:
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "internal_error"})
+	default:
+		w.WriteHeader(http.StatusNoContent)
+	}
 }

@@ -78,7 +78,7 @@ func (s *MonitoringStore) Overview(ctx context.Context) (OperationsOverview, err
 	err := s.db.QueryRow(ctx, `SELECT
 		(SELECT count(*) FROM accounts WHERE status='active'),(SELECT count(*) FROM orders WHERE created_at>=now()-interval '30 days'),
 		(SELECT count(*) FROM services WHERE status<>'terminated'),(SELECT count(*) FROM services WHERE runtime_status='running'),
-		(SELECT count(*) FROM invoices WHERE status='open'),(SELECT count(*) FROM services WHERE status='overdue'),
+		(SELECT count(*) FROM invoices WHERE status='open'),(SELECT count(*) FROM services WHERE status IN ('overdue','suspended')),
 		(SELECT count(*) FROM nodes),(SELECT count(*) FROM nodes WHERE status='online'),
 		(SELECT count(*) FROM support_tickets WHERE status NOT IN ('resolved','closed')),
 		(SELECT count(*) FROM provisioning_jobs WHERE status IN ('pending','running')),(SELECT count(*) FROM provisioning_jobs WHERE status IN ('failed','dead')),

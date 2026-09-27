@@ -64,7 +64,9 @@ func (f *fakeNode) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		go func() {
 			time.Sleep(5 * time.Millisecond)
 			f.mu.Lock()
-			f.containers[name] = map[string]any{"ID": 7, "Name": name, "Image": body["image"], "Password": body["password"], "Memory": body["memory"], "Disk": body["disk"], "IPv4MappingLimit": body["ipv4_mapping_limit"]}
+			f.containers[name] = map[string]any{"ID": 7, "Name": name, "Image": body["image"], "Password": body["password"], "Memory": body["memory"], "Disk": body["disk"], "IPv4MappingLimit": body["ipv4_mapping_limit"], "Status": "Running",
+				// Real nodes report interface addresses: bridge-private IPv4, link-local IPv6.
+				"IPv4": `["10.66.0.5"]`, "IPv6": `["fe80::1","fd66:6666::5"]`}
 			f.tasks[id]["status"] = "success"
 			f.mu.Unlock()
 		}()
@@ -183,17 +185,21 @@ func jsonNumber(id uint) string {
 	return string(encoded)
 }
 
-func openDriver(t *testing.T, node *fakeNode) provider.Driver {
+func openDriver(t *testing.T, node *fakeNode, customize ...func(*Options)) provider.Driver {
 	t.Helper()
 	pollInterval = time.Millisecond
 	server := httptest.NewTLSServer(node)
 	t.Cleanup(server.Close)
 	sum := sha256.Sum256(server.Certificate().Raw)
-	options, _ := json.Marshal(Options{
+	settings := Options{
 		PublicIPv4: "203.0.113.10", NATInterface: "eth0", PortRangeStart: 30000, PortRangeEnd: 30002,
 		Images: []string{"debian12"}, CapacityVCPU: 8, CapacityRAMMB: 16384, CapacityDiskGB: 400,
 		TLSFingerprint: hex.EncodeToString(sum[:]),
-	})
+	}
+	for _, apply := range customize {
+		apply(&settings)
+	}
+	options, _ := json.Marshal(settings)
 	driver, err := provider.Open(Type, provider.Config{BaseURL: server.URL, Credential: "hash", Options: options, Timeout: 2 * time.Second})
 	if err != nil {
 		t.Fatal(err)
@@ -211,7 +217,7 @@ func TestEnsureInstanceWaitsForTaskAndIsIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !result.Created || result.Instance.ExternalID != "7" || result.Instance.IP != "203.0.113.10" || result.Instance.InitialPassword == "" {
+	if !result.Created || result.Instance.ExternalID != "7" || result.Instance.IP != "203.0.113.10" || result.Instance.IPv6 != "" || result.Instance.Status != "running" || result.Instance.InitialPassword == "" {
 		t.Fatalf("unexpected instance %+v", result)
 	}
 	if node.lastCreate["disk"] != float64(10240) || node.lastCreate["ipv4_mapping_limit"] != float64(5) || node.lastCreate["username"] != "vpsbill" {
@@ -337,5 +343,21 @@ func TestTerminalBridgesLXDAPIConsole(t *testing.T) {
 	n, err = session.Read(buffer)
 	if err != nil || string(buffer[:n]) != "input:ls\r" {
 		t.Fatalf("input not framed as LXDAPI expects: %q, %v", buffer[:n], err)
+	}
+}
+
+func TestMappingsBehindOneToOneNAT(t *testing.T) {
+	node := newFakeNode()
+	node.containers["svc-1"] = map[string]any{"ID": 7, "Name": "svc-1"}
+	node.nextID = 200
+	driver := openDriver(t, node, func(o *Options) { o.NATForwardIP = "10.0.0.5" })
+	mapper := driver.(provider.PortMapper)
+	mappings, err := mapper.AddPortMapping(context.Background(), "svc-1", provider.PortMapping{ContainerPort: 80, HostPort: 30001, Protocol: "tcp"})
+	if err != nil || len(mappings) != 1 {
+		t.Fatalf("add failed: %v, %v", mappings, err)
+	}
+	// LXDAPI must match the NIC address, while customers see the public one.
+	if node.mappings[0].PublicIP != "10.0.0.5" || mappings[0].HostIP != "203.0.113.10" {
+		t.Fatalf("forward=%q shown=%q", node.mappings[0].PublicIP, mappings[0].HostIP)
 	}
 }
