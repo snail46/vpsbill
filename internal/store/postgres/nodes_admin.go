@@ -79,3 +79,16 @@ func (s *CatalogStore) DeleteNode(ctx context.Context, id string) error {
 	}
 	return tx.Commit(ctx)
 }
+
+// UpdateNodeBilling records the host's rental expiry (YYYY-MM-DD, empty to
+// clear) and monthly transfer allowance (0 for none).
+func (s *CatalogStore) UpdateNodeBilling(ctx context.Context, id, expiresAt string, trafficQuotaGB int) error {
+	command, err := s.db.Exec(ctx, `UPDATE nodes SET expires_at=nullif($2,'')::date,traffic_quota_gb=$3,updated_at=now() WHERE id=$1`, id, expiresAt, trafficQuotaGB)
+	if err != nil {
+		return err
+	}
+	if command.RowsAffected() == 0 {
+		return ErrNodeNotFound
+	}
+	return nil
+}

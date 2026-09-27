@@ -1,17 +1,38 @@
 package app
 
 import (
+	"context"
 	"errors"
 	"net/http"
+	"regexp"
 	"strings"
 
+	"vpsbill/internal/notify"
+	"vpsbill/internal/settings"
 	"vpsbill/internal/store/postgres"
 )
 
-type operationsAPI struct{ store *postgres.OperationsStore }
+type operationsAPI struct {
+	store    *postgres.OperationsStore
+	settings *settings.Manager
+	notifier *notify.Notifier
+}
 
-func newOperationsAPI(store *postgres.OperationsStore) *operationsAPI {
-	return &operationsAPI{store: store}
+func newOperationsAPI(store *postgres.OperationsStore, runtime *settings.Manager, notifier *notify.Notifier) *operationsAPI {
+	return &operationsAPI{store: store, settings: runtime, notifier: notifier}
+}
+
+var uuidPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+
+func (a *operationsAPI) maxAttachmentMB() int { return a.settings.Current().TicketAttachmentMaxMB }
+
+// notifyAsync runs a notification outside the request so a slow database
+// query for recipients never delays the response.
+func (a *operationsAPI) notifyAsync(send func(ctx context.Context, notifier *notify.Notifier)) {
+	if a.notifier == nil {
+		return
+	}
+	go send(context.Background(), a.notifier)
 }
 
 func (a *operationsAPI) customerListTickets(w http.ResponseWriter, r *http.Request) {
@@ -31,15 +52,20 @@ func (a *operationsAPI) customerCreateTicket(w http.ResponseWriter, r *http.Requ
 		Priority  string `json:"priority"`
 		Body      string `json:"body"`
 	}
-	if !decodeJSON(w, r, &input) {
+	uploads, ok := readTicketRequest(w, r, a.maxAttachmentMB(), &input)
+	if !ok {
 		return
 	}
 	identity := customerPrincipalFromContext(r.Context())
-	result, err := a.store.CreateTicket(r.Context(), identity.AccountID, identity.UserID, strings.TrimSpace(input.ServiceID), input.Subject, input.Priority, input.Body, remoteIP(r), r.UserAgent())
+	result, err := a.store.CreateTicket(r.Context(), identity.AccountID, identity.UserID, strings.TrimSpace(input.ServiceID), input.Subject, input.Priority, input.Body, remoteIP(r), r.UserAgent(), uploads...)
 	if err != nil {
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "ticket_create_failed", "message": "工单主题、优先级、内容或关联服务无效"})
 		return
 	}
+	message := result.Messages[0]
+	a.notifyAsync(func(ctx context.Context, notifier *notify.Notifier) {
+		notifier.TicketCreated(ctx, result.Ticket.ID, message.ID, message.Body)
+	})
 	writeJSON(w, http.StatusCreated, map[string]any{"data": result})
 }
 
@@ -61,12 +87,45 @@ func (a *operationsAPI) customerReplyTicket(w http.ResponseWriter, r *http.Reque
 	var input struct {
 		Body string `json:"body"`
 	}
-	if !decodeJSON(w, r, &input) {
+	uploads, ok := readTicketRequest(w, r, a.maxAttachmentMB(), &input)
+	if !ok {
 		return
 	}
 	identity := customerPrincipalFromContext(r.Context())
-	message, err := a.store.ReplyTicket(r.Context(), r.PathValue("id"), identity.AccountID, "customer", identity.UserID, input.Body, false)
+	ticketID := r.PathValue("id")
+	message, err := a.store.ReplyTicket(r.Context(), ticketID, identity.AccountID, "customer", identity.UserID, input.Body, false, uploads...)
+	if err == nil {
+		a.notifyAsync(func(ctx context.Context, notifier *notify.Notifier) {
+			notifier.TicketReplied(ctx, ticketID, message.ID, "customer", message.Body, false)
+		})
+	}
 	writeTicketMutation(w, message, err)
+}
+
+func (a *operationsAPI) customerAttachment(w http.ResponseWriter, r *http.Request) {
+	a.attachment(w, r, customerPrincipalFromContext(r.Context()).AccountID)
+}
+
+func (a *operationsAPI) adminAttachment(w http.ResponseWriter, r *http.Request) {
+	a.attachment(w, r, "")
+}
+
+func (a *operationsAPI) attachment(w http.ResponseWriter, r *http.Request, accountID string) {
+	ticketID, attachmentID := r.PathValue("id"), r.PathValue("attachment")
+	if !uuidPattern.MatchString(ticketID) || !uuidPattern.MatchString(attachmentID) {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "attachment_not_found"})
+		return
+	}
+	item, data, err := a.store.TicketAttachmentData(r.Context(), ticketID, attachmentID, accountID)
+	if errors.Is(err, postgres.ErrAttachmentNotFound) {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "attachment_not_found"})
+		return
+	}
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "internal_error"})
+		return
+	}
+	serveAttachment(w, item, data)
 }
 
 func (a *operationsAPI) adminListTickets(w http.ResponseWriter, r *http.Request) {
@@ -96,11 +155,18 @@ func (a *operationsAPI) adminReplyTicket(w http.ResponseWriter, r *http.Request)
 		Body     string `json:"body"`
 		Internal bool   `json:"internal"`
 	}
-	if !decodeJSON(w, r, &input) {
+	uploads, ok := readTicketRequest(w, r, a.maxAttachmentMB(), &input)
+	if !ok {
 		return
 	}
 	identity := principalFromContext(r.Context())
-	message, err := a.store.ReplyTicket(r.Context(), r.PathValue("id"), "", "staff", identity.UserID, input.Body, input.Internal)
+	ticketID := r.PathValue("id")
+	message, err := a.store.ReplyTicket(r.Context(), ticketID, "", "staff", identity.UserID, input.Body, input.Internal, uploads...)
+	if err == nil {
+		a.notifyAsync(func(ctx context.Context, notifier *notify.Notifier) {
+			notifier.TicketReplied(ctx, ticketID, message.ID, "staff", message.Body, message.Internal)
+		})
+	}
 	writeTicketMutation(w, message, err)
 }
 

@@ -33,6 +33,9 @@ export type NodeRecord = {
   capacity_ram_mb: number
   capacity_disk_gb: number
   last_seen_at: string | null
+  expires_at?: string
+  traffic_quota_gb?: number
+  traffic_used_bytes?: number
 }
 
 export type ProviderOptionField = {
@@ -314,7 +317,16 @@ export type TicketRecord = {
   created_at: string
 }
 
-export type TicketMessageRecord = { id: string; author_type: string; author_name: string; body: string; internal: boolean; created_at: string }
+export type TicketAttachmentRecord = { id: string; file_name: string; content_type: string; size_bytes: number }
+export type TicketMessageRecord = {
+  id: string
+  author_type: string
+  author_name: string
+  body: string
+  internal: boolean
+  created_at: string
+  attachments?: TicketAttachmentRecord[]
+}
 export type TicketDetailRecord = { ticket: TicketRecord; messages: TicketMessageRecord[] }
 export type AuditLogRecord = { id: number; actor_type: string; actor_id?: string; action: string; target_type: string; target_id?: string; ip?: string; user_agent?: string; metadata: Record<string, unknown>; created_at: string }
 
@@ -330,7 +342,7 @@ function csrfToken() {
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers)
   headers.set('Accept', 'application/json')
-  if (init.body) headers.set('Content-Type', 'application/json')
+  if (typeof init.body === 'string') headers.set('Content-Type', 'application/json')
   if (init.method && !['GET', 'HEAD'].includes(init.method.toUpperCase())) {
     headers.set('X-CSRF-Token', csrfToken())
   }

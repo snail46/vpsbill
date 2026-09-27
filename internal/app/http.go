@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"vpsbill/internal/config"
+	"vpsbill/internal/notify"
 	"vpsbill/internal/security"
 	"vpsbill/internal/settings"
 	"vpsbill/internal/store/postgres"
@@ -25,6 +26,8 @@ type Dependencies struct {
 	AgentGateway http.Handler
 	// AgentInternal serves agent requests forwarded by other API instances.
 	AgentInternal http.Handler
+	// Notifier queues notification mail; nil builds one from DB and Settings.
+	Notifier *notify.Notifier
 }
 
 func NewHandler(deps Dependencies) (http.Handler, error) {
@@ -48,7 +51,11 @@ func NewHandler(deps Dependencies) (http.Handler, error) {
 	adminSettings := adminSettings{settings: deps.Settings}
 	automation := newAdminAutomation(provisioningStore)
 	portal := newCustomerPortal(deps.Settings, portalStore, billingStore, catalogStore, secretBox, newConsoleTickets(deps.Config.SessionSecret+deps.Config.EncryptionKey))
-	operations := newOperationsAPI(operationsStore)
+	notifier := deps.Notifier
+	if notifier == nil {
+		notifier = notify.New(postgres.NewMailStore(deps.DB), deps.Settings, secretBox, deps.Logger)
+	}
+	operations := newOperationsAPI(operationsStore, deps.Settings, notifier)
 	metrics := newMetricsAPI(monitoringStore, deps.Settings)
 	install := &installer{settings: deps.Settings, auth: auth, logger: deps.Logger}
 
@@ -68,10 +75,11 @@ func NewHandler(deps Dependencies) (http.Handler, error) {
 	mux.HandleFunc("GET /api/v1/meta", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"data": map[string]any{
-				"name":                deps.Settings.Current().AppName,
-				"environment":         deps.Config.Environment,
-				"installed":           deps.Settings.Current().Installed,
-				"password_reset_mail": deps.Settings.Current().SMTP.Configured(),
+				"name":                     deps.Settings.Current().AppName,
+				"environment":              deps.Config.Environment,
+				"installed":                deps.Settings.Current().Installed,
+				"password_reset_mail":      deps.Settings.Current().SMTP.Configured(),
+				"ticket_attachment_max_mb": deps.Settings.Current().TicketAttachmentMaxMB,
 				"capabilities": []string{
 					"accounts", "catalog", "billing", "provisioning", "clicd", "support", "audit", "notifications",
 				},
@@ -118,6 +126,7 @@ func NewHandler(deps Dependencies) (http.Handler, error) {
 	mux.Handle("POST /api/v1/customer/tickets", auth.requireCustomer(http.HandlerFunc(operations.customerCreateTicket)))
 	mux.Handle("GET /api/v1/customer/tickets/{id}", auth.requireCustomer(http.HandlerFunc(operations.customerTicketDetail)))
 	mux.Handle("POST /api/v1/customer/tickets/{id}/messages", auth.requireCustomer(http.HandlerFunc(operations.customerReplyTicket)))
+	mux.Handle("GET /api/v1/customer/tickets/{id}/attachments/{attachment}", auth.requireCustomer(http.HandlerFunc(operations.customerAttachment)))
 	// Public on purpose: nodes fetch the agent before they hold any credential.
 	mux.HandleFunc("GET /api/v1/agent/download/{file}", agentDownloads(deps.Config.AgentDownloadDir))
 	if deps.AgentGateway != nil {
@@ -165,6 +174,7 @@ func NewHandler(deps Dependencies) (http.Handler, error) {
 	mux.Handle("GET /api/v1/admin/tickets", auth.require("tickets:read", http.HandlerFunc(operations.adminListTickets)))
 	mux.Handle("GET /api/v1/admin/tickets/{id}", auth.require("tickets:read", http.HandlerFunc(operations.adminTicketDetail)))
 	mux.Handle("POST /api/v1/admin/tickets/{id}/messages", auth.require("tickets:write", http.HandlerFunc(operations.adminReplyTicket)))
+	mux.Handle("GET /api/v1/admin/tickets/{id}/attachments/{attachment}", auth.require("tickets:read", http.HandlerFunc(operations.adminAttachment)))
 	mux.Handle("PATCH /api/v1/admin/tickets/{id}", auth.require("tickets:write", http.HandlerFunc(operations.adminUpdateTicket)))
 	mux.Handle("GET /api/v1/admin/audit-logs", auth.require("audit:read", http.HandlerFunc(operations.adminAuditLogs)))
 	mux.HandleFunc("POST /api/v1/webhooks/payments/generic", billing.paymentWebhook)

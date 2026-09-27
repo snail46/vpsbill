@@ -168,6 +168,34 @@ func TestBillingLifecycleIntegration(t *testing.T) {
 	if _, err = operations.ReplyTicket(ctx, ticket.Ticket.ID, "", "staff", admin.UserID, "Verified.", false); err != nil {
 		t.Fatal(err)
 	}
+	// Image attachments: customers reach their own, never internal notes'.
+	image := AttachmentUpload{FileName: "shot.png", ContentType: "image/png", Data: []byte("\x89PNG\r\n\x1a\nfake")}
+	withImage, err := operations.ReplyTicket(ctx, ticket.Ticket.ID, account.ID, "customer", customerID, "", false, image)
+	if err != nil || withImage.Body != attachmentPlaceholder || len(withImage.Attachments) != 1 {
+		t.Fatalf("image-only reply: %+v err=%v", withImage, err)
+	}
+	internalNote, err := operations.ReplyTicket(ctx, ticket.Ticket.ID, "", "staff", admin.UserID, "internal screenshot", true, image)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, data, attachmentErr := operations.TicketAttachmentData(ctx, ticket.Ticket.ID, withImage.Attachments[0].ID, account.ID); attachmentErr != nil || string(data) != string(image.Data) {
+		t.Fatalf("customer attachment: %q err=%v", data, attachmentErr)
+	}
+	if _, _, attachmentErr := operations.TicketAttachmentData(ctx, ticket.Ticket.ID, internalNote.Attachments[0].ID, account.ID); !errors.Is(attachmentErr, ErrAttachmentNotFound) {
+		t.Fatalf("internal attachment must be hidden from customers, got %v", attachmentErr)
+	}
+	if _, _, attachmentErr := operations.TicketAttachmentData(ctx, ticket.Ticket.ID, withImage.Attachments[0].ID, "00000000-0000-0000-0000-000000000000"); !errors.Is(attachmentErr, ErrAttachmentNotFound) {
+		t.Fatalf("other accounts must not read attachments, got %v", attachmentErr)
+	}
+	if _, _, attachmentErr := operations.TicketAttachmentData(ctx, ticket.Ticket.ID, internalNote.Attachments[0].ID, ""); attachmentErr != nil {
+		t.Fatalf("staff read internal attachment: %v", attachmentErr)
+	}
+	if detail, detailErr := operations.TicketDetail(ctx, ticket.Ticket.ID, account.ID, false); detailErr != nil || len(detail.Messages) != 3 || len(detail.Messages[2].Attachments) != 1 {
+		t.Fatalf("customer detail with attachments: %+v err=%v", detail.Messages, detailErr)
+	}
+	if _, err = db.Exec(ctx, `DELETE FROM support_messages WHERE id IN ($1,$2)`, withImage.ID, internalNote.ID); err != nil {
+		t.Fatal(err)
+	}
 	if err = operations.UpdateTicketStatus(ctx, ticket.Ticket.ID, admin.UserID, "resolved"); err != nil {
 		t.Fatal(err)
 	}
@@ -305,6 +333,50 @@ func TestBillingLifecycleIntegration(t *testing.T) {
 	var keyKept bool
 	if err = db.QueryRow(ctx, `SELECT name, api_key_ciphertext=$2 FROM nodes WHERE id=$1`, nodeID, testNodeAPIKey).Scan(&nodeName, &keyKept); err != nil || nodeName != "renamed-node" || !keyKept {
 		t.Fatalf("updated node: name=%q keyKept=%v err=%v", nodeName, keyKept, err)
+	}
+	// Host billing reminders read the expiry, quota and this month's traffic.
+	if err = catalog.UpdateNodeBilling(ctx, nodeID, "2026-12-31", 1000); err != nil {
+		t.Fatal(err)
+	}
+	mailStore := NewMailStore(db)
+	if _, err = db.Exec(ctx, `UPDATE services SET node_id=$2 WHERE id=$1`, serviceID, nodeID); err != nil {
+		t.Fatal(err)
+	}
+	if err = mailStore.RecordServiceTraffic(ctx, serviceID, 5<<30); err != nil {
+		t.Fatal(err)
+	}
+	watches, err := mailStore.NodeWatches(ctx)
+	if err != nil || len(watches) != 1 || watches[0].TrafficQuotaGB != 1000 || watches[0].UsedBytes != 5<<30 || watches[0].ExpiresAt == nil || watches[0].ExpiresAt.UTC().Format("2006-01-02") != "2026-12-31" {
+		t.Fatalf("node watches: %+v err=%v", watches, err)
+	}
+	if _, err = db.Exec(ctx, `UPDATE services SET node_id=NULL WHERE id=$1`, serviceID); err != nil {
+		t.Fatal(err)
+	}
+	// Mail queue: dedup, lease, retry and completion.
+	if added, queueErr := mailStore.EnqueueMail(ctx, "ops@example.com", "subject", "body", "dedup-1"); queueErr != nil || !added {
+		t.Fatalf("enqueue: added=%v err=%v", added, queueErr)
+	}
+	if added, queueErr := mailStore.EnqueueMail(ctx, "ops@example.com", "subject", "body", "dedup-1"); queueErr != nil || added {
+		t.Fatalf("duplicate enqueue: added=%v err=%v", added, queueErr)
+	}
+	queued, err := mailStore.ClaimMail(ctx, 10)
+	if err != nil || len(queued) != 1 || queued[0].Attempts != 1 {
+		t.Fatalf("claim: %+v err=%v", queued, err)
+	}
+	if again, againErr := mailStore.ClaimMail(ctx, 10); againErr != nil || len(again) != 0 {
+		t.Fatalf("leased mail queued twice: %+v err=%v", again, againErr)
+	}
+	if err = mailStore.FailMail(ctx, queued[0].ID, 1, 8, 0, "smtp down"); err != nil {
+		t.Fatal(err)
+	}
+	if retried, retryErr := mailStore.ClaimMail(ctx, 10); retryErr != nil || len(retried) != 1 || retried[0].Attempts != 2 {
+		t.Fatalf("retry claim: %+v err=%v", retried, retryErr)
+	}
+	if err = mailStore.CompleteMail(ctx, queued[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	if emails, emailErr := mailStore.StaffEmails(ctx); emailErr != nil || len(emails) != 1 || emails[0] != "admin@example.com" {
+		t.Fatalf("staff emails: %v err=%v", emails, emailErr)
 	}
 	if err = catalog.DeleteNode(ctx, nodeID); err != nil {
 		t.Fatalf("delete node: %v", err)

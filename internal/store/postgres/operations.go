@@ -37,12 +37,13 @@ type Ticket struct {
 }
 
 type TicketMessage struct {
-	ID         string    `json:"id"`
-	AuthorType string    `json:"author_type"`
-	AuthorName string    `json:"author_name"`
-	Body       string    `json:"body"`
-	Internal   bool      `json:"internal"`
-	CreatedAt  time.Time `json:"created_at"`
+	ID          string             `json:"id"`
+	AuthorType  string             `json:"author_type"`
+	AuthorName  string             `json:"author_name"`
+	Body        string             `json:"body"`
+	Internal    bool               `json:"internal"`
+	CreatedAt   time.Time          `json:"created_at"`
+	Attachments []TicketAttachment `json:"attachments"`
 }
 
 type TicketDetail struct {
@@ -87,8 +88,11 @@ func (s *OperationsStore) listTickets(ctx context.Context, where string, argumen
 	return result, rows.Err()
 }
 
-func (s *OperationsStore) CreateTicket(ctx context.Context, accountID, userID, serviceID, subject, priority, body, ip, userAgent string) (TicketDetail, error) {
+func (s *OperationsStore) CreateTicket(ctx context.Context, accountID, userID, serviceID, subject, priority, body, ip, userAgent string, attachments ...AttachmentUpload) (TicketDetail, error) {
 	subject, body, priority = strings.TrimSpace(subject), strings.TrimSpace(body), strings.TrimSpace(priority)
+	if body == "" && len(attachments) > 0 {
+		body = attachmentPlaceholder
+	}
 	if len(subject) < 3 || len(subject) > 160 || body == "" || len(body) > 10000 {
 		return TicketDetail{}, errors.New("invalid ticket content")
 	}
@@ -116,6 +120,9 @@ func (s *OperationsStore) CreateTicket(ctx context.Context, accountID, userID, s
 	var message TicketMessage
 	err = tx.QueryRow(ctx, `INSERT INTO support_messages(ticket_id,author_type,author_id,body) VALUES($1,'customer',$2,$3) RETURNING id,created_at`, result.Ticket.ID, userID, body).Scan(&message.ID, &message.CreatedAt)
 	if err != nil {
+		return TicketDetail{}, err
+	}
+	if message.Attachments, err = insertAttachments(ctx, tx, result.Ticket.ID, message.ID, attachments); err != nil {
 		return TicketDetail{}, err
 	}
 	message.AuthorType, message.Body = "customer", body
@@ -170,11 +177,27 @@ func (s *OperationsStore) TicketDetail(ctx context.Context, ticketID, accountID 
 		}
 		result.Messages = append(result.Messages, row)
 	}
-	return result, rows.Err()
+	if err := rows.Err(); err != nil {
+		return TicketDetail{}, err
+	}
+	attachments, err := s.attachmentsByMessage(ctx, ticketID)
+	if err != nil {
+		return TicketDetail{}, err
+	}
+	for index := range result.Messages {
+		result.Messages[index].Attachments = attachments[result.Messages[index].ID]
+		if result.Messages[index].Attachments == nil {
+			result.Messages[index].Attachments = []TicketAttachment{}
+		}
+	}
+	return result, nil
 }
 
-func (s *OperationsStore) ReplyTicket(ctx context.Context, ticketID, accountID, actorType, actorID, body string, internal bool) (TicketMessage, error) {
+func (s *OperationsStore) ReplyTicket(ctx context.Context, ticketID, accountID, actorType, actorID, body string, internal bool, attachments ...AttachmentUpload) (TicketMessage, error) {
 	body = strings.TrimSpace(body)
+	if body == "" && len(attachments) > 0 {
+		body = attachmentPlaceholder
+	}
 	if body == "" || len(body) > 10000 {
 		return TicketMessage{}, errors.New("invalid message")
 	}
@@ -206,6 +229,9 @@ func (s *OperationsStore) ReplyTicket(ctx context.Context, ticketID, accountID, 
 	var result TicketMessage
 	err = tx.QueryRow(ctx, `INSERT INTO support_messages(ticket_id,author_type,author_id,body,internal) VALUES($1,$2,$3,$4,$5) RETURNING id,created_at`, ticketID, actorType, actorID, body, internal).Scan(&result.ID, &result.CreatedAt)
 	if err != nil {
+		return TicketMessage{}, err
+	}
+	if result.Attachments, err = insertAttachments(ctx, tx, ticketID, result.ID, attachments); err != nil {
 		return TicketMessage{}, err
 	}
 	newStatus := "staff_reply"

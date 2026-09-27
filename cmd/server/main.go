@@ -17,6 +17,7 @@ import (
 	"vpsbill/internal/config"
 	"vpsbill/internal/hatch/gateway"
 	"vpsbill/internal/notifications"
+	"vpsbill/internal/notify"
 	_ "vpsbill/internal/provider/clicd" // registers the CLICD node driver
 	hatchprovider "vpsbill/internal/provider/hatch"
 	_ "vpsbill/internal/provider/lxdapi" // registers the LXDAPI node driver
@@ -91,6 +92,9 @@ func main() {
 		return current.NotificationWebhookURL, current.NotificationWebhookSecret, current.WorkerPollInterval
 	})
 	go notificationWorker.Run(ctx)
+	mailNotifier := notify.New(postgres.NewMailStore(db), runtime, secretBox, logger)
+	go mailNotifier.RunSender(ctx)
+	go mailNotifier.RunScanner(ctx)
 
 	handler, err := app.NewHandler(app.Dependencies{
 		Config:        cfg,
@@ -99,6 +103,7 @@ func main() {
 		Settings:      runtime,
 		AgentGateway:  agentHub,
 		AgentInternal: agentInternal,
+		Notifier:      mailNotifier,
 	})
 	if err != nil {
 		logger.Error("initialize application", "error", err)

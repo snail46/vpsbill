@@ -61,6 +61,7 @@ import {
   TransactionRecord,
 } from './api'
 import CustomerServicesPanel from './CustomerServices'
+import { AttachmentGallery, AttachmentPicker, ticketRequestBody, useAttachmentLimit } from './TicketAttachments'
 import HostDetailPanel from './HostDetail'
 
 type Meta = { name: string; environment: string; installed: boolean; capabilities: string[]; password_reset_mail?: boolean }
@@ -1450,6 +1451,8 @@ function CustomerSupport() {
   const [detail, setDetail] = useState<TicketDetailRecord | null>(null)
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState('')
+  const [createFiles, setCreateFiles] = useState<File[]>([])
+  const maxMB = useAttachmentLimit()
 
   const load = async () => {
     try {
@@ -1483,14 +1486,18 @@ function CustomerSupport() {
     try {
       const result = await api<TicketDetailRecord>('/api/v1/customer/tickets', {
         method: 'POST',
-        body: JSON.stringify({
-          service_id: data.get('service_id'),
-          subject: data.get('subject'),
-          priority: data.get('priority'),
-          body: data.get('body'),
-        }),
+        body: ticketRequestBody(
+          {
+            service_id: data.get('service_id'),
+            subject: data.get('subject'),
+            priority: data.get('priority'),
+            body: data.get('body'),
+          },
+          createFiles
+        ),
       })
       setCreating(false)
+      setCreateFiles([])
       await load()
       // Re-read so the view has the joined customer and instance names.
       await open(result.ticket.id)
@@ -1499,21 +1506,20 @@ function CustomerSupport() {
     }
   }
 
-  async function reply(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    if (!detail) return
-    const form = event.currentTarget
-    const data = new FormData(form)
+  async function reply(body: string, _internal: boolean, files: File[]) {
+    if (!detail) return false
     try {
       await api(`/api/v1/customer/tickets/${detail.ticket.id}/messages`, {
         method: 'POST',
-        body: JSON.stringify({ body: data.get('body') }),
+        body: ticketRequestBody({ body }, files),
       })
-      form.reset()
+      setError('')
       await open(detail.ticket.id)
       await load()
+      return true
     } catch (err) {
       setError(err instanceof Error ? err.message : '回复失败')
+      return false
     }
   }
 
@@ -1566,10 +1572,20 @@ function CustomerSupport() {
           </label>
           <label className="wide">
             <span>问题详述</span>
-            <textarea name="body" rows={6} maxLength={10000} placeholder="请详细提供现象、报错信息或重现步骤…" required />
+            <textarea name="body" rows={6} maxLength={10000} placeholder="请详细提供现象、报错信息或重现步骤…" required={!createFiles.length} />
           </label>
+          <div className="wide">
+            <AttachmentPicker files={createFiles} onChange={setCreateFiles} maxMB={maxMB} onError={setError} />
+          </div>
           <div className="form-actions wide">
-            <button type="button" className="secondary-button" onClick={() => setCreating(false)}>
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={() => {
+                setCreating(false)
+                setCreateFiles([])
+              }}
+            >
               取消
             </button>
             <button className="primary-button compact">提交工单</button>
@@ -1599,7 +1615,7 @@ function CustomerSupport() {
         </div>
 
         {detail ? (
-          <TicketConversation detail={detail} onReply={reply} />
+          <TicketConversation detail={detail} onReply={reply} maxMB={maxMB} onError={setError} />
         ) : (
           <div className="panel support-placeholder">选择左侧工单查看完整沟通历史与回复</div>
         )}
@@ -1613,12 +1629,39 @@ function TicketConversation({
   onReply,
   admin = false,
   onStatus,
+  maxMB,
+  onError,
 }: {
   detail: TicketDetailRecord
-  onReply: (event: FormEvent<HTMLFormElement>) => void
+  onReply: (body: string, internal: boolean, files: File[]) => Promise<boolean>
   admin?: boolean
   onStatus?: (status: string) => void
+  maxMB: number
+  onError: (message: string) => void
 }) {
+  const [body, setBody] = useState('')
+  const [internal, setInternal] = useState(false)
+  const [files, setFiles] = useState<File[]>([])
+  const [sending, setSending] = useState(false)
+
+  useEffect(() => {
+    setBody('')
+    setInternal(false)
+    setFiles([])
+  }, [detail.ticket.id])
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!body.trim() && !files.length) return
+    setSending(true)
+    if (await onReply(body, internal, files)) {
+      setBody('')
+      setInternal(false)
+      setFiles([])
+    }
+    setSending(false)
+  }
+
   return (
     <div className="panel conversation">
       <div className="panel-heading">
@@ -1645,28 +1688,35 @@ function TicketConversation({
                 {new Date(message.created_at).toLocaleString()}
               </span>
             </header>
-            <p>{message.body}</p>
+            {!(message.attachments?.length && message.body === '（图片附件）') && <p>{message.body}</p>}
+            <AttachmentGallery ticketID={detail.ticket.id} attachments={message.attachments} admin={admin} />
           </article>
         ))}
       </div>
 
       {detail.ticket.status !== 'closed' && (
-        <form className="reply-form" onSubmit={onReply}>
+        <form className="reply-form" onSubmit={submit}>
           <textarea
             name="body"
             rows={4}
             maxLength={10000}
+            value={body}
+            onChange={event => setBody(event.target.value)}
             placeholder={admin ? '回复客户，或勾选内部备忘记录后台信息…' : '请在此输入需要补充的信息…'}
-            required
+            required={!files.length}
           />
-          {admin && (
-            <label className="checkbox">
-              <input name="internal" type="checkbox" /> 仅客服内部可见
-            </label>
-          )}
-          <button className="primary-button compact">
-            <Send size={14} />发送回复
-          </button>
+          <AttachmentPicker files={files} onChange={setFiles} maxMB={maxMB} onError={onError} />
+          <div className="reply-form-actions">
+            {admin && (
+              <label className="checkbox">
+                <input type="checkbox" checked={internal} onChange={event => setInternal(event.target.checked)} /> 仅客服内部可见
+              </label>
+            )}
+            <button className="primary-button compact" disabled={sending}>
+              <Send size={14} />
+              {sending ? '正在发送…' : '发送回复'}
+            </button>
+          </div>
         </form>
       )}
 
@@ -1691,6 +1741,7 @@ function AdminSupport() {
   const [tickets, setTickets] = useState<TicketRecord[]>([])
   const [detail, setDetail] = useState<TicketDetailRecord | null>(null)
   const [error, setError] = useState('')
+  const maxMB = useAttachmentLimit()
 
   const load = () =>
     api<TicketRecord[]>('/api/v1/admin/tickets')
@@ -1709,21 +1760,20 @@ function AdminSupport() {
     }
   }
 
-  async function reply(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    if (!detail) return
-    const form = event.currentTarget
-    const data = new FormData(form)
+  async function reply(body: string, internal: boolean, files: File[]) {
+    if (!detail) return false
     try {
       await api(`/api/v1/admin/tickets/${detail.ticket.id}/messages`, {
         method: 'POST',
-        body: JSON.stringify({ body: data.get('body'), internal: data.get('internal') === 'on' }),
+        body: ticketRequestBody({ body, internal }, files),
       })
-      form.reset()
+      setError('')
       await open(detail.ticket.id)
       load()
+      return true
     } catch (err) {
       setError(err instanceof Error ? err.message : '回复失败')
+      return false
     }
   }
 
@@ -1780,7 +1830,7 @@ function AdminSupport() {
         </div>
 
         {detail ? (
-          <TicketConversation detail={detail} onReply={reply} admin onStatus={status} />
+          <TicketConversation detail={detail} onReply={reply} admin onStatus={status} maxMB={maxMB} onError={setError} />
         ) : (
           <div className="panel support-placeholder">选择左侧工单开始回复与流转</div>
         )}
@@ -2970,6 +3020,34 @@ type SiteSettingsRecord = {
   smtp_from: string
   smtp_security: string
   password_reset_mail_enabled: boolean
+  mail_notifications: MailNotificationSettings
+  ticket_attachment_max_mb: number
+}
+
+type MailNotificationSettings = {
+  admin_emails: string
+  customer_expiry: boolean
+  customer_traffic: boolean
+  customer_ticket_reply: boolean
+  admin_node_expiry: boolean
+  admin_node_traffic: boolean
+  admin_ticket: boolean
+  expiry_reminder_days: number
+  node_expiry_reminder_days: number
+  traffic_alert_percent: number
+}
+
+const defaultMailNotifications: MailNotificationSettings = {
+  admin_emails: '',
+  customer_expiry: true,
+  customer_traffic: true,
+  customer_ticket_reply: true,
+  admin_node_expiry: true,
+  admin_node_traffic: true,
+  admin_ticket: true,
+  expiry_reminder_days: 3,
+  node_expiry_reminder_days: 7,
+  traffic_alert_percent: 80,
 }
 
 function SiteSettingsView() {
@@ -2994,6 +3072,8 @@ function SiteSettingsView() {
     smtp_security: 'starttls',
   })
   const [clearPassword, setClearPassword] = useState(false)
+  const [notifications, setNotifications] = useState<MailNotificationSettings>(defaultMailNotifications)
+  const [attachmentMB, setAttachmentMB] = useState('5')
   const [saving, setSaving] = useState(false)
   const [testing, setTesting] = useState(false)
   const [error, setError] = useState('')
@@ -3022,6 +3102,8 @@ function SiteSettingsView() {
       smtp_security: value.smtp_security || 'starttls',
     }))
     setClearPassword(false)
+    setNotifications({ ...defaultMailNotifications, ...value.mail_notifications })
+    setAttachmentMB(String(value.ticket_attachment_max_mb || 5))
   }
 
   useEffect(() => {
@@ -3043,7 +3125,13 @@ function SiteSettingsView() {
     try {
       const value = await api<SiteSettingsRecord>('/api/v1/admin/settings/site', {
         method: 'PUT',
-        body: JSON.stringify({ ...form, smtp_port: Number(form.smtp_port) || 0, clear_smtp_password: clearPassword }),
+        body: JSON.stringify({
+          ...form,
+          smtp_port: Number(form.smtp_port) || 0,
+          clear_smtp_password: clearPassword,
+          mail_notifications: notifications,
+          ticket_attachment_max_mb: Number(attachmentMB) || 0,
+        }),
       })
       apply(value)
       setNotice('站点设置已保存并立即生效。')
@@ -3197,6 +3285,94 @@ function SiteSettingsView() {
               清除已保存的 SMTP 密码
             </label>
           )}
+
+          <fieldset className="wide">
+            <legend>邮件通知（需要先配置 SMTP）</legend>
+          </fieldset>
+          <fieldset>
+            <legend>发给客户</legend>
+            {(
+              [
+                ['customer_expiry', '实例即将到期（续费账单未支付）'],
+                ['customer_traffic', '实例月流量告警'],
+                ['customer_ticket_reply', '工单收到客服回复'],
+              ] as const
+            ).map(([key, label]) => (
+              <label key={key} className="checkbox notify-option">
+                <input
+                  type="checkbox"
+                  checked={notifications[key]}
+                  onChange={event => setNotifications(current => ({ ...current, [key]: event.target.checked }))}
+                />
+                {label}
+              </label>
+            ))}
+          </fieldset>
+          <fieldset>
+            <legend>发给管理员</legend>
+            {(
+              [
+                ['admin_node_expiry', '母鸡即将到期'],
+                ['admin_node_traffic', '母鸡月流量告警'],
+                ['admin_ticket', '新工单与客户回复'],
+              ] as const
+            ).map(([key, label]) => (
+              <label key={key} className="checkbox notify-option">
+                <input
+                  type="checkbox"
+                  checked={notifications[key]}
+                  onChange={event => setNotifications(current => ({ ...current, [key]: event.target.checked }))}
+                />
+                {label}
+              </label>
+            ))}
+          </fieldset>
+          <label>
+            <span>管理员通知邮箱</span>
+            <input
+              value={notifications.admin_emails}
+              onChange={event => setNotifications(current => ({ ...current, admin_emails: event.target.value }))}
+              placeholder="多个用逗号分隔，留空发给所有管理员"
+            />
+          </label>
+          <label>
+            <span>实例到期提前提醒（天）</span>
+            <input
+              type="number"
+              min={1}
+              max={30}
+              value={notifications.expiry_reminder_days}
+              onChange={event => setNotifications(current => ({ ...current, expiry_reminder_days: Number(event.target.value) }))}
+            />
+          </label>
+          <label>
+            <span>母鸡到期提前提醒（天）</span>
+            <input
+              type="number"
+              min={1}
+              max={60}
+              value={notifications.node_expiry_reminder_days}
+              onChange={event => setNotifications(current => ({ ...current, node_expiry_reminder_days: Number(event.target.value) }))}
+            />
+          </label>
+          <label>
+            <span>流量告警阈值（%，用尽时另发一封）</span>
+            <input
+              type="number"
+              min={50}
+              max={99}
+              value={notifications.traffic_alert_percent}
+              onChange={event => setNotifications(current => ({ ...current, traffic_alert_percent: Number(event.target.value) }))}
+            />
+          </label>
+
+          <fieldset className="wide">
+            <legend>工单附件</legend>
+          </fieldset>
+          <label>
+            <span>单张图片大小上限（MB，1–20）</span>
+            <input type="number" min={1} max={20} value={attachmentMB} onChange={event => setAttachmentMB(event.target.value)} />
+          </label>
         </div>
 
         <div className="form-actions">
@@ -3521,7 +3697,7 @@ function NodesView() {
               <th>支持虚拟化</th>
               <th>节点总物理容量</th>
               <th>连接状态</th>
-              <th>最后心跳在线</th>
+              <th>到期 / 本月流量</th>
               <th>操作</th>
             </tr>
           </thead>
@@ -3544,8 +3720,17 @@ function NodesView() {
                     {node.capacity_ram_mb.toLocaleString()} MB / {node.capacity_disk_gb.toLocaleString()} GB
                   </small>
                 </td>
-                <td><StatusBadge status={node.status} /></td>
-                <td>{node.last_seen_at ? new Date(node.last_seen_at).toLocaleString() : '—'}</td>
+                <td>
+                  <StatusBadge status={node.status} />
+                  <small>心跳 {node.last_seen_at ? new Date(node.last_seen_at).toLocaleString() : '—'}</small>
+                </td>
+                <td>
+                  <NodeExpiry date={node.expires_at} />
+                  <small>
+                    {formatBytes(node.traffic_used_bytes ?? 0)}
+                    {node.traffic_quota_gb ? ` / ${node.traffic_quota_gb.toLocaleString()} GB` : ' · 不限'}
+                  </small>
+                </td>
                 <td>
                   <button
                     className="text-button"
@@ -3619,6 +3804,8 @@ function NodeForm({ node, onClose, onCreated }: { node?: NodeRecord; onClose: ()
           api_key: data.get('api_key'),
           virtualization_types: data.getAll('virtualization_types'),
           provider_options: providerOptions,
+          expires_at: String(data.get('expires_at') ?? ''),
+          traffic_quota_gb: Number(data.get('traffic_quota_gb')) || 0,
         }),
       })
       onCreated()
@@ -3694,6 +3881,16 @@ function NodeForm({ node, onClose, onCreated }: { node?: NodeRecord; onClose: ()
             </label>
           ),
         )}
+        <label>
+          <span>母鸡到期日（可选）</span>
+          <input name="expires_at" type="date" defaultValue={node?.expires_at ?? ''} />
+          <small>向服务商租用的到期日，用于到期提醒</small>
+        </label>
+        <label>
+          <span>月流量限额 GB（可选）</span>
+          <input name="traffic_quota_gb" type="number" min={0} defaultValue={node?.traffic_quota_gb ?? 0} />
+          <small>0 表示不限；按本节点实例流量合计告警</small>
+        </label>
         <fieldset className="wide">
           <legend>支持的虚拟化技术</legend>
           {(descriptor?.virtualization_types ?? []).map((kind, index) => (
@@ -4367,4 +4564,28 @@ function viewTitle(view: View) {
 
 function money(amountMinor: number, currency: string) {
   return new Intl.NumberFormat('zh-CN', { style: 'currency', currency }).format(amountMinor / 100)
+}
+
+function formatBytes(value: number) {
+  const units = ['B', 'KB', 'MB', 'GB', 'TB']
+  let size = value
+  let index = 0
+  while (size >= 1024 && index < units.length - 1) {
+    size /= 1024
+    index++
+  }
+  return index === 0 ? `${value} B` : `${size.toFixed(size >= 100 ? 0 : 1)} ${units[index]}`
+}
+
+// NodeExpiry shows a host's rental expiry, highlighted in its final week.
+function NodeExpiry({ date }: { date?: string }) {
+  if (!date) return <span className="muted-text">未设置到期</span>
+  const days = Math.ceil((new Date(`${date}T00:00:00`).getTime() - Date.now()) / 86_400_000)
+  const tone = days < 0 ? 'expiry-past' : days <= 7 ? 'expiry-soon' : ''
+  return (
+    <span className={tone}>
+      {date}
+      {days < 0 ? ' · 已到期' : days <= 7 ? ` · ${days} 天后` : ''}
+    </span>
+  )
 }

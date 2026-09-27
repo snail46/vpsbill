@@ -2401,9 +2401,8 @@ textarea {
 
 .reply-form {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: minmax(0, 1fr);
   gap: 12px;
-  align-items: flex-end;
   margin-top: 20px;
   padding-top: 20px;
   border-top: 1px solid var(--border-default);
@@ -2998,4 +2997,131 @@ textarea {
 
 .auth-links .auth-switch {
   margin-top: 0;
+}
+
+.reply-form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px 20px;
+}
+
+.reply-form-actions .checkbox {
+  margin-right: auto;
+}
+
+.attachment-picker {
+  display: grid;
+  gap: 6px;
+}
+
+.attachment-picker small {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.attachment-thumbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.attachment-thumbs figure {
+  position: relative;
+  width: 76px;
+  margin: 0;
+}
+
+.attachment-thumbs img {
+  display: block;
+  width: 76px;
+  height: 76px;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-default);
+  background: var(--bg-card-subtle);
+}
+
+.attachment-thumbs figcaption {
+  color: var(--text-muted);
+  font-size: 11px;
+  text-align: center;
+  margin-top: 2px;
+}
+
+.attachment-thumbs figure button {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 1px solid var(--border-default);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.attachment-add {
+  width: 76px;
+  height: 76px;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 4px;
+  border-radius: var(--radius-sm);
+  border: 1px dashed var(--border-default);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.attachment-add:hover, .attachment-thumbs figure button:hover {
+  color: var(--text-primary);
+  border-color: var(--text-muted);
+}
+
+.attachment-gallery {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.attachment-gallery a {
+  display: block;
+  max-width: 100%;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  border: 1px solid var(--border-default);
+}
+
+.attachment-gallery img {
+  display: block;
+  width: auto;
+  max-width: 220px;
+  max-height: 160px;
+  object-fit: contain;
+  background: var(--bg-card-subtle);
+}
+
+.site-settings .notify-option {
+  display: flex;
+  margin: 0 0 8px;
+}
+
+.muted-text {
+  color: var(--text-muted);
+}
+
+.expiry-soon {
+  color: #fbbf24;
+}
+
+.expiry-past {
+  color: #fb7185;
 }

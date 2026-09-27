@@ -33,6 +33,11 @@ type Node struct {
 	CapacityDiskGB      int64          `json:"capacity_disk_gb"`
 	LastSeenAt          *time.Time     `json:"last_seen_at"`
 	CreatedAt           time.Time      `json:"created_at"`
+	// ExpiresAt is the host rental expiry as YYYY-MM-DD; empty when not tracked.
+	ExpiresAt      string `json:"expires_at"`
+	TrafficQuotaGB int    `json:"traffic_quota_gb"`
+	// TrafficUsedBytes sums this calendar month's measured service traffic.
+	TrafficUsedBytes int64 `json:"traffic_used_bytes"`
 }
 
 type CreateNode struct {
@@ -54,7 +59,9 @@ func (s *CatalogStore) ListNodes(ctx context.Context) ([]Node, error) {
 	rows, err := s.db.Query(ctx, `
 		SELECT n.id, n.region_id, r.code, r.name, n.name, n.provider_type, n.base_url, n.provider_options, n.status,
 		       n.virtualization_types, n.capacity, n.capacity_vcpu, n.capacity_ram_mb,
-		       n.capacity_disk_gb, n.last_seen_at, n.created_at
+		       n.capacity_disk_gb, n.last_seen_at, n.created_at,
+		       coalesce(to_char(n.expires_at,'YYYY-MM-DD'),''), n.traffic_quota_gb,
+		       coalesce((SELECT sum(s.traffic_used_bytes) FROM services s WHERE s.node_id=n.id AND s.traffic_measured_at>=date_trunc('month',now())),0)::bigint
 		FROM nodes n JOIN regions r ON r.id=n.region_id
 		ORDER BY r.code, n.name
 	`)
@@ -66,7 +73,7 @@ func (s *CatalogStore) ListNodes(ctx context.Context) ([]Node, error) {
 	for rows.Next() {
 		var node Node
 		var capacity []byte
-		if err := rows.Scan(&node.ID, &node.RegionID, &node.RegionCode, &node.RegionName, &node.Name, &node.ProviderType, &node.BaseURL, &node.ProviderOptions, &node.Status, &node.VirtualizationTypes, &capacity, &node.CapacityVCPU, &node.CapacityRAMMB, &node.CapacityDiskGB, &node.LastSeenAt, &node.CreatedAt); err != nil {
+		if err := rows.Scan(&node.ID, &node.RegionID, &node.RegionCode, &node.RegionName, &node.Name, &node.ProviderType, &node.BaseURL, &node.ProviderOptions, &node.Status, &node.VirtualizationTypes, &capacity, &node.CapacityVCPU, &node.CapacityRAMMB, &node.CapacityDiskGB, &node.LastSeenAt, &node.CreatedAt, &node.ExpiresAt, &node.TrafficQuotaGB, &node.TrafficUsedBytes); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal(capacity, &node.Capacity)

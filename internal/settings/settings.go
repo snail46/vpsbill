@@ -41,6 +41,8 @@ type Runtime struct {
 	TerminationRetention         time.Duration
 	PaymentGateway               PaymentGatewayConfig
 	SMTP                         mail.Config
+	MailNotifications            MailNotifications
+	TicketAttachmentMaxMB        int
 }
 
 type PaymentGatewayConfig struct {
@@ -131,7 +133,8 @@ func NewManager(ctx context.Context, db *pgxpool.Pool, box *security.SecretBox, 
 		WorkerPollInterval: fallback.WorkerPollInterval, ReconcileInterval: fallback.ReconcileInterval,
 		LifecycleInterval: fallback.LifecycleInterval, RenewalLeadTime: fallback.RenewalLeadTime,
 		OverdueGracePeriod: fallback.OverdueGracePeriod, TerminationRetention: fallback.TerminationRetention,
-		PaymentGateway: legacyPaymentConfig(fallback.PaymentProviderName, fallback.PaymentCheckoutURL, fallback.PaymentWebhookSecret),
+		PaymentGateway:    legacyPaymentConfig(fallback.PaymentProviderName, fallback.PaymentCheckoutURL, fallback.PaymentWebhookSecret),
+		MailNotifications: DefaultMailNotifications(), TicketAttachmentMaxMB: 5,
 	})
 	if err := m.reload(ctx); err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return nil, err
@@ -228,17 +231,19 @@ func (m *Manager) UpdatePaymentGateway(ctx context.Context, in PaymentGatewayInp
 
 func (m *Manager) reload(ctx context.Context) error {
 	var v Runtime
-	var payment, notification, metrics, gatewayConfig, smtpPassword []byte
+	var payment, notification, metrics, gatewayConfig, smtpPassword, mailNotifications []byte
 	var gatewayType string
 	var poll, reconcile, lifecycle, lead, grace, retention int
 	err := m.db.QueryRow(ctx, `SELECT app_name,public_url,timezone,payment_provider_name,payment_checkout_url,
 		payment_webhook_secret_encrypted,notification_webhook_url,notification_webhook_secret_encrypted,metrics_token_encrypted,
 		worker_poll_interval_seconds,reconcile_interval_seconds,lifecycle_interval_seconds,renewal_lead_seconds,overdue_grace_seconds,termination_retention_seconds,
 		payment_gateway_type,payment_gateway_config_encrypted,
-		smtp_host,smtp_port,smtp_username,smtp_password_encrypted,smtp_from,smtp_security
+		smtp_host,smtp_port,smtp_username,smtp_password_encrypted,smtp_from,smtp_security,
+		mail_notifications,ticket_attachment_max_mb
 		FROM system_settings WHERE singleton=true`).Scan(&v.AppName, &v.PublicURL, &v.Timezone, &v.PaymentProviderName, &v.PaymentCheckoutURL,
 		&payment, &v.NotificationWebhookURL, &notification, &metrics, &poll, &reconcile, &lifecycle, &lead, &grace, &retention, &gatewayType, &gatewayConfig,
-		&v.SMTP.Host, &v.SMTP.Port, &v.SMTP.Username, &smtpPassword, &v.SMTP.From, &v.SMTP.Security)
+		&v.SMTP.Host, &v.SMTP.Port, &v.SMTP.Username, &smtpPassword, &v.SMTP.From, &v.SMTP.Security,
+		&mailNotifications, &v.TicketAttachmentMaxMB)
 	if err != nil {
 		return err
 	}
@@ -268,6 +273,7 @@ func (m *Manager) reload(ctx context.Context) error {
 			return fmt.Errorf("decode payment gateway configuration: %w", jsonErr)
 		}
 	}
+	v.MailNotifications = decodeMailNotifications(mailNotifications)
 	v.Installed = true
 	v.WorkerPollInterval, v.ReconcileInterval, v.LifecycleInterval = time.Duration(poll)*time.Second, time.Duration(reconcile)*time.Second, time.Duration(lifecycle)*time.Second
 	v.RenewalLeadTime, v.OverdueGracePeriod, v.TerminationRetention = time.Duration(lead)*time.Second, time.Duration(grace)*time.Second, time.Duration(retention)*time.Second
@@ -374,6 +380,7 @@ func validate(in InstallInput) (Runtime, InstallResult, error) {
 		PaymentProviderName: strings.TrimSpace(in.PaymentProviderName), PaymentCheckoutURL: strings.TrimSpace(in.PaymentCheckoutURL), PaymentWebhookSecret: strings.TrimSpace(in.PaymentWebhookSecret),
 		NotificationWebhookURL: strings.TrimSpace(in.NotificationWebhookURL), NotificationWebhookSecret: strings.TrimSpace(in.NotificationWebhookSecret), MetricsToken: strings.TrimSpace(in.MetricsToken)}
 	v.PaymentGateway = PaymentGatewayConfig{Type: "disabled", AlipayGatewayURL: "https://openapi.alipay.com/gateway.do", EpayPaymentType: "alipay"}
+	v.MailNotifications, v.TicketAttachmentMaxMB = DefaultMailNotifications(), 5
 	if v.AppName == "" || v.Timezone == "" || strings.TrimSpace(in.AdminDisplayName) == "" || strings.TrimSpace(in.AdminEmail) == "" {
 		return Runtime{}, InstallResult{}, errors.New("站点名称、时区和管理员信息不能为空")
 	}

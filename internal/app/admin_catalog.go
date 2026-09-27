@@ -42,8 +42,13 @@ func (a *adminCatalog) createNode(w http.ResponseWriter, r *http.Request) {
 		APIKey              string         `json:"api_key"`
 		VirtualizationTypes []string       `json:"virtualization_types"`
 		ProviderOptions     map[string]any `json:"provider_options"`
+		ExpiresAt           string         `json:"expires_at"`
+		TrafficQuotaGB      int            `json:"traffic_quota_gb"`
 	}
 	if !decodeJSON(w, r, &input) {
+		return
+	}
+	if !validNodeBilling(w, &input.ExpiresAt, input.TrafficQuotaGB) {
 		return
 	}
 	input.ProviderType = strings.TrimSpace(input.ProviderType)
@@ -113,6 +118,11 @@ func (a *adminCatalog) createNode(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusConflict, map[string]any{"error": "node_create_failed", "message": "节点名称可能已存在"})
 		return
 	}
+	if err := a.store.UpdateNodeBilling(r.Context(), node.ID, input.ExpiresAt, input.TrafficQuotaGB); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "internal_error"})
+		return
+	}
+	node.ExpiresAt, node.TrafficQuotaGB = input.ExpiresAt, input.TrafficQuotaGB
 	writeJSON(w, http.StatusCreated, map[string]any{"data": node})
 }
 
@@ -435,8 +445,13 @@ func (a *adminCatalog) updateNode(w http.ResponseWriter, r *http.Request) {
 		APIKey              string         `json:"api_key"`
 		VirtualizationTypes []string       `json:"virtualization_types"`
 		ProviderOptions     map[string]any `json:"provider_options"`
+		ExpiresAt           string         `json:"expires_at"`
+		TrafficQuotaGB      int            `json:"traffic_quota_gb"`
 	}
 	if !decodeJSON(w, r, &input) {
+		return
+	}
+	if !validNodeBilling(w, &input.ExpiresAt, input.TrafficQuotaGB) {
 		return
 	}
 	descriptor, ok := provider.Lookup(existing.ProviderType)
@@ -495,6 +510,10 @@ func (a *adminCatalog) updateNode(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusConflict, map[string]any{"error": "node_update_failed", "message": "节点名称可能已存在"})
 		return
 	}
+	if err := a.store.UpdateNodeBilling(r.Context(), existing.ID, input.ExpiresAt, input.TrafficQuotaGB); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "internal_error"})
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -510,4 +529,21 @@ func (a *adminCatalog) deleteNode(w http.ResponseWriter, r *http.Request) {
 	default:
 		w.WriteHeader(http.StatusNoContent)
 	}
+}
+
+// validNodeBilling checks the optional host expiry date (YYYY-MM-DD) and
+// monthly traffic allowance.
+func validNodeBilling(w http.ResponseWriter, expiresAt *string, trafficQuotaGB int) bool {
+	*expiresAt = strings.TrimSpace(*expiresAt)
+	if *expiresAt != "" {
+		if _, err := time.Parse("2006-01-02", *expiresAt); err != nil {
+			writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "validation_error", "message": "母鸡到期日格式应为 YYYY-MM-DD"})
+			return false
+		}
+	}
+	if trafficQuotaGB < 0 || trafficQuotaGB > 10_000_000 {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "validation_error", "message": "月流量限额无效"})
+		return false
+	}
+	return true
 }

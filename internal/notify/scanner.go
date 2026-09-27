@@ -1,0 +1,243 @@
+package notify
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"strconv"
+	"strings"
+	"time"
+
+	"vpsbill/internal/provider"
+)
+
+// RunScanner measures service traffic and queues expiry and traffic
+// reminders every scanInterval until ctx ends.
+func (n *Notifier) RunScanner(ctx context.Context) {
+	wait := firstScanWait
+	for {
+		timer := time.NewTimer(wait)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-timer.C:
+		}
+		n.Scan(ctx)
+		wait = scanInterval
+	}
+}
+
+// Scan runs one pass. Traffic is measured even when mail is off so the admin
+// node list can show this month's usage.
+func (n *Notifier) Scan(ctx context.Context) {
+	n.collectTraffic(ctx)
+	if !n.enabled() {
+		return
+	}
+	n.remindExpiringServices(ctx)
+	n.remindNodes(ctx)
+}
+
+func (n *Notifier) remindExpiringServices(ctx context.Context) {
+	preferences := n.settings.Current().MailNotifications
+	if !preferences.CustomerExpiry {
+		return
+	}
+	services, err := n.store.ExpiringServices(ctx, time.Duration(preferences.ExpiryReminderDays)*24*time.Hour)
+	if err != nil {
+		n.logger.Error("list expiring services", "error", err)
+		return
+	}
+	location := n.location()
+	for _, service := range services {
+		// One reminder when the window opens, another in the final day.
+		stage := "window"
+		if service.DueAt.Sub(n.now()) <= 24*time.Hour {
+			stage = "final"
+		}
+		due := service.DueAt.In(location).Format("2006-01-02 15:04")
+		subject := fmt.Sprintf("[%s] 实例 %s 将于 %s 到期", n.siteName(), service.InstanceName, due[:10])
+		body := fmt.Sprintf("您好，%s：\n\n您的实例 %s（%s）将于 %s 到期，续费账单 %s 待支付 %s。\n\n"+
+			"请在到期前完成支付，逾期后实例会在宽限期结束时暂停。\n\n前往支付：%s\n",
+			service.CustomerName, service.InstanceName, service.PlanName, due, service.InvoiceNumber,
+			money(service.AmountMinor, service.Currency), n.link("/portal/billing"))
+		n.enqueue(ctx, service.Email, subject, body, fmt.Sprintf("service-expiry:%s:%s:%s", service.ServiceID, service.DueAt.UTC().Format(time.RFC3339), stage))
+	}
+}
+
+// collectTraffic reads each running service's monthly traffic from its node,
+// stores it, and warns the customer when the plan allowance is nearly used.
+func (n *Notifier) collectTraffic(ctx context.Context) {
+	targets, err := n.store.TrafficTargets(ctx)
+	if err != nil {
+		n.logger.Error("list traffic targets", "error", err)
+		return
+	}
+	preferences := n.settings.Current().MailNotifications
+	month := n.now().In(n.location()).Format("2006-01")
+	drivers := map[string]provider.Driver{}
+	for _, target := range targets {
+		key := target.ProviderType + "|" + target.BaseURL
+		driver, ok := drivers[key]
+		if !ok {
+			opened, err := provider.OpenSealed(n.box, target.Sealed(), 20*time.Second)
+			if err != nil {
+				drivers[key] = nil
+				continue
+			}
+			driver, drivers[key] = opened, opened
+		}
+		metrics, ok := driver.(provider.Metrics)
+		if driver == nil || !ok {
+			continue
+		}
+		requestCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+		value, err := metrics.InstanceTraffic(requestCtx, target.InstanceName)
+		cancel()
+		used, found := trafficUsedBytes(value)
+		if err != nil || !found {
+			continue
+		}
+		if err := n.store.RecordServiceTraffic(ctx, target.ServiceID, used); err != nil {
+			n.logger.Error("record service traffic", "service_id", target.ServiceID, "error", err)
+			continue
+		}
+		if target.TrafficGB <= 0 || !preferences.CustomerTraffic || !n.enabled() {
+			continue
+		}
+		threshold, crossed := crossedThreshold(used, int64(target.TrafficGB)<<30, preferences.TrafficAlertPercent)
+		if !crossed {
+			continue
+		}
+		subject := fmt.Sprintf("[%s] 实例 %s 本月流量已用 %d%%", n.siteName(), target.InstanceName, threshold)
+		advice := "请留意用量，超出后可能会被限速或暂停网络。"
+		if threshold >= 100 {
+			subject = fmt.Sprintf("[%s] 实例 %s 本月流量已用尽", n.siteName(), target.InstanceName)
+			advice = "本月流量已用尽，网络可能已被限速或暂停，下月 1 日自动重置。如需帮助请提交工单。"
+		}
+		body := fmt.Sprintf("您好，%s：\n\n您的实例 %s（%s）本月已使用 %s，套餐月流量 %d GB。\n%s\n\n查看实例：%s\n",
+			target.CustomerName, target.InstanceName, target.PlanName, formatBytes(used), target.TrafficGB, advice, n.link("/portal/services"))
+		n.enqueue(ctx, target.Email, subject, body, fmt.Sprintf("service-traffic:%s:%s:%d", target.ServiceID, month, threshold))
+	}
+}
+
+// remindNodes warns merchant staff about host rentals that are about to
+// expire and hosts whose services used most of the monthly allowance.
+func (n *Notifier) remindNodes(ctx context.Context) {
+	preferences := n.settings.Current().MailNotifications
+	if !preferences.AdminNodeExpiry && !preferences.AdminNodeTraffic {
+		return
+	}
+	nodes, err := n.store.NodeWatches(ctx)
+	if err != nil {
+		n.logger.Error("list node watches", "error", err)
+		return
+	}
+	location := n.location()
+	now := n.now().In(location)
+	month := now.Format("2006-01")
+	var recipients []string
+	for _, node := range nodes {
+		if preferences.AdminNodeExpiry && node.ExpiresAt != nil {
+			date := node.ExpiresAt.UTC().Format("2006-01-02")
+			expires, _ := time.ParseInLocation("2006-01-02", date, location)
+			remaining := expires.Sub(now)
+			if remaining <= time.Duration(preferences.NodeExpiryReminderDays)*24*time.Hour {
+				stage, subject := "window", fmt.Sprintf("[%s] 母鸡 %s 将于 %s 到期", n.siteName(), node.Name, date)
+				switch {
+				case remaining <= 0:
+					stage, subject = "expired", fmt.Sprintf("[%s] 母鸡 %s 已于 %s 到期", n.siteName(), node.Name, date)
+				case remaining <= 24*time.Hour:
+					stage = "final"
+				}
+				body := fmt.Sprintf("母鸡 %s 的租期到 %s。请及时续费，或提前迁出上面的实例，避免客户服务中断。\n\n节点管理：%s\n",
+					node.Name, date, n.link("/admin/nodes"))
+				if recipients == nil {
+					recipients = n.adminRecipients(ctx)
+				}
+				for _, to := range recipients {
+					n.enqueue(ctx, to, subject, body, fmt.Sprintf("node-expiry:%s:%s:%s:%s", node.ID, date, stage, to))
+				}
+			}
+		}
+		if preferences.AdminNodeTraffic && node.TrafficQuotaGB > 0 {
+			threshold, crossed := crossedThreshold(node.UsedBytes, int64(node.TrafficQuotaGB)<<30, preferences.TrafficAlertPercent)
+			if crossed {
+				subject := fmt.Sprintf("[%s] 母鸡 %s 本月流量已用 %d%%", n.siteName(), node.Name, threshold)
+				body := fmt.Sprintf("母鸡 %s 上的实例本月合计使用 %s，月流量限额 %d GB。\n统计的是各实例流量之和，不含宿主机自身流量。\n\n节点管理：%s\n",
+					node.Name, formatBytes(node.UsedBytes), node.TrafficQuotaGB, n.link("/admin/nodes"))
+				if recipients == nil {
+					recipients = n.adminRecipients(ctx)
+				}
+				for _, to := range recipients {
+					n.enqueue(ctx, to, subject, body, fmt.Sprintf("node-traffic:%s:%s:%d:%s", node.ID, month, threshold, to))
+				}
+			}
+		}
+	}
+}
+
+// crossedThreshold returns the highest alert level reached: 100 when the
+// allowance is used up, otherwise alertPercent.
+func crossedThreshold(used, limit int64, alertPercent int) (int, bool) {
+	if limit <= 0 {
+		return 0, false
+	}
+	switch {
+	case used >= limit:
+		return 100, true
+	case used*100 >= limit*int64(alertPercent):
+		return alertPercent, true
+	default:
+		return 0, false
+	}
+}
+
+// trafficUsedBytes reads total_used_bytes from a provider traffic document.
+func trafficUsedBytes(value any) (int64, bool) {
+	if value == nil {
+		return 0, false
+	}
+	data, err := json.Marshal(value)
+	if err != nil {
+		return 0, false
+	}
+	var document struct {
+		TotalUsedBytes *json.Number `json:"total_used_bytes"`
+	}
+	decoder := json.NewDecoder(strings.NewReader(string(data)))
+	decoder.UseNumber()
+	if err := decoder.Decode(&document); err != nil || document.TotalUsedBytes == nil {
+		return 0, false
+	}
+	if whole, err := document.TotalUsedBytes.Int64(); err == nil {
+		return whole, true
+	}
+	if float, err := strconv.ParseFloat(document.TotalUsedBytes.String(), 64); err == nil {
+		return int64(float), true
+	}
+	return 0, false
+}
+
+func formatBytes(value int64) string {
+	units := []string{"B", "KB", "MB", "GB", "TB"}
+	size := float64(value)
+	index := 0
+	for size >= 1024 && index < len(units)-1 {
+		size /= 1024
+		index++
+	}
+	if index == 0 {
+		return fmt.Sprintf("%d B", value)
+	}
+	return fmt.Sprintf("%.2f %s", size, units[index])
+}
+
+func money(amountMinor int64, currency string) string {
+	symbol := strings.TrimSpace(currency) + " "
+	if strings.EqualFold(strings.TrimSpace(currency), "CNY") {
+		symbol = "¥"
+	}
+	return fmt.Sprintf("%s%.2f", symbol, float64(amountMinor)/100)
+}
