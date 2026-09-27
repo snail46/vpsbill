@@ -13,10 +13,13 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
 const DefaultConfigPath = "/etc/hatch/agent.json"
+
+var nftTablePattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,31}$`)
 
 type Config struct {
 	// ServerURL is the billing site, e.g. https://billing.example.com.
@@ -33,6 +36,9 @@ type Config struct {
 	// addresses on this uplink. Needed when the provider puts the /64 on-link
 	// instead of routing it to the host; leave empty for a routed prefix.
 	IPv6NDPInterface string `json:"ipv6_ndp_interface,omitempty"`
+	// NFTTable names the nftables table holding the port forwards. Give each
+	// agent on the same host its own table so they do not replace each other.
+	NFTTable string `json:"nft_table,omitempty"`
 	// Capacity overrides detected host capacity when set.
 	Capacity CapacityConfig `json:"capacity"`
 	LXD      *LXDConfig     `json:"lxd,omitempty"`
@@ -77,6 +83,9 @@ func (c *Config) ApplyDefaults() {
 	if c.StateDir == "" {
 		c.StateDir = "/var/lib/hatch"
 	}
+	if c.NFTTable == "" {
+		c.NFTTable = "hatch"
+	}
 	if c.PortRangeStart == 0 && c.PortRangeEnd == 0 {
 		c.PortRangeStart, c.PortRangeEnd = 20000, 60000
 	}
@@ -119,6 +128,9 @@ func (c Config) Validate() error {
 	}
 	if c.PortRangeStart < 1 || c.PortRangeEnd > 65535 || c.PortRangeStart > c.PortRangeEnd {
 		return errors.New("invalid port range")
+	}
+	if !nftTablePattern.MatchString(c.NFTTable) {
+		return errors.New("nft_table must be lowercase letters, digits or _")
 	}
 	if c.PublicIPv4 != "" {
 		if _, err := netip.ParseAddr(c.PublicIPv4); err != nil {

@@ -93,6 +93,7 @@ fib daddr type local tcp dport 20022 dnat to 10.20.30.254:22
   "port_range_start": 20000,
   "port_range_end": 60000,
   "ipv6_ndp_interface": "",
+  "nft_table": "hatch",
   "capacity": { "vcpu": 16, "ram_mb": 60000, "disk_gb": 900 },
   "lxd": { "socket": "/var/snap/lxd/common/lxd/unix.socket", "network": "lxdbr0", "storage_pool": "default" },
   "podman": { "socket": "/run/podman/podman.sock", "network": "podman", "disk_quota": false }
@@ -102,6 +103,7 @@ fib daddr type local tcp dport 20022 dnat to 10.20.30.254:22
 - `capacity` 不填时自动探测整机 CPU、内存；磁盘取 LXD/Incus 存储池的容量（只启用 Podman 时取 `state_dir` 所在磁盘）。建议按可售额度填写，给宿主机留余量。另外 `port_range_start`/`port_range_end` 不要和同机其他 NAT 面板（如 LXDAPI）的端口段重叠。
 - `server_url` 必须是 HTTPS（仅回环地址允许 HTTP，用于测试）。计费站点使用私有 CA 时，可以用 `ca_file` 指定。
 - 删除 `lxd` 或 `podman` 段落即可禁用对应运行时。
+- 同一台宿主机要运行两个 Agent（例如一个管 Incus、一个管 LXD snap，分别接入为两个节点）时，给第二个 Agent 单独的配置文件、`state_dir`、端口段和 `nft_table`（如 `"nft_table": "hatch_lxd"`），并复制一份 systemd 单元改用新配置、`ReadWritePaths` 指向新的 `state_dir`。`nft_table` 默认 `hatch`，两个 Agent 共用同一张表会互相覆盖端口转发。
 
 ## 反向代理
 

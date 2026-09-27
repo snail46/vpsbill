@@ -692,7 +692,7 @@ func (s *Service) freePort() (int, error) {
 func (s *Service) applyNAT(ctx context.Context) error {
 	s.natMu.Lock()
 	defer s.natMu.Unlock()
-	if err := s.nat.Apply(ctx, renderRuleset(s.store.List())); err != nil {
+	if err := s.nat.Apply(ctx, renderRuleset(s.config.NFTTable, s.store.List())); err != nil {
 		return fmt.Errorf("apply port forwards: %w", err)
 	}
 	return nil

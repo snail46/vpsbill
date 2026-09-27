@@ -40,10 +40,13 @@ type natRule struct {
 	TargetPort int
 }
 
-// renderRuleset builds the "ip hatch" table. Port forwards match packets
+// renderRuleset builds the agent's "ip <table>" table. Port forwards match packets
 // addressed to any local address (fib daddr type local), which works both on
 // hosts that own their public IP and behind 1:1 cloud NAT.
-func renderRuleset(records []InstanceRecord) string {
+func renderRuleset(table string, records []InstanceRecord) string {
+	if table == "" {
+		table = "hatch"
+	}
 	var rules []natRule
 	for _, record := range records {
 		if record.PrivateIPv4 == "" {
@@ -62,7 +65,7 @@ func renderRuleset(records []InstanceRecord) string {
 		return rules[i].PublicPort < rules[j].PublicPort
 	})
 	var builder strings.Builder
-	builder.WriteString("table ip hatch\ndelete table ip hatch\ntable ip hatch {\n")
+	fmt.Fprintf(&builder, "table ip %[1]s\ndelete table ip %[1]s\ntable ip %[1]s {\n", table)
 	builder.WriteString("  chain prerouting {\n    type nat hook prerouting priority dstnat; policy accept;\n")
 	for _, rule := range rules {
 		fmt.Fprintf(&builder, "    fib daddr type local %s dport %d dnat to %s:%d\n", rule.Protocol, rule.PublicPort, rule.Target, rule.TargetPort)

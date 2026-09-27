@@ -85,3 +85,16 @@ func TestOverdueStopPausesWhenSupported(t *testing.T) {
 		t.Fatalf("start must power on a stopped instance: %v", stopped.calls)
 	}
 }
+
+func TestOffersTemplateNeedsReadyImage(t *testing.T) {
+	images := []provider.Image{
+		{ID: "debian-12", Enabled: true, Downloaded: true},
+		{ID: "ubuntu-24", Enabled: true, Downloaded: false},
+	}
+	if !offersTemplate(images, "debian-12") {
+		t.Fatal("ready image not offered")
+	}
+	if offersTemplate(images, "ubuntu-24") || offersTemplate(images, "alpine") {
+		t.Fatal("missing or undownloaded image offered")
+	}
+}

@@ -280,7 +280,9 @@ func (a *adminCatalog) listTemplates(w http.ResponseWriter, r *http.Request) {
 			if !image.Enabled || !image.Downloaded || !validVirtualization(image.Virtualization) {
 				continue
 			}
-			key := image.Virtualization + "\x00" + image.ID
+			// Same-named images on different backends are separate templates:
+			// a plan binds one provider type and only schedules to its nodes.
+			key := response.node.ProviderType + "\x00" + image.Virtualization + "\x00" + image.ID
 			item := byKey[key]
 			if item == nil {
 				item = &availableTemplate{ID: image.ID, ProviderType: response.node.ProviderType, Name: image.Name, Virtualization: image.Virtualization, Distro: image.Distro, Release: image.Release, Arch: image.Arch, Description: image.Description}

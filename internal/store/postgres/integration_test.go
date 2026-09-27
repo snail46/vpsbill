@@ -134,6 +134,13 @@ func TestBillingLifecycleIntegration(t *testing.T) {
 	if err != nil || !claimed || provisionJob.ServiceID != serviceID || provisionJob.Action != "provision" {
 		t.Fatalf("claim provision job: claimed=%v job=%+v err=%v", claimed, provisionJob, err)
 	}
+	candidates, err := provisioning.PlacementCandidates(ctx, serviceID)
+	if err != nil || len(candidates) != 1 || candidates[0].NodeID != nodeID || candidates[0].ProviderType != "clicd" {
+		t.Fatalf("placement candidates: %+v err=%v", candidates, err)
+	}
+	if _, err = provisioning.ReserveNode(ctx, serviceID, nodeID); !errors.Is(err, ErrNoCapacity) {
+		t.Fatalf("excluded node was reserved: err=%v", err)
+	}
 	reservedNodeID, err := provisioning.ReserveNode(ctx, serviceID)
 	if err != nil || reservedNodeID != nodeID {
 		t.Fatalf("reserve node: id=%s err=%v", reservedNodeID, err)

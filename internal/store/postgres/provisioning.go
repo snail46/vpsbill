@@ -142,7 +142,10 @@ func (s *ProvisioningStore) RecoverStaleJobs(ctx context.Context, staleAfter tim
 // ReserveNode serializes assignment through a service row and candidate node
 // lock. Reservations, rather than observed VM state, are the source of truth
 // for available sellable capacity.
-func (s *ProvisioningStore) ReserveNode(ctx context.Context, serviceID string) (string, error) {
+func (s *ProvisioningStore) ReserveNode(ctx context.Context, serviceID string, excludedNodeIDs ...string) (string, error) {
+	if excludedNodeIDs == nil {
+		excludedNodeIDs = []string{}
+	}
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		return "", err
@@ -166,13 +169,13 @@ func (s *ProvisioningStore) ReserveNode(ctx context.Context, serviceID string) (
 	err = tx.QueryRow(ctx, `
 		SELECT n.id
 		FROM nodes n
-		WHERE n.region_id=$1 AND n.status='online' AND $2=ANY(n.virtualization_types) AND n.provider_type=$6
+		WHERE n.region_id=$1 AND n.status='online' AND $2=ANY(n.virtualization_types) AND n.provider_type=$6 AND NOT (n.id::text = ANY($7::text[]))
 		  AND n.capacity_vcpu - coalesce((SELECT sum(r.vcpu) FROM inventory_reservations r WHERE r.node_id=n.id AND r.status='reserved'),0) >= $3
 		  AND n.capacity_ram_mb - coalesce((SELECT sum(r.ram_mb) FROM inventory_reservations r WHERE r.node_id=n.id AND r.status='reserved'),0) >= $4
 		  AND n.capacity_disk_gb - coalesce((SELECT sum(r.disk_gb) FROM inventory_reservations r WHERE r.node_id=n.id AND r.status='reserved'),0) >= $5
 		ORDER BY n.capacity_ram_mb - coalesce((SELECT sum(r.ram_mb) FROM inventory_reservations r WHERE r.node_id=n.id AND r.status='reserved'),0)
 		FOR UPDATE OF n SKIP LOCKED LIMIT 1
-	`, regionID, virtualization, vcpu, ramMB, diskGB, providerType).Scan(&nodeID)
+	`, regionID, virtualization, vcpu, ramMB, diskGB, providerType, excludedNodeIDs).Scan(&nodeID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", ErrNoCapacity
 	}
@@ -191,6 +194,39 @@ func (s *ProvisioningStore) ReserveNode(ctx context.Context, serviceID string) (
 		return "", err
 	}
 	return nodeID, tx.Commit(ctx)
+}
+
+// PlacementCandidate is an online node matching a pending service's plan.
+type PlacementCandidate struct {
+	NodeID   string
+	NodeName string
+	NodeEndpoint
+}
+
+// PlacementCandidates lists the nodes ReserveNode may pick for a service that
+// has no node yet, so the worker can skip nodes lacking the chosen image.
+func (s *ProvisioningStore) PlacementCandidates(ctx context.Context, serviceID string) ([]PlacementCandidate, error) {
+	rows, err := s.db.Query(ctx, `
+		SELECT n.id, n.name, n.provider_type, n.base_url, n.api_key_ciphertext, n.provider_options
+		FROM services s JOIN plans p ON p.id=s.plan_id
+		JOIN nodes n ON n.region_id=s.region_id AND n.status='online'
+		    AND p.virtualization=ANY(n.virtualization_types) AND n.provider_type=p.provider_type
+		WHERE s.id=$1 AND s.node_id IS NULL
+		ORDER BY n.created_at
+	`, serviceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var candidates []PlacementCandidate
+	for rows.Next() {
+		var item PlacementCandidate
+		if err := rows.Scan(&item.NodeID, &item.NodeName, &item.ProviderType, &item.BaseURL, &item.APIKeyCiphertext, &item.ProviderOptions); err != nil {
+			return nil, err
+		}
+		candidates = append(candidates, item)
+	}
+	return candidates, rows.Err()
 }
 
 func (s *ProvisioningStore) ProvisionContext(ctx context.Context, jobID string) (ProvisionContext, error) {

@@ -104,7 +104,11 @@ func (w *Worker) executeTerminate(parent context.Context, job postgres.Provision
 }
 
 func (w *Worker) executeProvision(parent context.Context, job postgres.ProvisioningJob) error {
-	if _, err := w.store.ReserveNode(parent, job.ServiceID); err != nil {
+	excluded, err := w.nodesMissingTemplate(parent, job)
+	if err != nil {
+		return fmt.Errorf("schedule node: %w", err)
+	}
+	if _, err := w.store.ReserveNode(parent, job.ServiceID, excluded...); err != nil {
 		return fmt.Errorf("schedule node: %w", err)
 	}
 	provision, err := w.store.ProvisionContext(parent, job.ID)
@@ -131,6 +135,50 @@ func (w *Worker) executeProvision(parent context.Context, job postgres.Provision
 	}
 	return w.store.CompleteProvision(parent, job.ID, w.workerID, instance.ExternalID, instance.UUID,
 		instance.IP, instance.IPv6, provider.NormalizeStatus(instance.Status), rootPasswordCiphertext)
+}
+
+// nodesMissingTemplate returns candidate nodes that answered their image list
+// without the template the customer chose, so placement skips them. Nodes
+// that cannot be asked stay eligible and report their own error on create.
+func (w *Worker) nodesMissingTemplate(ctx context.Context, job postgres.ProvisioningJob) ([]string, error) {
+	configuration, _ := job.Payload["configuration"].(map[string]any)
+	templateID := stringValue(configuration, "template_id")
+	if templateID == "" {
+		return nil, nil
+	}
+	candidates, err := w.store.PlacementCandidates(ctx, job.ServiceID)
+	if err != nil || len(candidates) < 2 {
+		return nil, err
+	}
+	var missing []string
+	for _, candidate := range candidates {
+		driver, err := provider.OpenSealed(w.box, candidate.Sealed(), 20*time.Second)
+		if err != nil {
+			continue
+		}
+		requestCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+		images, err := driver.Images(requestCtx)
+		cancel()
+		if err != nil {
+			continue
+		}
+		if !offersTemplate(images, templateID) {
+			missing = append(missing, candidate.NodeID)
+		}
+	}
+	if len(missing) == len(candidates) {
+		return nil, fmt.Errorf("no online node offers template %q", templateID)
+	}
+	return missing, nil
+}
+
+func offersTemplate(images []provider.Image, templateID string) bool {
+	for _, image := range images {
+		if image.ID == templateID && image.Enabled && image.Downloaded {
+			return true
+		}
+	}
+	return false
 }
 
 func (w *Worker) executePowerAction(parent context.Context, job postgres.ProvisioningJob) error {
