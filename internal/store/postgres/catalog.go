@@ -41,6 +41,7 @@ type Node struct {
 	// OwnerAccountID marks a hosted node published by a customer.
 	OwnerAccountID string     `json:"owner_account_id,omitempty"`
 	RetiredAt      *time.Time `json:"retired_at,omitempty"`
+	NodeSupply
 }
 
 type CreateNode struct {
@@ -65,7 +66,7 @@ func (s *CatalogStore) ListNodes(ctx context.Context) ([]Node, error) {
 		       n.capacity_disk_gb, n.last_seen_at, n.created_at,
 		       coalesce(to_char(n.expires_at,'YYYY-MM-DD'),''), n.traffic_quota_gb,
 		       coalesce((SELECT sum(s.traffic_used_bytes) FROM services s WHERE s.node_id=n.id AND s.traffic_measured_at>=date_trunc('month',now())),0)::bigint,
-		       coalesce(n.owner_account_id::text,''), n.retired_at
+		       coalesce(n.owner_account_id::text,''), n.retired_at, `+nodeSupplyColumns+`
 		FROM nodes n JOIN regions r ON r.id=n.region_id
 		ORDER BY r.code, n.name
 	`)
@@ -77,9 +78,11 @@ func (s *CatalogStore) ListNodes(ctx context.Context) ([]Node, error) {
 	for rows.Next() {
 		var node Node
 		var capacity []byte
-		if err := rows.Scan(&node.ID, &node.RegionID, &node.RegionCode, &node.RegionName, &node.Name, &node.ProviderType, &node.BaseURL, &node.ProviderOptions, &node.Status, &node.VirtualizationTypes, &capacity, &node.CapacityVCPU, &node.CapacityRAMMB, &node.CapacityDiskGB, &node.LastSeenAt, &node.CreatedAt, &node.ExpiresAt, &node.TrafficQuotaGB, &node.TrafficUsedBytes, &node.OwnerAccountID, &node.RetiredAt); err != nil {
+		targets := []any{&node.ID, &node.RegionID, &node.RegionCode, &node.RegionName, &node.Name, &node.ProviderType, &node.BaseURL, &node.ProviderOptions, &node.Status, &node.VirtualizationTypes, &capacity, &node.CapacityVCPU, &node.CapacityRAMMB, &node.CapacityDiskGB, &node.LastSeenAt, &node.CreatedAt, &node.ExpiresAt, &node.TrafficQuotaGB, &node.TrafficUsedBytes, &node.OwnerAccountID, &node.RetiredAt}
+		if err := rows.Scan(append(targets, node.NodeSupply.targets()...)...); err != nil {
 			return nil, err
 		}
+		node.finish(true)
 		_ = json.Unmarshal(capacity, &node.Capacity)
 		nodes = append(nodes, node)
 	}
@@ -104,8 +107,8 @@ func (s *CatalogStore) CreateNode(ctx context.Context, input CreateNode) (Node, 
 	var node Node
 	if err := tx.QueryRow(ctx, `
 		INSERT INTO nodes(region_id, name, provider_type, base_url, api_key_ciphertext, status, virtualization_types, capacity,
-		                  capacity_vcpu, capacity_ram_mb, capacity_disk_gb, last_seen_at, provider_options)
-		VALUES($1, $2, $3, $4, $5, 'online', $6, $7, $8, $9, $10, now(), coalesce($11::jsonb, '{}'::jsonb))
+		                  capacity_vcpu, capacity_ram_mb, capacity_disk_gb, reported_vcpu, reported_ram_mb, reported_disk_gb, last_seen_at, provider_options)
+		VALUES($1, $2, $3, $4, $5, 'online', $6, $7, $8, $9, $10, $8, $9, $10, now(), coalesce($11::jsonb, '{}'::jsonb))
 		RETURNING id, status, last_seen_at, created_at
 	`, regionID, strings.TrimSpace(input.Name), input.ProviderType, strings.TrimRight(strings.TrimSpace(input.BaseURL), "/"), input.APIKeyCiphertext, input.VirtualizationTypes, capacity, input.CapacityVCPU, input.CapacityRAMMB, input.CapacityDiskGB, nullableJSON(input.ProviderOptions)).Scan(&node.ID, &node.Status, &node.LastSeenAt, &node.CreatedAt); err != nil {
 		return Node{}, fmt.Errorf("create node: %w", err)

@@ -153,12 +153,12 @@ func (s *ProvisioningStore) ReserveNode(ctx context.Context, serviceID string, e
 	defer func() { _ = tx.Rollback(ctx) }()
 	var currentNode *string
 	var regionID, virtualization, providerType, planNode string
-	var vcpu, ramMB, diskGB int
+	var vcpu, ramMB, diskGB, trafficGB int
 	if err := tx.QueryRow(ctx, `
-		SELECT s.node_id, s.region_id, p.virtualization, p.provider_type, p.vcpu, p.ram_mb, p.disk_gb, coalesce(p.node_id::text,'')
+		SELECT s.node_id, s.region_id, p.virtualization, p.provider_type, p.vcpu, p.ram_mb, p.disk_gb, coalesce(p.node_id::text,''), coalesce(p.traffic_gb,0)
 		FROM services s JOIN plans p ON p.id=s.plan_id
 		WHERE s.id=$1 FOR UPDATE OF s
-	`, serviceID).Scan(&currentNode, &regionID, &virtualization, &providerType, &vcpu, &ramMB, &diskGB, &planNode); err != nil {
+	`, serviceID).Scan(&currentNode, &regionID, &virtualization, &providerType, &vcpu, &ramMB, &diskGB, &planNode, &trafficGB); err != nil {
 		return "", err
 	}
 	if currentNode != nil {
@@ -170,13 +170,18 @@ func (s *ProvisioningStore) ReserveNode(ctx context.Context, serviceID string, e
 		SELECT n.id
 		FROM nodes n
 		WHERE n.region_id=$1 AND n.status='online' AND $2=ANY(n.virtualization_types) AND n.provider_type=$6 AND NOT (n.id::text = ANY($7::text[]))
-		  AND n.retired_at IS NULL AND (($8='' AND n.owner_account_id IS NULL) OR n.id::text=$8)
-		  AND n.capacity_vcpu - coalesce((SELECT sum(r.vcpu) FROM inventory_reservations r WHERE r.node_id=n.id AND r.status='reserved'),0) >= $3
-		  AND n.capacity_ram_mb - coalesce((SELECT sum(r.ram_mb) FROM inventory_reservations r WHERE r.node_id=n.id AND r.status='reserved'),0) >= $4
-		  AND n.capacity_disk_gb - coalesce((SELECT sum(r.disk_gb) FROM inventory_reservations r WHERE r.node_id=n.id AND r.status='reserved'),0) >= $5
-		ORDER BY n.capacity_ram_mb - coalesce((SELECT sum(r.ram_mb) FROM inventory_reservations r WHERE r.node_id=n.id AND r.status='reserved'),0)
+		  AND n.retired_at IS NULL AND (($8='' AND n.owner_account_id IS NULL AND n.health_hold_reason IS NULL) OR n.id::text=$8)
+		  AND ($9=0 OR coalesce(n.traffic_quota_gb,0)=0 OR
+		       coalesce((SELECT sum(tp.traffic_gb) FROM services ts JOIN plans tp ON tp.id=ts.plan_id
+		                 WHERE ts.node_id IN (SELECT m.id FROM nodes m WHERE m.id=n.id OR m.machine_id=n.machine_id)
+		                   AND ts.status NOT IN ('terminating','terminated') AND tp.traffic_gb>0),0) + $9
+		       <= n.traffic_quota_gb * least(n.overcommit_traffic, coalesce((SELECT max_overcommit_traffic FROM system_settings WHERE singleton=true), n.overcommit_traffic)))
+		  AND n.capacity_vcpu - coalesce((SELECT sum(r.vcpu) FROM inventory_reservations r WHERE r.node_id IN (SELECT m.id FROM nodes m WHERE m.id=n.id OR m.machine_id=n.machine_id) AND r.status='reserved'),0) >= $3
+		  AND n.capacity_ram_mb - coalesce((SELECT sum(r.ram_mb) FROM inventory_reservations r WHERE r.node_id IN (SELECT m.id FROM nodes m WHERE m.id=n.id OR m.machine_id=n.machine_id) AND r.status='reserved'),0) >= $4
+		  AND n.capacity_disk_gb - coalesce((SELECT sum(r.disk_gb) FROM inventory_reservations r WHERE r.node_id IN (SELECT m.id FROM nodes m WHERE m.id=n.id OR m.machine_id=n.machine_id) AND r.status='reserved'),0) >= $5
+		ORDER BY n.capacity_ram_mb - coalesce((SELECT sum(r.ram_mb) FROM inventory_reservations r WHERE r.node_id IN (SELECT m.id FROM nodes m WHERE m.id=n.id OR m.machine_id=n.machine_id) AND r.status='reserved'),0)
 		FOR UPDATE OF n SKIP LOCKED LIMIT 1
-	`, regionID, virtualization, vcpu, ramMB, diskGB, providerType, excludedNodeIDs, planNode).Scan(&nodeID)
+	`, regionID, virtualization, vcpu, ramMB, diskGB, providerType, excludedNodeIDs, planNode, trafficGB).Scan(&nodeID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", ErrNoCapacity
 	}

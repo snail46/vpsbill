@@ -24,7 +24,7 @@ Hatch 是 VPSBill 自研的宿主机 Agent。它运行在母鸡上，驱动本�
 
 | 能力 | LXD | Podman |
 |---|---|---|
-| 创建（CPU/内存/磁盘限制、静态内网 IP） | ✅ | ✅（磁盘配额需 XFS pquota，需开启 `disk_quota`） |
+| 创建（CPU/内存/磁盘限制、静态内网 IP） | ✅（存储池须为 zfs/btrfs/lvm） | ✅（存储须在开启项目配额的 XFS 上，安装脚本自动创建） |
 | 带宽限速 | ✅ `limits.ingress/egress` | ✅ `tc`（宿主机 veth 上 tbf 限下行、ingress police 限上行） |
 | 开关机、重启、暂停/恢复 | ✅ | ✅ |
 | 重装（保留内网 IP 与端口映射） | ✅ | ✅ |
@@ -54,7 +54,9 @@ fib daddr type local tcp dport 20022 dnat to 10.20.30.254:22
 - Linux + systemd + nftables（`nft` 命令）。Podman 限速还需要 `tc` 和 `nsenter`（iproute2、util-linux）。
 - **LXD**：网桥必须设置静态 `ipv4.address`（例如 `lxc network set lxdbr0 ipv4.address 10.20.30.1/24`）。Agent 从子网高位向下分配静态 IP，低位留给网桥 DHCP。在 LXD 中导入可售镜像并设置别名（`lxc image copy images:debian/12 local: --alias debian12`），别名就是套餐里的系统模板 ID。`images:` 上的官方镜像（包括 `/cloud` 变体）都不带 SSH 服务端；Agent 设置 root 密码时发现没有 sshd，会用镜像自带的包管理器（apt / dnf / apk）安装 `openssh-server`，所以实例需要能访问软件源，首次开通会多花半分钟左右。已经预装 sshd 的自制镜像不受影响。
 - **Incus**：与 LXD 相同，网桥也要有静态 `ipv4.address`（例如 `incus network create hatchbr0 ipv4.address=10.77.0.1/24 ipv4.nat=true ipv6.address=none`）。安装 Agent 时用 `--runtime incus --lxd-network hatchbr0`。
-- **Podman**：启用 rootful API 套接字（`systemctl enable --now podman.socket`）和开机拉起（`systemctl enable podman-restart.service`）。网络默认使用 `podman`，也可以用 `podman network create` 另建。Podman 默认网络是 `10.88.0.0/16`，如果宿主机已有网桥占用这个网段（例如某些 Incus 面板），请另建网络（`podman network create --subnet 10.89.0.0/24 hatchpod`），构建镜像时也加 `--network host`。镜像需要以 systemd 等 init 为入口并带 sshd，否则无法当作 VPS 使用。
+- **Podman**：安装脚本（`--runtime podman`）会自动完成：安装 Podman，在一个预分配文件里建 XFS 数据盘并以项目配额（prjquota）挂载到 `/var/lib/hatch-podman`、把 Podman 存储移过去（任何宿主机文件系统都行，大小用 `--podman-disk 20G` 指定，默认剩余空间减 2 GiB）；启用 API 套接字和开机拉起；网络不存在时按 `10.89.0.0/24` 创建；构建两个最小镜像 `localhost/hatch-debian12:latest`（systemd）和 `localhost/hatch-alpine:latest`（OpenRC），空闲占用只有几 MB，**1 核 / 64 MB / 1 GB** 的实例可以正常运行和 SSH 登录。自带镜像需要以 init 为入口并带 sshd。
+- **硬盘限额是强制的**：每台实例都有硬盘上限，不能开启时 Agent 拒绝创建实例，并在上报里标明原因，平台随即暂停该母机销售。LXD/Incus 的存储池必须是 zfs、btrfs 或 lvm（`dir` 无法限制）；Podman 必须是上面的 XFS 数据盘。
+- **zram**（默认开启，`--no-zram` 关闭）：用一半内存做压缩交换，实例最多还能用与内存限额相同大小的交换，小内存母机更稳。
 - 宿主机的 FORWARD 策略需要放行 DNAT 后的流量（Agent 自己的 forward 链已放行 `ct status dnat`）。
 - **IPv6**（可选）：给网桥配置公网 IPv6 前缀，例如 `lxc network set lxdbr0 ipv6.address 2001:db8:1::1/64 ipv6.nat false`，或 `podman network create --ipv6 --subnet 2001:db8:2::/64 vps`。Agent 在前缀内随机分配地址，防止被顺序扫描。前缀最好由服务商路由到宿主机；如果服务商把 /64 直接放在网卡链路上（on-link），在配置里设置 `"ipv6_ndp_interface": "eth0"`，Agent 会开启 `proxy_ndp` 并为每个实例地址发布邻居代理。套餐勾选 IPv6 后，节点网桥必须有 IPv6 子网，否则开通会被拒绝。
 
@@ -96,11 +98,12 @@ fib daddr type local tcp dport 20022 dnat to 10.20.30.254:22
   "nft_table": "hatch",
   "capacity": { "vcpu": 16, "ram_mb": 60000, "disk_gb": 900 },
   "lxd": { "socket": "/var/snap/lxd/common/lxd/unix.socket", "network": "lxdbr0", "storage_pool": "default" },
-  "podman": { "socket": "/run/podman/podman.sock", "network": "podman", "disk_quota": false }
+  "podman": { "socket": "/run/podman/podman.sock", "network": "podman" }
 }
 ```
 
-- `capacity` 不填时自动探测整机 CPU、内存；磁盘取 LXD/Incus 存储池的容量（只启用 Podman 时取 `state_dir` 所在磁盘）。建议按可售额度填写，给宿主机留余量。另外 `port_range_start`/`port_range_end` 不要和同机其他 NAT 面板（如 LXDAPI）的端口段重叠。
+- Agent 自动检测整机 CPU、内存，磁盘取各运行时实例存储（LXD/Incus 存储池、Podman 数据盘）的总和。`capacity` 只能**调低**检测值（给宿主机留余量），填得比检测值高无效。超售在平台上按倍数设置，不在这里。
+- Agent 还上报本机标识（`/etc/machine-id` 的哈希）和负载（负载、内存、交换、各存储用量）。同一台机器上的多个 Agent 会被识别出来，资源合并计算。另外 `port_range_start`/`port_range_end` 不要和同机其他 NAT 面板（如 LXDAPI）的端口段重叠。
 - `server_url` 必须是 HTTPS（仅回环地址允许 HTTP，用于测试）。计费站点使用私有 CA 时，可以用 `ca_file` 指定。
 - 删除 `lxd` 或 `podman` 段落即可禁用对应运行时。
 - 同一台宿主机要运行两个 Agent（例如一个管 Incus、一个管 LXD snap，分别接入为两个节点）时，给第二个 Agent 单独的配置文件、`state_dir`、端口段和 `nft_table`（如 `"nft_table": "hatch_lxd"`），并复制一份 systemd 单元改用新配置、`ReadWritePaths` 指向新的 `state_dir`。`nft_table` 默认 `hatch`，两个 Agent 共用同一张表会互相覆盖端口转发。

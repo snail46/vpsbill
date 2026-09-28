@@ -22,6 +22,7 @@ import { TicketConversation, ticketStatusLabel } from './shared/ui'
 import { ticketRequestBody, useAttachmentLimit } from './TicketAttachments'
 import { walletMoney } from './Wallet'
 import { formatDate, formatTime } from './shared/time'
+import { OvercommitDialog, SupplyDetails, overcommitText } from './Supply'
 
 type Tab = 'market' | 'mine' | 'coupons' | 'tickets' | 'chat'
 const tabs: [Tab, string, typeof Store][] = [
@@ -160,9 +161,14 @@ function Market({ customer }: { customer: CustomerIdentity }) {
               </div>
               <div>
                 <dt>剩余可售</dt>
-                <dd>{node.free_vcpu} 核 · {node.free_ram_mb} MB · {node.free_disk_gb} GB（机主 Agent 上报）</dd>
+                <dd>{node.free_vcpu} 核 · {node.free_ram_mb} MB · {node.free_disk_gb} GB</dd>
+              </div>
+              <div>
+                <dt>超售</dt>
+                <dd>{overcommitText(node.overcommit)}</dd>
               </div>
             </dl>
+            <SupplyDetails node={node} sellable={{ vcpu: node.capacity_vcpu, ram_mb: node.capacity_ram_mb, disk_gb: node.capacity_disk_gb }} />
             {!node.mine && (
               <button className="text-button report-link" onClick={() => setReporting(node)}>
                 举报资源不符或超售
@@ -182,7 +188,7 @@ function Market({ customer }: { customer: CustomerIdentity }) {
                     <strong>{planPrice(plan)}</strong>
                     <button
                       className="primary-button compact"
-                      disabled={node.mine || node.status !== 'online'}
+                      disabled={node.mine || node.status !== 'online' || !!node.health_hold_reason}
                       onClick={() => setBuying({ node, plan })}
                     >
                       购买
@@ -605,6 +611,7 @@ function HostedNodeCard({
   const [editing, setEditing] = useState(false)
   const [planForm, setPlanForm] = useState<PlanRecord | 'new' | null>(null)
   const [retiring, setRetiring] = useState(false)
+  const [overselling, setOverselling] = useState(false)
 
   async function call(path: string, body: unknown, message: string) {
     onError('')
@@ -652,13 +659,15 @@ function HostedNodeCard({
       )}
       <dl className="market-facts">
         <div><dt>线路</dt><dd>{node.line_description}</dd></div>
-        <div><dt>资源</dt><dd>{node.capacity_vcpu} 核 / {node.capacity_ram_mb} MB / {node.capacity_disk_gb} GB，剩余 {node.free_vcpu} 核 / {node.free_ram_mb} MB / {node.free_disk_gb} GB</dd></div>
+        <div><dt>可售资源</dt><dd>{node.capacity_vcpu} 核 / {node.capacity_ram_mb} MB / {node.capacity_disk_gb} GB，剩余 {node.free_vcpu} 核 / {node.free_ram_mb} MB / {node.free_disk_gb} GB</dd></div>
         <div><dt>运行实例</dt><dd>{node.active_services}</dd></div>
         <div><dt>托管中 / 待结算</dt><dd>{walletMoney(node.escrow_holding_minor, data.currency)} / {walletMoney(node.host_pending_minor, data.currency)}</dd></div>
         <div><dt>已到账</dt><dd>{walletMoney(node.host_released_minor, data.currency)}</dd></div>
       </dl>
+      <SupplyDetails node={node} sellable={{ vcpu: node.capacity_vcpu, ram_mb: node.capacity_ram_mb, disk_gb: node.capacity_disk_gb }} />
       <div className="form-actions">
         <button className="secondary-button" onClick={() => setEditing(value => !value)}>编辑信息</button>
+        <button className="secondary-button" onClick={() => setOverselling(true)}>超售设置</button>
         <button className="secondary-button" onClick={() => void call(`/api/v1/customer/hosting/nodes/${node.id}/listing`, { listed: node.listing_status !== 'listed' }, node.listing_status === 'listed' ? '已暂停销售，现有实例不受影响' : '已恢复销售')}>
           {node.listing_status === 'listed' ? '暂停销售' : '恢复销售'}
         </button>
@@ -667,6 +676,20 @@ function HostedNodeCard({
         </button>
         <button className="danger-button" onClick={() => setRetiring(true)}>下架母机</button>
       </div>
+      {overselling && (
+        <OvercommitDialog
+          node={node}
+          name={node.name}
+          limits={data.overcommit_limits}
+          endpoint={`/api/v1/customer/hosting/nodes/${node.id}/overcommit`}
+          onClose={() => setOverselling(false)}
+          onSaved={() => {
+            setOverselling(false)
+            onNotice('超售设置已保存')
+            onChanged()
+          }}
+        />
+      )}
       {editing && (
         <form className="form-grid" onSubmit={saveInfo}>
           <NodeInfoFields node={node} regions={data.regions} editing />
@@ -851,7 +874,7 @@ function HostedPlanForm({ node, plan, onClose, onSaved }: { node: HostedNodeReco
       </div>
       {error && <div className="form-error">{error}</div>}
       <p className="muted-text">
-        单个实例配置不能超过母机实际资源（{node.capacity_vcpu} 核 / {node.capacity_ram_mb} MB / {node.capacity_disk_gb} GB）；可售总量按实际资源预留，不会超售。
+        单个实例配置不能超过母机真实资源（{node.reported_vcpu} 核 / {node.reported_ram_mb} MB / {node.reported_disk_gb} GB）；可售总量为真实资源乘以「超售设置」里的倍数。
       </p>
       <div className="form-grid">
         <label>
@@ -867,7 +890,7 @@ function HostedPlanForm({ node, plan, onClose, onSaved }: { node: HostedNodeReco
           </select>
         </label>
         <label><span>vCPU</span><input name="vcpu" type="number" min="1" required defaultValue={plan?.vcpu ?? 1} /></label>
-        <label><span>内存 MB</span><input name="ram_mb" type="number" min="128" required defaultValue={plan?.ram_mb ?? 512} /></label>
+        <label><span>内存 MB</span><input name="ram_mb" type="number" min="64" required defaultValue={plan?.ram_mb ?? 512} /></label>
         <label><span>磁盘 GB</span><input name="disk_gb" type="number" min="1" required defaultValue={plan?.disk_gb ?? 5} /></label>
         <label><span>月流量 GB（0 = 不限）</span><input name="traffic_gb" type="number" min="0" required defaultValue={plan?.traffic_gb ?? 100} /></label>
         <label><span>下行 Mbps（0 = 不限）</span><input name="network_down_mbps" type="number" min="0" required defaultValue={plan?.network_down_mbps ?? 50} /></label>

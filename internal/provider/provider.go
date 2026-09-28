@@ -142,6 +142,32 @@ type Suspender interface {
 type HostInfo struct {
 	Raw      map[string]any
 	Capacity Capacity
+	// MachineID identifies the physical machine when the backend knows it,
+	// so nodes sharing one are not sold twice.
+	MachineID string
+	// Health is the host's load, when the backend reports it.
+	Health *HostHealth
+}
+
+// HostHealth is a load sample of the whole host.
+type HostHealth struct {
+	CPUs           int         `json:"cpus"`
+	Load1          float64     `json:"load1"`
+	Load5          float64     `json:"load5"`
+	Load15         float64     `json:"load15"`
+	MemTotalMB     int64       `json:"mem_total_mb"`
+	MemAvailableMB int64       `json:"mem_available_mb"`
+	SwapTotalMB    int64       `json:"swap_total_mb"`
+	SwapFreeMB     int64       `json:"swap_free_mb"`
+	Disks          []DiskUsage `json:"disks,omitempty"`
+	// QuotaErrors names runtimes that cannot enforce instance disk sizes.
+	QuotaErrors map[string]string `json:"quota_errors,omitempty"`
+}
+
+type DiskUsage struct {
+	Name    string `json:"name"`
+	TotalGB int64  `json:"total_gb"`
+	UsedGB  int64  `json:"used_gb"`
 }
 
 // Capacity is the node's normalized allocatable capacity.

@@ -143,8 +143,7 @@ func (a *adminCatalog) testNode(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadGateway, map[string]any{"error": "node_unreachable", "message": "节点无响应"})
 		return
 	}
-	totals := info.Capacity
-	if err := a.store.UpdateNodeHealth(r.Context(), id, "online", info.Raw, int64(totals.VCPU), totals.RAMMB, totals.DiskGB); err != nil {
+	if err := a.store.RecordNodeReport(r.Context(), id, info); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "internal_error"})
 		return
 	}
@@ -392,8 +391,8 @@ func validatePlan(plan postgres.Plan) string {
 	if !containsString(descriptor.VirtualizationTypes, plan.Virtualization) {
 		return descriptor.Name + " 支持的虚拟化类型为 " + strings.Join(descriptor.VirtualizationTypes, " / ")
 	}
-	if plan.VCPU < 1 || plan.RAMMB < 128 || plan.DiskGB < 1 {
-		return "CPU、内存和磁盘参数无效"
+	if plan.VCPU < 1 || plan.RAMMB < 64 || plan.DiskGB < 1 {
+		return "CPU 至少 1 核、内存至少 64 MB、磁盘至少 1 GB"
 	}
 	if !plan.AssignNAT && !plan.AssignIPv4 && !plan.AssignIPv6 {
 		return "套餐至少需要启用一种网络方式"

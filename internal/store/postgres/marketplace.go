@@ -71,7 +71,8 @@ func createEscrow(ctx context.Context, tx pgx.Tx, serviceID, invoiceID string, g
 // the paid period and the node must have room for the instances.
 func validateHostedOrder(ctx context.Context, tx pgx.Tx, planID, buyerID, regionID, cycle string, quantity int, vcpu, ramMB, diskGB int) error {
 	var nodeID, owner *string
-	if err := tx.QueryRow(ctx, `SELECT node_id, owner_account_id FROM plans WHERE id=$1`, planID).Scan(&nodeID, &owner); err != nil {
+	var trafficGB int64
+	if err := tx.QueryRow(ctx, `SELECT node_id, owner_account_id, traffic_gb FROM plans WHERE id=$1`, planID).Scan(&nodeID, &owner, &trafficGB); err != nil {
 		return err
 	}
 	if nodeID == nil {
@@ -82,13 +83,21 @@ func validateHostedOrder(ctx context.Context, tx pgx.Tx, planID, buyerID, region
 	var expires *time.Time
 	var retired *time.Time
 	var freeVCPU, freeRAM, freeDisk int64
+	var hold string
+	var trafficRoom *int64
 	if err := tx.QueryRow(ctx, `
 		SELECT coalesce((SELECT marketplace_enabled FROM system_settings WHERE singleton=true), true), n.region_id, n.status, n.listing_status, n.expires_at, n.retired_at,
-		       n.capacity_vcpu - coalesce((SELECT sum(r.vcpu) FROM inventory_reservations r WHERE r.node_id=n.id AND r.status='reserved'),0),
-		       n.capacity_ram_mb - coalesce((SELECT sum(r.ram_mb) FROM inventory_reservations r WHERE r.node_id=n.id AND r.status='reserved'),0),
-		       n.capacity_disk_gb - coalesce((SELECT sum(r.disk_gb) FROM inventory_reservations r WHERE r.node_id=n.id AND r.status='reserved'),0)
+		       n.capacity_vcpu - coalesce((SELECT sum(r.vcpu) FROM inventory_reservations r WHERE r.node_id IN (SELECT m.id FROM nodes m WHERE m.id=n.id OR m.machine_id=n.machine_id) AND r.status='reserved'),0),
+		       n.capacity_ram_mb - coalesce((SELECT sum(r.ram_mb) FROM inventory_reservations r WHERE r.node_id IN (SELECT m.id FROM nodes m WHERE m.id=n.id OR m.machine_id=n.machine_id) AND r.status='reserved'),0),
+		       n.capacity_disk_gb - coalesce((SELECT sum(r.disk_gb) FROM inventory_reservations r WHERE r.node_id IN (SELECT m.id FROM nodes m WHERE m.id=n.id OR m.machine_id=n.machine_id) AND r.status='reserved'),0),
+		       coalesce(n.health_hold_reason,''),
+		       CASE WHEN coalesce(n.traffic_quota_gb,0)=0 THEN NULL ELSE
+		         floor(n.traffic_quota_gb * least(n.overcommit_traffic, coalesce((SELECT max_overcommit_traffic FROM system_settings WHERE singleton=true), n.overcommit_traffic)))::bigint
+		         - coalesce((SELECT sum(tp.traffic_gb) FROM services ts JOIN plans tp ON tp.id=ts.plan_id
+		                     WHERE ts.node_id IN (SELECT m.id FROM nodes m WHERE m.id=n.id OR m.machine_id=n.machine_id)
+		                       AND ts.status NOT IN ('terminating','terminated') AND tp.traffic_gb>0),0)::bigint END
 		FROM nodes n WHERE n.id=$1 FOR UPDATE OF n
-	`, *nodeID).Scan(&enabled, &nodeRegion, &status, &listing, &expires, &retired, &freeVCPU, &freeRAM, &freeDisk); err != nil {
+	`, *nodeID).Scan(&enabled, &nodeRegion, &status, &listing, &expires, &retired, &freeVCPU, &freeRAM, &freeDisk, &hold, &trafficRoom); err != nil {
 		return err
 	}
 	switch {
@@ -100,6 +109,8 @@ func validateHostedOrder(ctx context.Context, tx pgx.Tx, planID, buyerID, region
 		return &HostedOrderError{"该母机已下架"}
 	case status != "online":
 		return &HostedOrderError{"该母机当前离线，暂不可购买"}
+	case hold != "":
+		return &HostedOrderError{"该母机负载过高，已暂停销售：" + hold}
 	case regionID != nodeRegion:
 		return &HostedOrderError{"地域与母机不一致"}
 	}
@@ -111,6 +122,9 @@ func validateHostedOrder(ctx context.Context, tx pgx.Tx, planID, buyerID, region
 	q := int64(quantity)
 	if freeVCPU < int64(vcpu)*q || freeRAM < int64(ramMB)*q || freeDisk < int64(diskGB)*q {
 		return &HostedOrderError{"该母机剩余资源不足"}
+	}
+	if trafficRoom != nil && trafficGB > 0 && *trafficRoom < trafficGB*q {
+		return &HostedOrderError{"该母机可售月流量不足"}
 	}
 	// The purchase limit counts the buyer's live instances of the plan and
 	// units in unpaid orders that can still be paid.
@@ -183,6 +197,7 @@ type HostedNode struct {
 	CreatedAt          time.Time       `json:"created_at"`
 	Plans              []Plan          `json:"plans"`
 	Services           []HostedService `json:"services,omitempty"`
+	NodeSupply
 }
 
 type HostedNodeInput struct {
@@ -246,8 +261,8 @@ func (m *MarketplaceStore) CreateHostedNode(ctx context.Context, ownerID, userID
 	err = tx.QueryRow(ctx, `
 		INSERT INTO nodes(region_id,name,provider_type,base_url,api_key_ciphertext,status,virtualization_types,capacity,
 		                  capacity_vcpu,capacity_ram_mb,capacity_disk_gb,last_seen_at,owner_account_id,location,line_description,
-		                  expires_at,traffic_quota_gb,listing_status)
-		SELECT r.id,$2,'hatch',$3,$4,'online',$5,$6,$7,$8,$9,now(),$10,$11,$12,$13::date,$14,'listed'
+		                  expires_at,traffic_quota_gb,listing_status,reported_vcpu,reported_ram_mb,reported_disk_gb)
+		SELECT r.id,$2,'hatch',$3,$4,'online',$5,$6,$7,$8,$9,now(),$10,$11,$12,$13::date,$14,'listed',$7,$8,$9
 		FROM regions r WHERE r.id=$1 AND r.enabled
 		RETURNING id
 	`, input.RegionID, input.Name, agent.BaseURL, agent.APIKeyCiphertext, agent.VirtualizationTypes, capacity,
@@ -335,9 +350,10 @@ func (m *MarketplaceStore) HostedNodes(ctx context.Context, ownerID string, mark
 		       coalesce(res.vcpu,0),coalesce(res.ram_mb,0),coalesce(res.disk_gb,0),
 		       n.last_seen_at,n.clearance_hold_until,n.retired_at,coalesce(n.retired_reason,''),
 		       (SELECT count(*) FROM services s JOIN plans p ON p.id=s.plan_id WHERE p.node_id=n.id AND s.status IN ('provisioning','active','overdue','suspended'))::int,
-		       coalesce(e.holding,0),coalesce(e.host_pending,0),coalesce(e.host_released,0),coalesce(e.fee,0),n.created_at
+		       coalesce(e.holding,0),coalesce(e.host_pending,0),coalesce(e.host_released,0),coalesce(e.fee,0),n.created_at,
+		       `+nodeSupplyColumns+`
 		FROM nodes n JOIN accounts a ON a.id=n.owner_account_id JOIN regions r ON r.id=n.region_id
-		LEFT JOIN LATERAL (SELECT sum(vcpu) vcpu, sum(ram_mb) ram_mb, sum(disk_gb) disk_gb FROM inventory_reservations WHERE node_id=n.id AND status='reserved') res ON true
+		LEFT JOIN LATERAL (SELECT sum(vcpu) vcpu, sum(ram_mb) ram_mb, sum(disk_gb) disk_gb FROM inventory_reservations WHERE node_id IN (SELECT m.id FROM nodes m WHERE m.id=n.id OR m.machine_id=n.machine_id) AND status='reserved') res ON true
 		LEFT JOIN LATERAL (
 			SELECT sum(CASE WHEN status='holding' THEN gross_minor-released_gross_minor ELSE 0 END)::bigint holding,
 			       sum(CASE WHEN status='holding' THEN host_share_minor-released_host_minor ELSE 0 END)::bigint host_pending,
@@ -354,13 +370,15 @@ func (m *MarketplaceStore) HostedNodes(ctx context.Context, ownerID string, mark
 	for rows.Next() {
 		var node HostedNode
 		var reservedVCPU, reservedRAM, reservedDisk int64
-		if err := rows.Scan(&node.ID, &node.Name, &node.OwnerAccountID, &node.OwnerName, &node.OwnerEmail, &node.OwnerBalanceMinor, &node.RegionID, &node.RegionName, &node.Location, &node.LineDescription,
+		targets := []any{&node.ID, &node.Name, &node.OwnerAccountID, &node.OwnerName, &node.OwnerEmail, &node.OwnerBalanceMinor, &node.RegionID, &node.RegionName, &node.Location, &node.LineDescription,
 			&node.Status, &node.ListingStatus, &node.VirtualizationTypes, &node.ExpiresAt, &node.TrafficQuotaGB,
 			&node.CapacityVCPU, &node.CapacityRAMMB, &node.CapacityDiskGB, &node.CapVCPU, &node.CapRAMMB, &node.CapDiskGB, &reservedVCPU, &reservedRAM, &reservedDisk,
 			&node.LastSeenAt, &node.ClearanceHoldUntil, &node.RetiredAt, &node.RetiredReason, &node.ActiveServices,
-			&node.EscrowHoldingMinor, &node.HostPendingMinor, &node.HostReleasedMinor, &node.FeeMinor, &node.CreatedAt); err != nil {
+			&node.EscrowHoldingMinor, &node.HostPendingMinor, &node.HostReleasedMinor, &node.FeeMinor, &node.CreatedAt}
+		if err := rows.Scan(append(targets, node.NodeSupply.targets()...)...); err != nil {
 			return nil, err
 		}
+		node.finish(ownerID == "" && !marketOnly)
 		node.FreeVCPU = max(node.CapacityVCPU-reservedVCPU, 0)
 		node.FreeRAMMB = max(node.CapacityRAMMB-reservedRAM, 0)
 		node.FreeDiskGB = max(node.CapacityDiskGB-reservedDisk, 0)

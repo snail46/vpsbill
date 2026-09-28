@@ -124,9 +124,12 @@ type Maintainer interface {
 	Maintain(ctx context.Context, name string) error
 }
 
-// DiskReporter is implemented by runtimes that keep instances in their own
-// storage pool; its size replaces the state directory's file system as the
-// host's disk capacity.
-type DiskReporter interface {
-	DiskCapacityGB(ctx context.Context) (int64, error)
+// StorageReporter is implemented by runtimes that keep instances in their
+// own storage: its size counts as the host's disk capacity, and it must be
+// able to enforce every instance's disk size.
+type StorageReporter interface {
+	// Storage returns the size and used bytes of the instance storage.
+	Storage(ctx context.Context) (total, used int64, err error)
+	// CheckDiskQuota fails when instance disk sizes cannot be enforced.
+	CheckDiskQuota(ctx context.Context) error
 }

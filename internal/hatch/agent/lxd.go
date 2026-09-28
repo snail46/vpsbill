@@ -283,21 +283,45 @@ func (l *LXD) Exec(ctx context.Context, name, script string, env map[string]stri
 	return nil
 }
 
-// DiskCapacityGB reports the total size of the storage pool instances use.
-func (l *LXD) DiskCapacityGB(ctx context.Context) (int64, error) {
+// Storage reports the size and use of the storage pool instances use.
+func (l *LXD) Storage(ctx context.Context) (int64, int64, error) {
 	metadata, err := l.request(ctx, http.MethodGet, "/1.0/storage-pools/"+url.PathEscape(l.config.StoragePool)+"/resources", nil)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	var resources struct {
 		Space struct {
 			Total int64 `json:"total"`
+			Used  int64 `json:"used"`
 		} `json:"space"`
 	}
 	if err := json.Unmarshal(metadata, &resources); err != nil {
-		return 0, err
+		return 0, 0, err
 	}
-	return resources.Space.Total >> 30, nil
+	return resources.Space.Total, resources.Space.Used, nil
+}
+
+// quotaDrivers are the storage drivers that enforce a root disk size. The
+// dir driver only does with project quotas on the backing file system,
+// which cannot be checked through the API, so it is refused.
+var quotaDrivers = map[string]bool{"zfs": true, "btrfs": true, "lvm": true, "lvmcluster": true, "ceph": true}
+
+// CheckDiskQuota fails unless the pool's driver limits root disk sizes.
+func (l *LXD) CheckDiskQuota(ctx context.Context) error {
+	metadata, err := l.request(ctx, http.MethodGet, "/1.0/storage-pools/"+url.PathEscape(l.config.StoragePool), nil)
+	if err != nil {
+		return fmt.Errorf("inspect storage pool %s: %w", l.config.StoragePool, err)
+	}
+	var pool struct {
+		Driver string `json:"driver"`
+	}
+	if err := json.Unmarshal(metadata, &pool); err != nil {
+		return err
+	}
+	if !quotaDrivers[pool.Driver] {
+		return fmt.Errorf("存储池 %s 使用 %s 驱动，无法限制实例硬盘；请改用 btrfs、zfs 或 lvm 存储池", l.config.StoragePool, pool.Driver)
+	}
+	return nil
 }
 
 // status reads the status from the instance record, which does not need the

@@ -19,8 +19,10 @@ import (
 )
 
 // Podman drives containers through the libpod REST API. Images must run an
-// init system and sshd (for example a systemd-based image) to behave like a
-// VPS; the agent only sets the root password inside them.
+// init system and sshd (systemd on Debian, OpenRC on Alpine; see
+// deploy/podman-images) to behave like a VPS; the agent only sets the root
+// password inside them. Every container gets a root file system size limit,
+// which needs the store on XFS with project quotas.
 type Podman struct {
 	client *unixClient
 	config PodmanConfig
@@ -33,6 +35,10 @@ type Podman struct {
 
 	diskMu sync.Mutex
 	disk   map[string]diskSample // instance name -> last measured root fs size
+
+	// mount and space inspect the host file systems; replaced in tests.
+	mount func(path string) (mountEntry, bool)
+	space func(path string) (int64, int64, error)
 }
 
 const libpod = "/v4.0.0/libpod"
@@ -40,6 +46,7 @@ const libpod = "/v4.0.0/libpod"
 func NewPodman(config PodmanConfig) *Podman {
 	return &Podman{
 		client: newUnixClient(config.Socket), config: config, run: runCommand, shaped: map[string]string{}, disk: map[string]diskSample{},
+		mount: mountOf, space: fsSpace,
 		interfaceName: func(index int) (string, error) {
 			iface, err := net.InterfaceByIndex(index)
 			if err != nil {
@@ -120,7 +127,58 @@ func (p *Podman) Network(ctx context.Context) (NetworkInfo, error) {
 	return info, nil
 }
 
+// store reads where Podman keeps images and containers.
+func (p *Podman) store(ctx context.Context) (driver, root string, err error) {
+	var info struct {
+		Store struct {
+			GraphDriverName string `json:"graphDriverName"`
+			GraphRoot       string `json:"graphRoot"`
+		} `json:"store"`
+	}
+	if err := p.request(ctx, http.MethodGet, "/info", nil, &info); err != nil {
+		return "", "", fmt.Errorf("read podman info: %w", err)
+	}
+	return info.Store.GraphDriverName, info.Store.GraphRoot, nil
+}
+
+// Storage reports the size and use of the file system holding the store.
+func (p *Podman) Storage(ctx context.Context) (int64, int64, error) {
+	_, root, err := p.store(ctx)
+	if err != nil {
+		return 0, 0, err
+	}
+	return p.space(root)
+}
+
+// CheckDiskQuota requires the overlay driver on XFS with project quotas,
+// the only setup where Podman can cap a container's root file system.
+func (p *Podman) CheckDiskQuota(ctx context.Context) error {
+	driver, root, err := p.store(ctx)
+	if err != nil {
+		return err
+	}
+	if driver != "overlay" {
+		return fmt.Errorf("Podman 存储驱动是 %s，需要 overlay 才能限制实例硬盘", driver)
+	}
+	entry, ok := p.mount(root)
+	if !ok || !hasProjectQuota(entry) {
+		return errNoProjectQuota
+	}
+	return nil
+}
+
+// Small instances: swap may add as much again as the memory limit (backed
+// by zram on hosts set up by the installer), and a process cap keeps a fork
+// bomb inside its container.
+const (
+	podmanSwapFactor = 2
+	podmanPidsLimit  = 1024
+	// podmanLogSize caps the init's console log kept by conmon.
+	podmanLogSize = 1 << 20
+)
+
 func (p *Podman) Create(ctx context.Context, spec RuntimeSpec) error {
+	memory := int64(spec.RAMMB) << 20
 	body := map[string]any{
 		"name": spec.Name, "image": spec.Image, "hostname": spec.Name,
 		"systemd":        "true",
@@ -132,11 +190,11 @@ func (p *Podman) Create(ctx context.Context, spec RuntimeSpec) error {
 		},
 		"resource_limits": map[string]any{
 			"cpu":    map[string]int64{"quota": int64(spec.VCPU) * 100000, "period": 100000},
-			"memory": map[string]int64{"limit": int64(spec.RAMMB) << 20},
+			"memory": map[string]int64{"limit": memory, "swap": memory * podmanSwapFactor},
+			"pids":   map[string]int64{"limit": podmanPidsLimit},
 		},
-	}
-	if p.config.DiskQuota {
-		body["storage_opts"] = map[string]string{"size": fmt.Sprintf("%dG", spec.DiskGB)}
+		"storage_opts":      map[string]string{"size": fmt.Sprintf("%dG", spec.DiskGB)},
+		"log_configuration": map[string]any{"driver": "k8s-file", "size": podmanLogSize},
 	}
 	if err := p.request(ctx, http.MethodPost, "/containers/create", body, nil); err != nil {
 		return err

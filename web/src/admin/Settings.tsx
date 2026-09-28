@@ -245,7 +245,16 @@ export type SiteSettingsRecord = {
   marketplace: MarketplaceSettings
 }
 
-export type MarketplaceSettings = { enabled: boolean; fee_percent: number; offline_hours: number; trade_fee_percent: number }
+export type MarketplaceSettings = {
+  enabled: boolean
+  fee_percent: number
+  offline_hours: number
+  trade_fee_percent: number
+  max_overcommit_cpu: number
+  max_overcommit_ram: number
+  max_overcommit_disk: number
+  max_overcommit_traffic: number
+}
 
 export type MailNotificationSettings = {
   admin_emails: string
@@ -298,7 +307,10 @@ export function SiteSettingsView() {
   const [clearPassword, setClearPassword] = useState(false)
   const [notifications, setNotifications] = useState<MailNotificationSettings>(defaultMailNotifications)
   const [attachmentMB, setAttachmentMB] = useState('5')
-  const [marketplace, setMarketplace] = useState<MarketplaceSettings>({ enabled: true, fee_percent: 20, offline_hours: 24, trade_fee_percent: 20 })
+  const [marketplace, setMarketplace] = useState<MarketplaceSettings>({
+    enabled: true, fee_percent: 20, offline_hours: 24, trade_fee_percent: 20,
+    max_overcommit_cpu: 4, max_overcommit_ram: 1.5, max_overcommit_disk: 2, max_overcommit_traffic: 3,
+  })
   const [saving, setSaving] = useState(false)
   const [testing, setTesting] = useState(false)
   const [error, setError] = useState('')
@@ -623,6 +635,22 @@ export function SiteSettingsView() {
             <span>交易市场每笔成交手续费（%，0–90，卖家承担）</span>
             <input type="number" min={0} max={90} step={0.5} value={marketplace.trade_fee_percent} onChange={event => setMarketplace(current => ({ ...current, trade_fee_percent: Number(event.target.value) }))} />
           </label>
+
+          <fieldset className="wide">
+            <legend>超售倍数上限（所有母机，含平台自营）</legend>
+            <small>母机可售资源 = Agent 检测的真实资源 × 母机设置的倍数，倍数不能超过这里的上限，并公开显示给买家。</small>
+          </fieldset>
+          {([
+            ['max_overcommit_cpu', 'CPU（建议 4）'],
+            ['max_overcommit_ram', '内存（建议 1.5）'],
+            ['max_overcommit_disk', '硬盘（建议 2）'],
+            ['max_overcommit_traffic', '月流量（建议 3）'],
+          ] as const).map(([key, label]) => (
+            <label key={key}>
+              <span>{label}</span>
+              <input type="number" min={1} max={20} step={0.1} value={marketplace[key]} onChange={event => setMarketplace(current => ({ ...current, [key]: Number(event.target.value) }))} />
+            </label>
+          ))}
         </div>
 
         <div className="form-actions">

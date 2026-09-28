@@ -77,6 +77,9 @@ func fakeLibpod(t *testing.T) (string, *map[string]any) {
 		}
 		_ = json.NewEncoder(w).Encode(body)
 	})
+	mux.HandleFunc("GET /v4.0.0/libpod/info", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"store":{"graphDriverName":"overlay","graphRoot":"/var/lib/hatch/podman-storage/storage"}}`))
+	})
 	server := &http.Server{Handler: mux}
 	go func() { _ = server.Serve(listener) }()
 	t.Cleanup(func() { _ = server.Close() })
@@ -98,6 +101,14 @@ func TestPodmanAppliesBandwidthLimitsOncePerVeth(t *testing.T) {
 	err := runtime.Create(ctx, RuntimeSpec{Name: "svc", Image: "vps:latest", VCPU: 1, RAMMB: 512, DiskGB: 5, IPv4: netip.MustParseAddr("10.88.0.200"), NetworkDownMbps: 100, NetworkUpMbps: 20})
 	if err != nil {
 		t.Fatal(err)
+	}
+	limits := (*created)["resource_limits"].(map[string]any)
+	memory := limits["memory"].(map[string]any)
+	if memory["limit"] != float64(512<<20) || memory["swap"] != float64(1024<<20) || limits["pids"].(map[string]any)["limit"] != float64(podmanPidsLimit) {
+		t.Fatalf("resource limits = %v", limits)
+	}
+	if size := (*created)["storage_opts"].(map[string]any)["size"]; size != "5G" {
+		t.Fatalf("disk size limit = %v", size)
 	}
 	if labels := (*created)["labels"].(map[string]any); labels[labelDown] != "100" || labels[labelUp] != "20" {
 		t.Fatalf("limits not stored as labels: %v", labels)
@@ -140,5 +151,26 @@ func TestPodmanReportsCachedDiskUsage(t *testing.T) {
 	}
 	if sizeQueries != 1 {
 		t.Fatalf("root fs measured %d times, want once per TTL", sizeQueries)
+	}
+}
+
+func TestPodmanRequiresProjectQuota(t *testing.T) {
+	socket, _ := fakeLibpod(t)
+	runtime := NewPodman(PodmanConfig{Socket: socket, Network: "podman"})
+	var asked string
+	mounts := map[string]mountEntry{
+		"quota":   {Point: "/var/lib/hatch/podman-storage", FSType: "xfs", SuperOptions: "rw,attr2,inode64,prjquota"},
+		"noquota": {Point: "/", FSType: "xfs", SuperOptions: "rw,attr2,inode64,noquota"},
+		"ext4":    {Point: "/", FSType: "ext4", SuperOptions: "rw"},
+	}
+	for name, entry := range mounts {
+		runtime.mount = func(path string) (mountEntry, bool) { asked = path; return entry, true }
+		err := runtime.CheckDiskQuota(context.Background())
+		if (err == nil) != (name == "quota") {
+			t.Fatalf("%s: err = %v", name, err)
+		}
+	}
+	if asked != "/var/lib/hatch/podman-storage/storage" {
+		t.Fatalf("checked %q instead of the graph root", asked)
 	}
 }

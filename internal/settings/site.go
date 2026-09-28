@@ -178,6 +178,11 @@ func (m *Manager) UpdateSite(ctx context.Context, in SiteInput, actorID string) 
 	if in.Marketplace.TradeFeePercent < 0 || in.Marketplace.TradeFeePercent > 90 {
 		return invalid("交易市场手续费比例必须在 0–90% 之间")
 	}
+	for _, ratio := range []float64{in.Marketplace.MaxOvercommitCPU, in.Marketplace.MaxOvercommitRAM, in.Marketplace.MaxOvercommitDisk, in.Marketplace.MaxOvercommitTraffic} {
+		if ratio < 1 || ratio > 20 {
+			return invalid("超售倍数上限必须在 1–20 之间")
+		}
+	}
 	notificationsJSON, err := json.Marshal(notifications)
 	if err != nil {
 		return SiteView{}, err
@@ -205,13 +210,15 @@ func (m *Manager) UpdateSite(ctx context.Context, in SiteInput, actorID string) 
 		    notification_webhook_url=$10,notification_webhook_secret_encrypted=$11,
 		    smtp_host=$12,smtp_port=$13,smtp_username=$14,smtp_password_encrypted=$15,smtp_from=$16,smtp_security=$17,
 		    mail_notifications=$18,ticket_attachment_max_mb=$19,
-		    marketplace_enabled=$20,marketplace_fee_percent=$21,marketplace_offline_hours=$22,trade_fee_percent=$23,admin_url=$24,updated_at=now()
+		    marketplace_enabled=$20,marketplace_fee_percent=$21,marketplace_offline_hours=$22,trade_fee_percent=$23,admin_url=$24,
+		    max_overcommit_cpu=$25,max_overcommit_ram=$26,max_overcommit_disk=$27,max_overcommit_traffic=$28,updated_at=now()
 		WHERE singleton=true
 	`, appName, publicURL, timezone,
 		seconds(*durations[0].target), seconds(*durations[1].target), seconds(*durations[2].target),
 		seconds(*durations[3].target), seconds(*durations[4].target), seconds(*durations[5].target),
 		notificationURL, notificationEnc, smtp.Host, smtp.Port, smtp.Username, smtpPasswordEnc, smtp.From, smtp.Security, notificationsJSON, in.TicketAttachmentMaxMB,
-		in.Marketplace.Enabled, in.Marketplace.FeePercent, in.Marketplace.OfflineHours, in.Marketplace.TradeFeePercent, adminURL)
+		in.Marketplace.Enabled, in.Marketplace.FeePercent, in.Marketplace.OfflineHours, in.Marketplace.TradeFeePercent, adminURL,
+		in.Marketplace.MaxOvercommitCPU, in.Marketplace.MaxOvercommitRAM, in.Marketplace.MaxOvercommitDisk, in.Marketplace.MaxOvercommitTraffic)
 	if err != nil {
 		return SiteView{}, err
 	}

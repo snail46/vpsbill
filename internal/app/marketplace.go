@@ -27,7 +27,7 @@ var HostingRules = []string{
 	"资源共享：托管旨在将用户的闲置服务器接入平台以分摊成本。不建议以高额盈利为唯一目的的大规模托管。",
 	"清退保障：母鸡离线满 24 小时系统或管理员将进行清退（如有特殊原因需提前联系管理员说明）。如服务器因租约到期、硬件故障或不可抗力无法继续提供服务，需按照实例剩余价值（托管余额）的 2 倍清退所有受影响的实例。",
 	"工单响应：托管后可能会有用户针对网络、系统等问题提交相关工单，请务必及时登录平台处理，保证服务质量。平台管理员可以查看并处理这些工单，但托管方是第一处理人。",
-	"真实合规：需真实填写母鸡地理位置、线路描述、到期时间、流量限制等，并合理分配资源（不建议过度超售），严禁虚假宣传。",
+	"真实合规：需真实填写母鸡地理位置、线路描述、到期时间、流量限制等，严禁虚假宣传。资源以 Agent 检测值为准，可在平台上限内设置超售倍数并公开展示；母机持续负载过高会自动暂停销售。",
 	"交流群组：每台托管母鸡有独立聊天室，包含机主和各个购买方，管理员可以查看全部聊天记录。",
 }
 
@@ -150,7 +150,7 @@ func (a *marketplaceAPI) market(w http.ResponseWriter, r *http.Request) {
 		result = append(result, listing{HostedNode: node, Mine: mine})
 	}
 	runtime := a.settings.Current()
-	writeJSON(w, http.StatusOK, map[string]any{"data": map[string]any{"nodes": result, "fee_percent": runtime.Marketplace.FeePercent}})
+	writeJSON(w, http.StatusOK, map[string]any{"data": map[string]any{"nodes": result, "fee_percent": runtime.Marketplace.FeePercent, "overcommit_limits": overcommitLimits(runtime)}})
 }
 
 // ---- Hosting center (the host's side) ----
@@ -175,14 +175,15 @@ func (a *marketplaceAPI) hosting(w http.ResponseWriter, r *http.Request) {
 	runtime := a.settings.Current()
 	server := strings.TrimRight(runtime.PublicURL, "/")
 	writeJSON(w, http.StatusOK, map[string]any{"data": map[string]any{
-		"enabled":       runtime.Marketplace.Enabled,
-		"fee_percent":   runtime.Marketplace.FeePercent,
-		"offline_hours": runtime.Marketplace.OfflineHours,
-		"rules":         HostingRules,
-		"nodes":         nodes,
-		"regions":       regions,
-		"balance_minor": wallet.BalanceMinor,
-		"currency":      wallet.Currency,
+		"enabled":           runtime.Marketplace.Enabled,
+		"fee_percent":       runtime.Marketplace.FeePercent,
+		"offline_hours":     runtime.Marketplace.OfflineHours,
+		"overcommit_limits": overcommitLimits(runtime),
+		"rules":             HostingRules,
+		"nodes":             nodes,
+		"regions":           regions,
+		"balance_minor":     wallet.BalanceMinor,
+		"currency":          wallet.Currency,
 		"install_command": "curl -fsSL " + server + "/api/v1/agent/download/install.sh | sh -s -- --server " + server +
 			" --runtime lxd,podman --public-ip <本机公网 IPv4>",
 	}})
@@ -429,9 +430,11 @@ func (in *hostedPlanInput) plan(node postgres.Node) (postgres.Plan, string) {
 		return postgres.Plan{}, "套餐名称需为 2-40 个字符"
 	case !containsString(node.VirtualizationTypes, in.Virtualization):
 		return postgres.Plan{}, "这台母机不支持所选虚拟化类型"
-	case in.VCPU < 1 || in.RAMMB < 128 || in.DiskGB < 1:
-		return postgres.Plan{}, "CPU、内存和磁盘参数无效"
-	case in.VCPU > node.CapacityVCPU || int64(in.RAMMB) > node.CapacityRAMMB || int64(in.DiskGB) > node.CapacityDiskGB:
+	case in.VCPU < 1 || in.RAMMB < 64 || in.DiskGB < 1:
+		return postgres.Plan{}, "CPU 至少 1 核、内存至少 64 MB、磁盘至少 1 GB"
+	// Overselling multiplies the total, but one instance cannot be larger
+	// than the machine itself.
+	case in.VCPU > max(node.ReportedVCPU, 1) || int64(in.RAMMB) > max(node.ReportedRAMMB, 1) || int64(in.DiskGB) > max(node.ReportedDiskGB, 1):
 		return postgres.Plan{}, "单个实例的配置超过了母机的实际资源"
 	case in.TrafficGB < 0 || in.NetworkDownMbps < 0 || in.NetworkUpMbps < 0 || in.NetworkDownMbps > 100000 || in.NetworkUpMbps > 100000:
 		return postgres.Plan{}, "流量或带宽参数无效"

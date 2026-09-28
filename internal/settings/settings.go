@@ -59,10 +59,16 @@ type MarketplaceSettings struct {
 	OfflineHours int     `json:"offline_hours"`
 	// TradeFeePercent is taken from each trading market sale.
 	TradeFeePercent float64 `json:"trade_fee_percent"`
+	// MaxOvercommit* cap the oversell ratio any node may declare.
+	MaxOvercommitCPU     float64 `json:"max_overcommit_cpu"`
+	MaxOvercommitRAM     float64 `json:"max_overcommit_ram"`
+	MaxOvercommitDisk    float64 `json:"max_overcommit_disk"`
+	MaxOvercommitTraffic float64 `json:"max_overcommit_traffic"`
 }
 
 func DefaultMarketplaceSettings() MarketplaceSettings {
-	return MarketplaceSettings{Enabled: true, FeePercent: 20, OfflineHours: 24, TradeFeePercent: 20}
+	return MarketplaceSettings{Enabled: true, FeePercent: 20, OfflineHours: 24, TradeFeePercent: 20,
+		MaxOvercommitCPU: 4, MaxOvercommitRAM: 1.5, MaxOvercommitDisk: 2, MaxOvercommitTraffic: 3}
 }
 
 type PaymentGatewayConfig struct {
@@ -260,12 +266,14 @@ func (m *Manager) reload(ctx context.Context) error {
 		payment_gateway_type,payment_gateway_config_encrypted,
 		smtp_host,smtp_port,smtp_username,smtp_password_encrypted,smtp_from,smtp_security,
 		mail_notifications,ticket_attachment_max_mb,
-		marketplace_enabled,marketplace_fee_percent::float8,marketplace_offline_hours,trade_fee_percent::float8,admin_url
+		marketplace_enabled,marketplace_fee_percent::float8,marketplace_offline_hours,trade_fee_percent::float8,admin_url,
+		max_overcommit_cpu::float8,max_overcommit_ram::float8,max_overcommit_disk::float8,max_overcommit_traffic::float8
 		FROM system_settings WHERE singleton=true`).Scan(&v.AppName, &v.PublicURL, &v.Timezone, &v.PaymentProviderName, &v.PaymentCheckoutURL,
 		&payment, &v.NotificationWebhookURL, &notification, &metrics, &poll, &reconcile, &lifecycle, &lead, &grace, &retention, &gatewayType, &gatewayConfig,
 		&v.SMTP.Host, &v.SMTP.Port, &v.SMTP.Username, &smtpPassword, &v.SMTP.From, &v.SMTP.Security,
 		&mailNotifications, &v.TicketAttachmentMaxMB,
-		&v.Marketplace.Enabled, &v.Marketplace.FeePercent, &v.Marketplace.OfflineHours, &v.Marketplace.TradeFeePercent, &v.AdminURL)
+		&v.Marketplace.Enabled, &v.Marketplace.FeePercent, &v.Marketplace.OfflineHours, &v.Marketplace.TradeFeePercent, &v.AdminURL,
+		&v.Marketplace.MaxOvercommitCPU, &v.Marketplace.MaxOvercommitRAM, &v.Marketplace.MaxOvercommitDisk, &v.Marketplace.MaxOvercommitTraffic)
 	if err != nil {
 		return err
 	}

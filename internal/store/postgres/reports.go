@@ -14,7 +14,7 @@ var ErrReportNotFound = errors.New("report not found")
 // ReportReasons are the reasons a customer can give.
 var ReportReasons = map[string]string{
 	"resources":  "实际资源与宣传不符",
-	"oversell":   "疑似超售",
+	"oversell":   "性能严重不足（超出公开的超售倍数）",
 	"false_info": "位置、线路等信息不实",
 	"abuse":      "辱骂或骚扰",
 	"spam":       "广告或刷屏",
@@ -147,10 +147,7 @@ type CapacityCap struct {
 
 func (m *MarketplaceStore) SetCapacityCap(ctx context.Context, nodeID, staffID string, limit CapacityCap) error {
 	command, err := m.db.Exec(ctx, `
-		UPDATE nodes SET capacity_cap_vcpu=$2,capacity_cap_ram_mb=$3,capacity_cap_disk_gb=$4,
-		       capacity_vcpu=least(capacity_vcpu,coalesce($2,capacity_vcpu)),
-		       capacity_ram_mb=least(capacity_ram_mb,coalesce($3,capacity_ram_mb)),
-		       capacity_disk_gb=least(capacity_disk_gb,coalesce($4,capacity_disk_gb)),updated_at=now()
+		UPDATE nodes SET capacity_cap_vcpu=$2,capacity_cap_ram_mb=$3,capacity_cap_disk_gb=$4,updated_at=now()
 		WHERE id=$1 AND owner_account_id IS NOT NULL
 	`, nodeID, limit.VCPU, limit.RAMMB, limit.DiskGB)
 	if err != nil {
@@ -158,6 +155,9 @@ func (m *MarketplaceStore) SetCapacityCap(ctx context.Context, nodeID, staffID s
 	}
 	if command.RowsAffected() == 0 {
 		return ErrHostedNodeNotFound
+	}
+	if _, err := m.db.Exec(ctx, `UPDATE nodes SET `+sellableCapacitySQL+` WHERE id=$1`, nodeID); err != nil {
+		return err
 	}
 	_, err = m.db.Exec(ctx, `INSERT INTO audit_logs(actor_type,actor_id,action,target_type,target_id,metadata) VALUES('staff',nullif($1,'')::uuid,'hosting.capacity_capped','node',$2,jsonb_build_object('vcpu',$3::int,'ram_mb',$4::bigint,'disk_gb',$5::bigint))`,
 		staffID, nodeID, limit.VCPU, limit.RAMMB, limit.DiskGB)

@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from 'react'
 import { ChevronRight, RefreshCw, X } from 'lucide-react'
-import { api, HostProbeRecord, NodeRecord, ProviderTypeRecord } from '../api'
+import { api, HostProbeRecord, NodeRecord, Overcommit, ProviderTypeRecord } from '../api'
+import { OvercommitDialog, overcommitText } from '../Supply'
 import { PageActions, StatusBadge, formatBytes, NodeExpiry, CapacityBar } from '../shared/ui'
 import { formatTime } from '../shared/time'
 
@@ -11,6 +12,8 @@ export function NodesView() {
   const [testing, setTesting] = useState('')
   const [editing, setEditing] = useState<NodeRecord | null>(null)
   const [providers, setProviders] = useState<ProviderTypeRecord[]>([])
+  const [overselling, setOverselling] = useState<NodeRecord | null>(null)
+  const [limits, setLimits] = useState<Overcommit>()
 
   async function removeNode(node: NodeRecord) {
     if (!window.confirm(`确认删除节点【${node.name}】？仅在节点上没有未终止的服务时才能删除。`)) return
@@ -25,6 +28,7 @@ export function NodesView() {
 
   useEffect(() => {
     api<ProviderTypeRecord[]>('/api/v1/admin/provider-types').then(setProviders).catch(() => undefined)
+    api<Overcommit>('/api/v1/admin/overcommit-limits').then(setLimits).catch(() => undefined)
   }, [])
 
   const load = () =>
@@ -94,7 +98,7 @@ export function NodesView() {
               <th>适配器类型</th>
               <th>归属地域</th>
               <th>支持虚拟化</th>
-              <th>节点总物理容量</th>
+              <th>可售容量</th>
               <th>连接状态</th>
               <th>到期 / 本月流量</th>
               <th>操作</th>
@@ -118,6 +122,9 @@ export function NodesView() {
                   <small>
                     {node.capacity_ram_mb.toLocaleString()} MB / {node.capacity_disk_gb.toLocaleString()} GB
                   </small>
+                  <small>检测 {node.reported_vcpu} 核 / {node.reported_ram_mb} MB / {node.reported_disk_gb} GB · {overcommitText(node.overcommit)}</small>
+                  {node.health_hold_reason && <small className="danger-text">暂停销售：{node.health_hold_reason}</small>}
+                  {node.shared_machine && <small className="warn-text">与 {node.shared_machine_with?.join('、')} 同机，资源合并计算</small>}
                 </td>
                 <td>
                   <StatusBadge status={node.status} />
@@ -141,6 +148,7 @@ export function NodesView() {
                   </button>
                   <div className="row-actions">
                     <button className="text-button" onClick={() => { setShowForm(false); setEditing(node) }}>编辑</button>
+                    <button className="text-button" onClick={() => setOverselling(node)}>超售</button>
                     <button className="text-button danger" onClick={() => void removeNode(node)}>删除</button>
                   </div>
                 </td>
@@ -154,6 +162,19 @@ export function NodesView() {
           </tbody>
         </table>
       </div>
+      {overselling && (
+        <OvercommitDialog
+          node={overselling}
+          name={overselling.name}
+          limits={limits}
+          endpoint={`/api/v1/admin/nodes/${overselling.id}/overcommit`}
+          onClose={() => setOverselling(null)}
+          onSaved={() => {
+            setOverselling(null)
+            void load()
+          }}
+        />
+      )}
     </section>
   )
 }

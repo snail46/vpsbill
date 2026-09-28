@@ -91,26 +91,12 @@ incus image copy images:ubuntu/24.04/cloud local: --alias ubuntu2404-cloud
 
 ### 4B. Hatch + Podman（OCI 容器）
 
-```sh
-apt-get install -y podman
-systemctl enable --now podman.socket
-systemctl enable podman-restart.service
-podman network create --subnet 10.89.0.0/24 hatchpod
-mkdir -p /root/podman-img
-cat > /root/podman-img/Containerfile <<'EOF'
-FROM docker.io/library/debian:12
-RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-      systemd systemd-sysv openssh-server iproute2 ca-certificates curl nano \
- && rm -rf /var/lib/apt/lists/* \
- && systemctl enable ssh \
- && systemctl mask systemd-udevd.service systemd-udevd-kernel.socket systemd-udevd-control.socket getty.target console-getty.service
-STOPSIGNAL SIGRTMIN+3
-CMD ["/sbin/init"]
-EOF
-podman build --network host -t localhost/debian12-ssh:latest /root/podman-img
-```
+Podman 不用手动准备：下一步的安装脚本带 `--runtime podman`（或 `incus,podman`）时会自动安装 Podman，在 `/var/lib/hatch-podman.img` 建 XFS 数据盘（开启项目配额，每台实例都有硬盘上限），创建网络，并构建两个最小镜像：
 
-套餐里的系统模板 ID 填 `localhost/debian12-ssh:latest`。Podman 默认网络是 `10.88.0.0/16`，容易和宿主机已有网桥冲突，所以这里另建了 `hatchpod`，构建时也用 `--network host`。
+- `localhost/hatch-debian12:latest`：Debian 12 + systemd + sshd；
+- `localhost/hatch-alpine:latest`：Alpine + OpenRC + sshd。
+
+两个镜像空闲时只占几 MB 内存，**1 核 / 64 MB / 1 GB** 的套餐可以正常开机和 SSH 登录。套餐的系统模板 ID 填这两个名字。数据盘大小用 `--podman-disk 20G` 指定，默认是剩余空间减 2 GiB（空间会预先占用）。已有 Podman 容器的机器需要先删除容器再迁移存储。
 
 ### 4C. 安装 Hatch Agent
 
@@ -119,8 +105,11 @@ podman build --network host -t localhost/debian12-ssh:latest /root/podman-img
 ```sh
 curl -fsSL http://127.0.0.1:8088/api/v1/agent/download/install.sh | sh -s -- \
   --server http://127.0.0.1:8088 --runtime incus,podman \
-  --lxd-network hatchbr0 --podman-network hatchpod --public-ip 203.0.113.10
+  --lxd-network hatchbr0 --podman-network hatchpod --podman-disk 20G --public-ip 203.0.113.10
 ```
+
+- 脚本默认开启 zram（一半内存做压缩交换），小内存母机更稳；不需要时加 `--no-zram`。
+- 母机最低配置：只跑 Podman 时 1 核 / 512 MB 内存 / 10 GB 硬盘起步；跑 LXD/Incus 建议 1 GB 内存以上，存储池用 btrfs 比 zfs 省内存（ZFS 缓存会占用不少内存）。
 
 - 只用其中一种时，`--runtime` 写 `incus` 或 `podman`；用 LXD snap 时写 `lxd`。
 - 母鸡在另一台机器上时，`--server` 必须是 `https://计费域名`，下载地址同理。
@@ -215,6 +204,6 @@ curl -fsSL http://127.0.0.1:8088/api/v1/agent/download/install.sh | sh -s -- --s
 
 ## 已知限制
 
-- Podman 实例磁盘占用每分钟测量一次；磁盘配额需要 XFS pquota 并开启 `disk_quota`；
+- Podman 实例磁盘占用每分钟测量一次；
 - LXDAPI 和 Hatch 没有历史监控曲线和 VNC；
 - 在线支付未接入时只能后台人工确认到账；正式收款必须使用 HTTPS。

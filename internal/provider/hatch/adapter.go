@@ -74,9 +74,21 @@ func (d *Driver) HostInfo(ctx context.Context) (provider.HostInfo, error) {
 	}
 	raw := map[string]any{
 		"hostname": info.Hostname, "agent_version": info.AgentVersion, "runtimes": info.Runtimes,
-		"public_ipv4": info.PublicIPv4, "details": info.Details,
+		"public_ipv4": info.PublicIPv4, "details": info.Details, "detected": info.Detected,
 	}
-	return provider.HostInfo{Raw: raw, Capacity: provider.Capacity{VCPU: info.Capacity.VCPU, RAMMB: info.Capacity.RAMMB, DiskGB: info.Capacity.DiskGB}}, nil
+	result := provider.HostInfo{Raw: raw, MachineID: info.MachineID,
+		Capacity: provider.Capacity{VCPU: info.Capacity.VCPU, RAMMB: info.Capacity.RAMMB, DiskGB: info.Capacity.DiskGB}}
+	if health := info.Health; health != nil {
+		result.Health = &provider.HostHealth{
+			CPUs: health.CPUs, Load1: health.Load1, Load5: health.Load5, Load15: health.Load15,
+			MemTotalMB: health.MemTotalMB, MemAvailableMB: health.MemAvailableMB,
+			SwapTotalMB: health.SwapTotalMB, SwapFreeMB: health.SwapFreeMB, QuotaErrors: info.QuotaErrors,
+		}
+		for _, disk := range health.Disks {
+			result.Health.Disks = append(result.Health.Disks, provider.DiskUsage{Name: disk.Name, TotalGB: disk.TotalGB, UsedGB: disk.UsedGB})
+		}
+	}
+	return result, nil
 }
 
 func (d *Driver) Images(ctx context.Context) ([]provider.Image, error) {

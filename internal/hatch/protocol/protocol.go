@@ -104,12 +104,42 @@ type Capacity struct {
 }
 
 type HostInfo struct {
-	Hostname     string         `json:"hostname"`
-	AgentVersion string         `json:"agent_version"`
-	Runtimes     []string       `json:"runtimes"`
-	PublicIPv4   string         `json:"public_ipv4"`
-	Capacity     Capacity       `json:"capacity"`
-	Details      map[string]any `json:"details,omitempty"`
+	Hostname     string   `json:"hostname"`
+	AgentVersion string   `json:"agent_version"`
+	Runtimes     []string `json:"runtimes"`
+	PublicIPv4   string   `json:"public_ipv4"`
+	// Capacity is what the host offers: the detected hardware, lowered by
+	// the operator's config. It never exceeds Detected.
+	Capacity Capacity `json:"capacity"`
+	Detected Capacity `json:"detected"`
+	// MachineID is a hash of /etc/machine-id, so the server can tell when
+	// several agents run on one machine and share its hardware.
+	MachineID string      `json:"machine_id,omitempty"`
+	Health    *HostHealth `json:"health,omitempty"`
+	// QuotaErrors names runtimes that cannot enforce instance disk sizes;
+	// they refuse to create instances until fixed.
+	QuotaErrors map[string]string `json:"quota_errors,omitempty"`
+	Details     map[string]any    `json:"details,omitempty"`
+}
+
+// HostHealth is a point-in-time load sample of the whole host.
+type HostHealth struct {
+	CPUs           int     `json:"cpus"`
+	Load1          float64 `json:"load1"`
+	Load5          float64 `json:"load5"`
+	Load15         float64 `json:"load15"`
+	MemTotalMB     int64   `json:"mem_total_mb"`
+	MemAvailableMB int64   `json:"mem_available_mb"`
+	SwapTotalMB    int64   `json:"swap_total_mb"`
+	SwapFreeMB     int64   `json:"swap_free_mb"`
+	// Disks is the instance storage of each runtime.
+	Disks []DiskUsage `json:"disks,omitempty"`
+}
+
+type DiskUsage struct {
+	Name    string `json:"name"`
+	TotalGB int64  `json:"total_gb"`
+	UsedGB  int64  `json:"used_gb"`
 }
 
 type Image struct {

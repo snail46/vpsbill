@@ -5,6 +5,7 @@ import ChatRoom from './ChatRoom'
 import { AdminReports } from './Reports'
 import { walletMoney } from './Wallet'
 import { formatTime } from './shared/time'
+import { overcommitText } from './Supply'
 
 function offlineFor(node: HostedNodeRecord) {
   if (node.status === 'online' || !node.last_seen_at) return ''
@@ -129,8 +130,11 @@ function HostedNodes() {
                       <small className="block">{node.region_name} · {node.location} · 到期 {node.expires_at}</small>
                       <small className="block">
                         可售 {node.capacity_vcpu} 核 / {node.capacity_ram_mb} MB / {node.capacity_disk_gb} GB
-                        {node.capacity_cap_vcpu || node.capacity_cap_ram_mb || node.capacity_cap_disk_gb ? '（已核定上限）' : '（Agent 上报）'}
+                        {node.capacity_cap_vcpu || node.capacity_cap_ram_mb || node.capacity_cap_disk_gb ? '（已核定上限）' : ''}
                       </small>
+                      <small className="block">检测 {node.reported_vcpu} 核 / {node.reported_ram_mb} MB / {node.reported_disk_gb} GB · {overcommitText(node.overcommit)}</small>
+                      {node.health_hold_reason && <small className="block danger-text">负载暂停销售：{node.health_hold_reason}</small>}
+                      {node.shared_machine && <small className="block warn-text">与 {node.shared_machine_with?.join('、')} 同机</small>}
                     </td>
                     <td>
                       {node.owner_name}
@@ -366,13 +370,14 @@ function CapDialog({ node, onClose, onSaved }: { node: HostedNodeRecord; onClose
           </button>
         </div>
         <p className="muted-text">
-          母机资源由机主的 Agent 上报，平台无法直接核实。收到超售或资源不符的举报并核实后，可以在这里设置可售上限；之后 Agent 上报更高的数值也不会超过上限。留空表示不限制。
-          当前可售 {node.capacity_vcpu} 核 / {node.capacity_ram_mb} MB / {node.capacity_disk_gb} GB。
+          母机的真实资源由机主的 Agent 检测上报，平台无法直接核实。收到资源不符的举报并核实后，可以在这里核定真实资源上限；之后 Agent 上报更高的数值也按上限计算。
+          可售资源 = 核定后的真实资源 × 机主设置的超售倍数。留空表示不限制。
+          当前检测 {node.reported_vcpu} 核 / {node.reported_ram_mb} MB / {node.reported_disk_gb} GB，可售 {node.capacity_vcpu} 核 / {node.capacity_ram_mb} MB / {node.capacity_disk_gb} GB。
         </p>
         {error && <div className="form-error">{error}</div>}
         <div className="form-grid">
           <label><span>vCPU 上限</span><input type="number" min={1} value={vcpu} onChange={event => setVCPU(event.target.value)} /></label>
-          <label><span>内存上限（MB）</span><input type="number" min={128} value={ram} onChange={event => setRAM(event.target.value)} /></label>
+          <label><span>内存上限（MB）</span><input type="number" min={64} value={ram} onChange={event => setRAM(event.target.value)} /></label>
           <label><span>磁盘上限（GB）</span><input type="number" min={1} value={disk} onChange={event => setDisk(event.target.value)} /></label>
         </div>
         <div className="form-actions">

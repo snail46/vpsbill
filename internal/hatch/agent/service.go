@@ -199,22 +199,30 @@ func (s *Service) runtime(virtualization string) (Runtime, error) {
 
 func (s *Service) hostInfo(ctx context.Context) (protocol.HostInfo, error) {
 	hostname, _ := os.Hostname()
-	capacity := detectCapacity(s.config.StateDir)
-	for _, runtime := range s.runtimes {
-		if reporter, ok := runtime.(DiskReporter); ok {
-			if size, err := reporter.DiskCapacityGB(ctx); err == nil && size > 0 {
-				capacity.DiskGB = size
+	detected := detectCapacity(s.config.StateDir)
+	health := readHealth()
+	// Instances live in each runtime's own storage, so together those make
+	// up the disk capacity.
+	var storageTotal int64
+	var quotaErrors map[string]string
+	for _, kind := range sortedKeys(s.runtimes) {
+		reporter, ok := s.runtimes[kind].(StorageReporter)
+		if !ok {
+			continue
+		}
+		if total, used, err := reporter.Storage(ctx); err == nil && total > 0 {
+			storageTotal += total
+			health.Disks = append(health.Disks, protocol.DiskUsage{Name: kind, TotalGB: total >> 30, UsedGB: used >> 30})
+		}
+		if err := reporter.CheckDiskQuota(ctx); err != nil {
+			if quotaErrors == nil {
+				quotaErrors = map[string]string{}
 			}
+			quotaErrors[kind] = err.Error()
 		}
 	}
-	if s.config.Capacity.VCPU > 0 {
-		capacity.VCPU = s.config.Capacity.VCPU
-	}
-	if s.config.Capacity.RAMMB > 0 {
-		capacity.RAMMB = s.config.Capacity.RAMMB
-	}
-	if s.config.Capacity.DiskGB > 0 {
-		capacity.DiskGB = s.config.Capacity.DiskGB
+	if storageTotal > 0 {
+		detected.DiskGB = storageTotal >> 30
 	}
 	details := map[string]any{"instances": len(s.store.List()), "port_range": []int{s.config.PortRangeStart, s.config.PortRangeEnd}}
 	for kind, runtime := range s.runtimes {
@@ -229,7 +237,8 @@ func (s *Service) hostInfo(ctx context.Context) (protocol.HostInfo, error) {
 	}
 	return protocol.HostInfo{
 		Hostname: hostname, AgentVersion: s.version, Runtimes: s.config.Runtimes(), PublicIPv4: s.config.PublicIPv4,
-		Capacity: capacity, Details: details,
+		Capacity: lowerCapacity(detected, s.config.Capacity), Detected: detected, MachineID: machineID(),
+		Health: health, QuotaErrors: quotaErrors, Details: details,
 	}, nil
 }
 
@@ -277,6 +286,13 @@ func (s *Service) ensure(ctx context.Context, spec protocol.CreateSpec) (protoco
 		}
 	}
 	if !runtimeHas {
+		// Every instance must have its disk size enforced, or one customer
+		// could fill the host.
+		if reporter, ok := runtime.(StorageReporter); ok {
+			if err := reporter.CheckDiskQuota(ctx); err != nil {
+				return protocol.EnsureResult{}, errorf(protocol.CodeUnsupported, "%s", err.Error())
+			}
+		}
 		if err := runtime.Create(ctx, runtimeSpec(record)); err != nil {
 			return protocol.EnsureResult{}, fmt.Errorf("create instance: %w", err)
 		}

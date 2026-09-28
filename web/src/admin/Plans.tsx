@@ -289,7 +289,7 @@ export function PlanForm({
         </label>
         <label>
           <span>内存容量 MB</span>
-          <input name="ram_mb" type="number" min="128" defaultValue={plan?.ram_mb || 512} required />
+          <input name="ram_mb" type="number" min="64" defaultValue={plan?.ram_mb || 512} required />
         </label>
         <label>
           <span>磁盘空间 GB</span>

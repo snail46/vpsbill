@@ -19,7 +19,37 @@ export type CustomerIdentity = {
   email_verified: boolean
 }
 
-export type NodeRecord = {
+// Overcommit is a node's oversell ratio per resource; 1 sells exactly
+// what the agent reports.
+export type Overcommit = { cpu: number; ram: number; disk: number; traffic: number }
+export type HostHealth = {
+  cpus: number
+  load1: number
+  load5: number
+  load15: number
+  mem_total_mb: number
+  mem_available_mb: number
+  swap_total_mb: number
+  swap_free_mb: number
+  disks?: { name: string; total_gb: number; used_gb: number }[]
+  quota_errors?: Record<string, string>
+}
+// NodeSupply is how a node's sellable capacity is derived and whether it
+// may sell right now.
+export type NodeSupply = {
+  reported_vcpu: number
+  reported_ram_mb: number
+  reported_disk_gb: number
+  overcommit: Overcommit
+  health?: HostHealth
+  health_hold_reason?: string
+  health_hold_since?: string
+  shared_machine: boolean
+  shared_machine_with?: string[]
+  sold_traffic_gb: number
+}
+
+export type NodeRecord = NodeSupply & {
   id: string
   region_code: string
   region_name: string
@@ -412,7 +442,7 @@ export type HostedServiceRecord = {
   remaining_value_minor: number
 }
 
-export type HostedNodeRecord = {
+export type HostedNodeRecord = NodeSupply & {
   id: string
   name: string
   owner_account_id?: string
@@ -452,11 +482,12 @@ export type HostedNodeRecord = {
   mine?: boolean
 }
 
-export type MarketRecord = { nodes: HostedNodeRecord[]; fee_percent: number }
+export type MarketRecord = { nodes: HostedNodeRecord[]; fee_percent: number; overcommit_limits: Overcommit }
 export type HostingRecord = {
   enabled: boolean
   fee_percent: number
   offline_hours: number
+  overcommit_limits: Overcommit
   trade_fee_percent: number
   rules: string[]
   nodes: HostedNodeRecord[]
@@ -597,7 +628,7 @@ export type ChatMuteRecord = { account_id: string; account_name: string; until: 
 
 export const reportReasons: Record<string, string> = {
   resources: '实际资源与宣传不符',
-  oversell: '疑似超售',
+  oversell: '性能严重不足（超出公开的超售倍数）',
   false_info: '位置、线路等信息不实',
   abuse: '辱骂或骚扰',
   spam: '广告或刷屏',

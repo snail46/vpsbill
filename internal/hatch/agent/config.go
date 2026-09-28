@@ -60,9 +60,9 @@ type LXDConfig struct {
 type PodmanConfig struct {
 	Socket  string `json:"socket"`
 	Network string `json:"network"`
-	// DiskQuota passes a rootfs size limit, which needs overlay on XFS with
-	// project quotas; leave off otherwise or container creation fails.
-	DiskQuota bool `json:"disk_quota"`
+	// DiskQuota is ignored: disk sizes are always enforced. Kept so older
+	// config files still load.
+	DiskQuota bool `json:"disk_quota,omitempty"`
 }
 
 func LoadConfig(path string) (Config, error) {

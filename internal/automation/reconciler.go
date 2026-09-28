@@ -102,8 +102,7 @@ func (r *Reconciler) reconcileNodes(ctx context.Context) {
 			_ = r.catalog.UpdateNodeHealth(ctx, node.ID, "offline", map[string]any{})
 			continue
 		}
-		totals := info.Capacity
-		if err := r.catalog.UpdateNodeHealth(ctx, node.ID, "online", info.Raw, int64(totals.VCPU), totals.RAMMB, totals.DiskGB); err != nil {
+		if err := r.catalog.RecordNodeReport(ctx, node.ID, info); err != nil {
 			r.logger.Error("update node capacity", "node_id", node.ID, "error", err)
 		}
 	}

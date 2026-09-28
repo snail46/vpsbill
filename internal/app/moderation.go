@@ -71,7 +71,7 @@ func (a *marketplaceAPI) adminCapacityCap(w http.ResponseWriter, r *http.Request
 	if !uuidPattern.MatchString(r.PathValue("id")) || !decodeJSON(w, r, &input) {
 		return
 	}
-	if input.VCPU != nil && *input.VCPU < 1 || input.RAMMB != nil && *input.RAMMB < 128 || input.DiskGB != nil && *input.DiskGB < 1 {
+	if input.VCPU != nil && *input.VCPU < 1 || input.RAMMB != nil && *input.RAMMB < 64 || input.DiskGB != nil && *input.DiskGB < 1 {
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "validation_error", "message": "核定资源无效"})
 		return
 	}
