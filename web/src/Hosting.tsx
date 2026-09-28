@@ -21,6 +21,7 @@ import { ReportDialog } from './Reports'
 import { TicketConversation, ticketStatusLabel } from './shared/ui'
 import { ticketRequestBody, useAttachmentLimit } from './TicketAttachments'
 import { walletMoney } from './Wallet'
+import { formatDate, formatTime } from './shared/time'
 
 type Tab = 'market' | 'mine' | 'coupons' | 'tickets' | 'chat'
 const tabs: [Tab, string, typeof Store][] = [
@@ -73,7 +74,7 @@ export default function HostingCenter({ customer }: { customer: CustomerIdentity
 
 function lastSeen(node: HostedNodeRecord) {
   if (node.status === 'online') return '在线'
-  return node.last_seen_at ? `离线（最后在线 ${new Date(node.last_seen_at).toLocaleString()}）` : '离线'
+  return node.last_seen_at ? `离线（最后在线 ${formatTime(node.last_seen_at)}）` : '离线'
 }
 
 function planPrice(plan: PlanRecord) {
@@ -447,7 +448,7 @@ function MyNodes() {
                 {retired.map(node => (
                   <tr key={node.id}>
                     <td>{node.name}</td>
-                    <td>{node.retired_at ? new Date(node.retired_at).toLocaleString() : ''}</td>
+                    <td>{node.retired_at ? formatTime(node.retired_at) : ''}</td>
                     <td>{node.retired_reason}</td>
                     <td>{walletMoney(node.host_released_minor, data.currency)}</td>
                   </tr>
@@ -646,7 +647,7 @@ function HostedNodeCard({
       {node.status !== 'online' && (
         <div className="note-banner warn">
           母机离线。离线满 {data.offline_hours} 小时将被自动清退，按剩余价值 2 倍补偿买家（其中一份从您的余额扣除）。有特殊原因请尽快提交工单联系管理员。
-          {node.clearance_hold_until && ` 管理员已暂缓清退至 ${new Date(node.clearance_hold_until).toLocaleString()}。`}
+          {node.clearance_hold_until && ` 管理员已暂缓清退至 ${formatTime(node.clearance_hold_until)}。`}
         </div>
       )}
       <dl className="market-facts">
@@ -762,7 +763,7 @@ function HostedNodeCard({
                 <td>{item.plan_name}</td>
                 <td>{item.buyer_name}</td>
                 <td>{item.status} · {item.runtime_status}</td>
-                <td>{item.next_due_at ? new Date(item.next_due_at).toLocaleDateString() : '—'}</td>
+                <td>{item.next_due_at ? formatDate(item.next_due_at) : '—'}</td>
                 <td>{walletMoney(item.remaining_value_minor, data.currency)}</td>
               </tr>
             ))}

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"vpsbill/internal/clock"
 	"vpsbill/internal/provider"
 )
 
@@ -107,8 +108,8 @@ func (n *Notifier) collectTraffic(ctx context.Context) {
 			continue
 		}
 		// Traffic counts both directions. An instance over its allowance is
-		// stopped until the month (UTC, as the counters reset) changes.
-		lockMonth := n.now().UTC().Format("2006-01")
+		// stopped until the month (UTC+8, the platform calendar) changes.
+		lockMonth := clock.Month(n.now())
 		if target.LockedMonth != "" && target.LockedMonth != lockMonth {
 			if err := n.store.UnlockTraffic(ctx, target.ServiceID, lockMonth); err != nil {
 				n.logger.Error("lift traffic lock", "service_id", target.ServiceID, "error", err)

@@ -416,10 +416,6 @@ export function SiteSettingsView() {
             <input type="url" value={form.admin_url} onChange={update('admin_url')} placeholder="https://admin.example.com" />
             <small>管理后台单独使用域名或端口时填写，发给管理员的邮件链接会指向这里。</small>
           </label>
-          <label>
-            <span>时区</span>
-            <input value={form.timezone} onChange={update('timezone')} placeholder="Asia/Shanghai" required />
-          </label>
 
           <fieldset className="wide">
             <legend>续费与自动化（格式如 30s、5m、72h）</legend>

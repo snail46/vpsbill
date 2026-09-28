@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useState } from 'react'
 import { AlertTriangle, ArrowLeftRight, RefreshCw, Tag, X } from 'lucide-react'
 import { api, type CustomerServiceRecord, type TradeListingRecord, type TradeRecord, type WalletRecord } from './api'
 import { walletMoney } from './Wallet'
+import { formatDate, formatTime } from './shared/time'
 
 const cycleNames: Record<string, string> = { monthly: '月付', quarterly: '季付', semiannual: '半年付', annual: '年付' }
 const statusNames: Record<TradeListingRecord['status'], string> = { listed: '挂售中', sold: '已售出', cancelled: '已下架' }
@@ -24,7 +25,7 @@ export function trafficText(total: number, rx?: number | null, tx?: number | nul
 function daysLeft(value: string | null) {
   if (!value) return '—'
   const days = Math.floor((new Date(value).getTime() - Date.now()) / 86400000)
-  return days >= 0 ? `${new Date(value).toLocaleDateString()}（剩 ${days} 天）` : new Date(value).toLocaleDateString()
+  return days >= 0 ? `${formatDate(value)}（剩 ${days} 天）` : formatDate(value)
 }
 
 // tradeEligibleAt is when an instance may be listed, counted from when the
@@ -80,7 +81,7 @@ function ListingSpecs({ listing }: { listing: TradeListingRecord }) {
         </div>
         <div>
           <dt>开通于</dt>
-          <dd>{new Date(listing.service_created_at).toLocaleDateString()}</dd>
+          <dd>{formatDate(listing.service_created_at)}</dd>
         </div>
       </dl>
       {listing.note && <p className="plan-description">卖家说明：{listing.note}</p>}
@@ -147,7 +148,7 @@ export default function TradeMarket() {
               <div className="panel-heading">
                 <div>
                   <h3>{listing.plan_name}</h3>
-                  <small>卖家 {listing.seller_name}{listing.mine ? '（我自己）' : ''} · 挂售于 {new Date(listing.created_at).toLocaleDateString()}</small>
+                  <small>卖家 {listing.seller_name}{listing.mine ? '（我自己）' : ''} · 挂售于 {formatDate(listing.created_at)}</small>
                 </div>
                 <strong className="trade-price">{walletMoney(listing.price_minor, listing.currency)}</strong>
               </div>
@@ -192,7 +193,7 @@ export default function TradeMarket() {
                       {listing.status === 'listed' && !listing.available && <small className="block">实例不是正常运行状态，买家看不到</small>}
                       {listing.cancel_reason && <small className="block">{listing.cancel_reason}</small>}
                     </td>
-                    <td>{new Date(listing.created_at).toLocaleString()}</td>
+                    <td>{formatTime(listing.created_at)}</td>
                     <td>
                       {listing.status === 'listed' && (
                         <button className="secondary-button compact" onClick={() => void cancel(listing)}>下架</button>
@@ -411,9 +412,9 @@ export function AdminTradeListings() {
                 <td>
                   <span className={listing.status === 'sold' ? 'tag success' : 'tag'}>{statusNames[listing.status]}</span>
                   {listing.cancel_reason && <small className="block">{listing.cancel_reason}</small>}
-                  {listing.sold_at && <small className="block">成交于 {new Date(listing.sold_at).toLocaleString()}</small>}
+                  {listing.sold_at && <small className="block">成交于 {formatTime(listing.sold_at)}</small>}
                 </td>
-                <td>{new Date(listing.created_at).toLocaleString()}</td>
+                <td>{formatTime(listing.created_at)}</td>
                 <td>{listing.status === 'listed' && <button className="secondary-button compact" onClick={() => void cancel(listing)}>下架</button>}</td>
               </tr>
             ))}

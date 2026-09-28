@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useState } from 'react'
 import { X } from 'lucide-react'
 import { AccountRecord, api, InvoiceRecord, OrderRecord, PlanRecord, RegionRecord, TransactionRecord } from '../api'
 import { PageActions, StatusBadge, cycleLabel, money } from '../shared/ui'
+import { formatDate, formatTime } from '../shared/time'
 
 export function OrdersView() {
   const [orders, setOrders] = useState<OrderRecord[]>([])
@@ -80,7 +81,7 @@ export function OrdersView() {
                 <td><code>{order.invoice_number}</code></td>
                 <td><strong>{money(order.total_minor, order.currency)}</strong></td>
                 <td><StatusBadge status={order.status} /></td>
-                <td>{new Date(order.created_at).toLocaleString()}</td>
+                <td>{formatTime(order.created_at)}</td>
               </tr>
             ))}
             {!orders.length && (
@@ -316,7 +317,7 @@ export function BillingView() {
                     <strong>{money(invoice.balance_minor, invoice.currency)}</strong>
                   </td>
                   <td><StatusBadge status={invoice.status} /></td>
-                  <td>{new Date(invoice.due_at).toLocaleDateString()}</td>
+                  <td>{formatDate(invoice.due_at)}</td>
                   <td>
                     {invoice.status === 'open' && (
                       <button
@@ -370,7 +371,7 @@ export function BillingView() {
                   <td><span className="tag">{transaction.provider.toUpperCase()}</span></td>
                   <td><strong>{money(transaction.amount_minor, transaction.currency)}</strong></td>
                   <td><StatusBadge status={transaction.status} /></td>
-                  <td>{new Date(transaction.created_at).toLocaleString()}</td>
+                  <td>{formatTime(transaction.created_at)}</td>
                 </tr>
               ))}
               {!transactions.length && (

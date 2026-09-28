@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { RefreshCw } from 'lucide-react'
 import { api, ProvisioningJobRecord, ServiceRecord } from '../api'
 import { JobError, StatusBadge } from '../shared/ui'
+import { formatDate, formatTime } from '../shared/time'
 
 export function ServicesView() {
   const [services, setServices] = useState<ServiceRecord[]>([])
@@ -125,7 +126,7 @@ export function ServicesView() {
                     <code>{service.primary_ipv4 || '—'}</code>
                     <small>{service.primary_ipv6}</small>
                   </td>
-                  <td>{service.next_due_at && service.status !== 'terminated' ? new Date(service.next_due_at).toLocaleDateString() : '—'}</td>
+                  <td>{service.next_due_at && service.status !== 'terminated' ? formatDate(service.next_due_at) : '—'}</td>
                   <td>
                     <div className="row-actions">
                       {(service.status === 'active' || service.status === 'overdue') && (
@@ -183,7 +184,7 @@ export function ServicesView() {
                   <td><span className="tag">{job.action}</span></td>
                   <td><StatusBadge status={job.status} /></td>
                   <td><code>{job.attempts} / 8</code></td>
-                  <td>{new Date(job.available_at).toLocaleString()}</td>
+                  <td>{formatTime(job.available_at)}</td>
                   <td className="error-cell">
                     <JobError value={job.last_error} />
                   </td>

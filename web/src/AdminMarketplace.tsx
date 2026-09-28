@@ -4,6 +4,7 @@ import { api, type ChatRoomRecord, type ClearanceRecord, type HostedNodeRecord }
 import ChatRoom from './ChatRoom'
 import { AdminReports } from './Reports'
 import { walletMoney } from './Wallet'
+import { formatTime } from './shared/time'
 
 function offlineFor(node: HostedNodeRecord) {
   if (node.status === 'online' || !node.last_seen_at) return ''
@@ -143,7 +144,7 @@ function HostedNodes() {
                           <span className={node.status === 'online' ? 'tag success' : 'tag danger'}>{node.status === 'online' ? '在线' : `离线 ${offlineFor(node)}`}</span>
                           <span className={node.listing_status === 'listed' ? 'tag success' : 'tag'}>{node.listing_status === 'listed' ? '在售' : '暂停销售'}</span>
                           {node.clearance_hold_until && new Date(node.clearance_hold_until) > new Date() && (
-                            <small className="block">暂缓清退至 {new Date(node.clearance_hold_until).toLocaleString()}</small>
+                            <small className="block">暂缓清退至 {formatTime(node.clearance_hold_until)}</small>
                           )}
                         </>
                       )}

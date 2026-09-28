@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from 'react'
 import { RefreshCw, WalletCards, X } from 'lucide-react'
 import { api, type CustomerCatalogRecord, type PaymentIntentRecord, type TopupInvoiceRecord, type WalletEntryRecord, type WalletRecord } from './api'
+import { formatTime } from './shared/time'
 
 export const walletKindLabels: Record<WalletEntryRecord['kind'], string> = {
   topup: '充值',
@@ -36,7 +37,7 @@ export function WalletLedger({ entries }: { entries: WalletEntryRecord[] }) {
         <tbody>
           {entries.map(entry => (
             <tr key={entry.id}>
-              <td>{new Date(entry.created_at).toLocaleString()}</td>
+              <td>{formatTime(entry.created_at)}</td>
               <td>
                 <span className={`tag wallet-${entry.kind}`}>{walletKindLabels[entry.kind] || entry.kind}</span>
               </td>

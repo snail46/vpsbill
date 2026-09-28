@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { RefreshCw } from 'lucide-react'
 import { api, CustomerCatalogRecord, CustomerInvoiceRecord, CustomerTransactionRecord, OrderRecord, PaymentIntentRecord, WalletRecord } from '../api'
 import { StatusBadge, money } from '../shared/ui'
+import { formatDate, formatTime } from '../shared/time'
 
 export function CustomerBilling() {
   const [invoices, setInvoices] = useState<CustomerInvoiceRecord[]>([])
@@ -107,7 +108,7 @@ export function CustomerBilling() {
                   <td><code>{item.invoice_number}</code></td>
                   <td><strong>{money(item.total_minor, item.currency)}</strong></td>
                   <td><StatusBadge status={item.status} /></td>
-                  <td>{new Date(item.created_at).toLocaleString()}</td>
+                  <td>{formatTime(item.created_at)}</td>
                 </tr>
               ))}
               {!orders.length && (
@@ -149,7 +150,7 @@ export function CustomerBilling() {
                     <strong>{money(item.balance_minor, item.currency)}</strong>
                   </td>
                   <td><StatusBadge status={item.status} /></td>
-                  <td>{new Date(item.due_at).toLocaleDateString()}</td>
+                  <td>{formatDate(item.due_at)}</td>
                   <td className="row-actions">
                     {item.status === 'open' && item.kind !== 'topup' && (
                       <button
@@ -211,7 +212,7 @@ export function CustomerBilling() {
                   <td><span className="tag">{item.provider.toUpperCase()}</span></td>
                   <td><strong>{money(item.amount_minor, item.currency)}</strong></td>
                   <td><StatusBadge status={item.status} /></td>
-                  <td>{new Date(item.created_at).toLocaleString()}</td>
+                  <td>{formatTime(item.created_at)}</td>
                 </tr>
               ))}
               {!transactions.length && (

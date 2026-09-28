@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useState } from 'react'
 import { Plus, Send, ShieldCheck } from 'lucide-react'
 import { api, TicketDetailRecord } from '../api'
 import { AttachmentGallery, AttachmentPicker } from '../TicketAttachments'
+import { formatTime, startOfDay } from './time'
 
 export type Meta = {
   name: string
@@ -183,7 +184,7 @@ export function formatBytes(value: number) {
 // NodeExpiry shows a host's rental expiry, highlighted in its final week.
 export function NodeExpiry({ date }: { date?: string }) {
   if (!date) return <span className="muted-text">未设置到期</span>
-  const days = Math.ceil((new Date(`${date}T00:00:00`).getTime() - Date.now()) / 86_400_000)
+  const days = Math.ceil((startOfDay(date).getTime() - Date.now()) / 86_400_000)
   const tone = days < 0 ? 'expiry-past' : days <= 7 ? 'expiry-soon' : ''
   return (
     <span className={tone}>
@@ -272,7 +273,7 @@ export function TicketConversation({
             {[
               detail.ticket.customer_name && `客户：${detail.ticket.customer_name}`,
               detail.ticket.instance_name && `关联实例：${detail.ticket.instance_name}`,
-            ].filter(Boolean).join(' · ') || `创建于 ${new Date(detail.ticket.created_at).toLocaleString()}`}
+            ].filter(Boolean).join(' · ') || `创建于 ${formatTime(detail.ticket.created_at)}`}
           </small>
         </div>
         <span className={`ticket-state ${detail.ticket.status}`}>{ticketStatusLabel(detail.ticket.status)}</span>
@@ -287,7 +288,7 @@ export function TicketConversation({
               {message.author_type === 'staff' && detail.ticket.host_account_id && <span className="chat-role staff">平台</span>}
               <span>
                 {message.internal ? '内部备忘 · ' : ''}
-                {new Date(message.created_at).toLocaleString()}
+                {formatTime(message.created_at)}
               </span>
             </header>
             {!(message.attachments?.length && message.body === '（图片附件）') && <p>{message.body}</p>}

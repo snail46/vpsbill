@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"vpsbill/internal/clock"
 	"vpsbill/internal/security"
 )
 
@@ -252,7 +253,7 @@ func (s *PortalStore) QueueServiceAction(ctx context.Context, accountID, userID,
 	if listed {
 		return "", ErrServiceListed
 	}
-	if action != "stop" && lockedMonth == time.Now().UTC().Format("2006-01") {
+	if action != "stop" && lockedMonth == clock.Month(time.Now()) {
 		return "", ErrTrafficLocked
 	}
 	if action == "start" && runtimeStatus == "running" {

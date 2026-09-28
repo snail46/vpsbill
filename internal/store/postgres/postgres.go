@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"vpsbill/internal/clock"
 )
 
 //go:embed migrations/*.sql
@@ -21,6 +23,9 @@ func Open(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
 	cfg.MaxConns = 20
 	cfg.MinConns = 2
 	cfg.MaxConnLifetime = 30 * time.Minute
+	// Month boundaries (date_trunc) and ::date casts follow the platform
+	// calendar rather than the database server's time zone.
+	cfg.ConnConfig.RuntimeParams["timezone"] = clock.DatabaseZone
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("create pool: %w", err)

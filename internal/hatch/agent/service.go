@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"vpsbill/internal/clock"
 	"vpsbill/internal/hatch/protocol"
 )
 
@@ -812,7 +813,7 @@ func (s *Service) meterInstance(ctx context.Context, name string) error {
 	if err != nil {
 		return err
 	}
-	month := s.now().UTC().Format("2006-01")
+	month := clock.Month(s.now())
 	return s.store.Update(name, func(current *InstanceRecord) (*InstanceRecord, error) {
 		if current == nil {
 			return nil, errorf(protocol.CodeNotFound, "instance %s not found", name)

@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useState } from 'react'
 import { Plus, TicketPercent, X } from 'lucide-react'
 import { api, type CouponQuoteRecord, type CouponRecord } from './api'
 import { walletMoney } from './Wallet'
+import { formatDate } from './shared/time'
 
 export function couponDiscountLabel(coupon: Pick<CouponRecord, 'discount_type' | 'discount_value'>) {
   if (coupon.discount_type === 'amount') return `每台减 ${walletMoney(coupon.discount_value)}`
@@ -9,11 +10,9 @@ export function couponDiscountLabel(coupon: Pick<CouponRecord, 'discount_type' |
   return `减 ${coupon.discount_value}%（${Number.isInteger(rate) ? rate : rate.toFixed(1)} 折）`
 }
 
+// localDay is the expiry day on the UTC+8 calendar the server uses.
 function localDay(value: string | null) {
-  if (!value) return ''
-  const date = new Date(value)
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+  return value ? formatDate(value) : ''
 }
 
 // CouponField checks a code against the plan being bought and hands the

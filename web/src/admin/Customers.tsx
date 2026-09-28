@@ -3,6 +3,7 @@ import { X } from 'lucide-react'
 import { AccountRecord, api } from '../api'
 import { AdminWalletPanel, walletMoney } from '../Wallet'
 import { PageActions, StatusBadge } from '../shared/ui'
+import { formatTime } from '../shared/time'
 
 export function CustomersView() {
   const [customers, setCustomers] = useState<AccountRecord[]>([])
@@ -74,7 +75,7 @@ export function CustomersView() {
             <div>
               <h3>{resetLink.name} 的密码重置链接</h3>
               <p>
-                登录邮箱 {resetLink.email}，{new Date(resetLink.expires_at).toLocaleString()} 前有效，只能使用一次。请通过工单或其他可信渠道发给客户本人。
+                登录邮箱 {resetLink.email}，{formatTime(resetLink.expires_at)} 前有效，只能使用一次。请通过工单或其他可信渠道发给客户本人。
               </p>
             </div>
             <button className="icon-button" onClick={() => setResetLink(null)} aria-label="关闭">
@@ -135,7 +136,7 @@ export function CustomersView() {
                 <td><code>{customer.default_currency}</code></td>
                 <td className={(customer.balance_minor || 0) < 0 ? 'amount-negative' : ''}>{walletMoney(customer.balance_minor || 0, customer.default_currency)}</td>
                 <td><StatusBadge status={customer.status} /></td>
-                <td>{new Date(customer.created_at).toLocaleString()}</td>
+                <td>{formatTime(customer.created_at)}</td>
                 <td>
                   <div className="row-actions">
                     <button

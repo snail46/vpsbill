@@ -23,6 +23,7 @@ import {
 import { api, imageLabel, serviceUsable, CustomerServiceRecord, PortMappingRecord, RefundQuoteRecord, ServiceCredentialRecord, ServiceRuntimeRecord } from './api'
 import { walletMoney } from './Wallet'
 import { ListServiceDialog, tradeEligibleAt } from './Trade'
+import { formatDate, formatTime, platformMonth } from './shared/time'
 
 const ServiceConsole = lazy(() => import('./ServiceConsole').then(module => ({ default: module.ServiceConsole })))
 
@@ -104,7 +105,7 @@ function ServiceCard({ service, onReload }: { service: CustomerServiceRecord; on
   // A listed instance is stopped and frozen for its seller.
   const listed = !!service.listing_id
   const usable = serviceUsable(service.status) && !listed
-  const trafficLocked = service.traffic_locked_month === new Date().toISOString().slice(0, 7)
+  const trafficLocked = service.traffic_locked_month === platformMonth()
 
   useEffect(() => {
     if (!usable) return
@@ -164,7 +165,7 @@ function ServiceCard({ service, onReload }: { service: CustomerServiceRecord; on
   // Prefer the live node status; the list's copy only refreshes on reload.
   const liveStatus = (runtime?.container.status || service.runtime_status).toLowerCase()
   const available = usable && !busy
-  const formatDate = (value?: string) => (value ? new Date(value).toLocaleString() : '—')
+  const formatWhen = (value?: string) => (value ? formatTime(value) : '—')
 
   return (
     <article className="service-card enhanced">
@@ -192,19 +193,19 @@ function ServiceCard({ service, onReload }: { service: CustomerServiceRecord; on
         <div className="service-notice warning">该实例正在交易市场挂售，已停机，挂售期间不能开机、登录或修改；到期时间照常计算。下架后可以重新开机。</div>
       )}
       {trafficLocked && (
-        <div className="service-notice danger">本月流量（上行加下行双向合计）已用尽，实例已停机，下月 1 日（UTC）自动恢复并开机。</div>
+        <div className="service-notice danger">本月流量（上行加下行双向合计）已用尽，实例已停机，下月 1 日（UTC+8）自动恢复并开机。</div>
       )}
       {((service.host_name && ['active', 'overdue', 'suspended'].includes(service.status)) || service.status === 'error') && !listed && <RefundPanel service={service} onDone={onReload} />}
 
       {service.status === 'overdue' && (
         <div className="service-notice warning">
-          续费账单已逾期，请在 {formatDate(service.grace_until)} 前完成支付，否则实例将被暂停。
+          续费账单已逾期，请在 {formatWhen(service.grace_until)} 前完成支付，否则实例将被暂停。
           <a href="/portal/billing">前往支付</a>
         </div>
       )}
       {service.status === 'suspended' && (
         <div className="service-notice danger">
-          服务已因欠费暂停，支付续费账单后将自动恢复运行；未续费的实例将于 {formatDate(service.termination_scheduled_at)} 删除。
+          服务已因欠费暂停，支付续费账单后将自动恢复运行；未续费的实例将于 {formatWhen(service.termination_scheduled_at)} 删除。
           <a href="/portal/billing">前往支付</a>
         </div>
       )}
@@ -406,7 +407,7 @@ function ServiceCard({ service, onReload }: { service: CustomerServiceRecord; on
 
       <footer>
         <span>业务状态：<StatusBadge status={service.status} /></span>
-        <span>到期时间：{service.next_due_at ? new Date(service.next_due_at).toLocaleDateString() : '—'}</span>
+        <span>到期时间：{service.next_due_at ? formatDate(service.next_due_at) : '—'}</span>
       </footer>
 
       {consoleKind && (
@@ -750,7 +751,7 @@ function TradeAction({ service, onDone }: { service: CustomerServiceRecord; onDo
   if (eligibleAt.getTime() > Date.now()) {
     return (
       <div className="service-refund">
-        <small className="muted-text">持有满 31 天后可在交易市场挂售（{eligibleAt.toLocaleDateString()} 起）</small>
+        <small className="muted-text">持有满 31 天后可在交易市场挂售（{formatDate(eligibleAt)} 起）</small>
       </div>
     )
   }

@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
+	"vpsbill/internal/clock"
 )
 
 type ChatMessage struct {
@@ -237,7 +239,7 @@ func (m *MarketplaceStore) PostChatMessage(ctx context.Context, nodeID, authorTy
 		}
 		switch {
 		case mutedUntil != nil:
-			return ChatMessage{}, &ChatLimitError{"你已被管理员禁言至 " + mutedUntil.Format("2006-01-02 15:04") + "（UTC）"}
+			return ChatMessage{}, &ChatLimitError{"你已被管理员禁言至 " + mutedUntil.In(clock.Zone).Format("2006-01-02 15:04") + "（UTC+8）"}
 		case burst >= chatBurst || recent >= chatHourly:
 			return ChatMessage{}, &ChatLimitError{"发言太频繁，请稍后再发"}
 		}

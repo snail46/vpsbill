@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useRef, useState } from 'react'
 import { Flag, Send, VolumeX } from 'lucide-react'
 import { api, type ChatHistoryRecord, type ChatMessageRecord, type ChatMuteRecord } from './api'
 import { ReportDialog } from './Reports'
+import { formatTime } from './shared/time'
 
 const roleLabels: Record<string, string> = { host: '机主', buyer: '用户', staff: '平台', system: '系统' }
 
@@ -140,7 +141,7 @@ export default function ChatRoom({ base, nodeID, title, staff = false }: { base:
             <div className="chat-meta">
               <strong>{message.author_name}</strong>
               <span className={`chat-role ${message.author_type}`}>{roleLabels[message.author_type] || message.author_type}</span>
-              <time>{new Date(message.created_at).toLocaleString()}</time>
+              <time>{formatTime(message.created_at)}</time>
               {staff && message.author_account_id && (
                 <button type="button" className="text-button chat-action" onClick={() => void mute(message)} title="禁言">
                   <VolumeX size={13} />禁言
@@ -162,7 +163,7 @@ export default function ChatRoom({ base, nodeID, title, staff = false }: { base:
           禁言中：
           {mutes.map(item => (
             <span key={item.account_id} className="tag">
-              {item.account_name} 至 {new Date(item.until).toLocaleString()}
+              {item.account_name} 至 {formatTime(item.until)}
               <button type="button" className="text-button" onClick={() => void unmute(item.account_id)}>解除</button>
             </span>
           ))}

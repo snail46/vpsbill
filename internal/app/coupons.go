@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"vpsbill/internal/clock"
 	"vpsbill/internal/settings"
 	"vpsbill/internal/store/postgres"
 )
@@ -33,11 +34,7 @@ func (c *couponAPI) input(w http.ResponseWriter, r *http.Request) (postgres.Coup
 	}
 	input := request.CouponInput
 	if day := strings.TrimSpace(request.ExpiresOn); day != "" {
-		location, err := time.LoadLocation(c.settings.Current().Timezone)
-		if err != nil {
-			location = time.UTC
-		}
-		parsed, err := time.ParseInLocation("2006-01-02", day, location)
+		parsed, err := time.ParseInLocation("2006-01-02", day, clock.Zone)
 		if err != nil {
 			writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "validation_error", "message": "到期日期格式无效"})
 			return input, false

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"vpsbill/internal/clock"
 	"vpsbill/internal/mail"
 )
 
@@ -87,7 +88,9 @@ func (m *Manager) UpdateSite(ctx context.Context, in SiteInput, actorID string) 
 	current := m.Current()
 	appName := strings.TrimSpace(in.AppName)
 	publicURL := strings.TrimRight(strings.TrimSpace(in.PublicURL), "/")
-	timezone := strings.TrimSpace(in.Timezone)
+	// The platform calendar is fixed at UTC+8; the column is kept for
+	// existing installations.
+	timezone := clock.DatabaseZone
 	invalid := func(message string) (SiteView, error) {
 		return SiteView{}, fmt.Errorf("%w: %s", ErrInvalidSettings, message)
 	}
@@ -100,9 +103,6 @@ func (m *Manager) UpdateSite(ctx context.Context, in SiteInput, actorID string) 
 	adminURL := strings.TrimRight(strings.TrimSpace(in.AdminURL), "/")
 	if adminURL != "" && absoluteURL(adminURL, true) != nil {
 		return invalid("后台访问地址必须是完整的 HTTP(S) URL，或者留空")
-	}
-	if _, err := time.LoadLocation(timezone); timezone == "" || err != nil {
-		return invalid("时区无效，请使用 Asia/Shanghai 这类 IANA 名称")
 	}
 	durations := []struct {
 		value   string

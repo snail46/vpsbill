@@ -3,6 +3,7 @@ import { RefreshCw } from 'lucide-react'
 import { api, AuditLogRecord, TicketDetailRecord, TicketRecord } from '../api'
 import { ticketRequestBody, useAttachmentLimit } from '../TicketAttachments'
 import { ticketStatusLabel, TicketConversation } from '../shared/ui'
+import { formatTime } from '../shared/time'
 
 export function AdminSupport() {
   const [tickets, setTickets] = useState<TicketRecord[]>([])
@@ -161,7 +162,7 @@ export function AuditView() {
           <tbody>
             {rows.map(row => (
               <tr key={row.id}>
-                <td>{new Date(row.created_at).toLocaleString()}</td>
+                <td>{formatTime(row.created_at)}</td>
                 <td>
                   <strong>{row.actor_type}</strong>
                   <small>{row.actor_id || '—'}</small>

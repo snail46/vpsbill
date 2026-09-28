@@ -1,3 +1,4 @@
+import { formatTime } from './shared/time'
 import { useEffect, useState } from 'react'
 import {
   Activity,
@@ -299,7 +300,7 @@ export default function HostDetailPanel({ id, onBack }: { id: string; onBack: ()
           <h2>{detail?.node.name || '宿主机详情'}</h2>
           <p>
             {detail
-              ? `${detail.node.region_name} · ${detail.node.base_url} · 探针更新于 ${new Date(detail.fetched_at).toLocaleString()}`
+              ? `${detail.node.region_name} · ${detail.node.base_url} · 探针更新于 ${formatTime(detail.fetched_at)}`
               : '正在拉取宿主机硬件探针数据…'}
           </p>
         </div>

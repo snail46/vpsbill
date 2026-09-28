@@ -3,6 +3,7 @@ import { Plus } from 'lucide-react'
 import { api, CustomerServiceRecord, TicketDetailRecord, TicketRecord } from '../api'
 import { AttachmentPicker, ticketRequestBody, useAttachmentLimit } from '../TicketAttachments'
 import { ticketStatusLabel, TicketConversation } from '../shared/ui'
+import { formatTime } from '../shared/time'
 
 export function CustomerSupport() {
   const [tickets, setTickets] = useState<TicketRecord[]>([])
@@ -166,7 +167,7 @@ export function CustomerSupport() {
               </div>
               <span className={`ticket-state ${ticket.status}`}>{ticketStatusLabel(ticket.status)}</span>
               <small>
-                {ticket.message_count} 条消息 · 最近更新 {new Date(ticket.last_reply_at).toLocaleString()}
+                {ticket.message_count} 条消息 · 最近更新 {formatTime(ticket.last_reply_at)}
               </small>
             </button>
           ))}

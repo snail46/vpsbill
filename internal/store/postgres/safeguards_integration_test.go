@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"vpsbill/internal/clock"
 )
 
 // TestSafeguardsIntegration covers email verification, TOTP replay, the
@@ -124,7 +126,7 @@ func TestSafeguardsIntegration(t *testing.T) {
 	if err := mail.RecordServiceTraffic(ctx, serviceID, rx+tx, &rx, &tx); err != nil {
 		t.Fatal(err)
 	}
-	month := time.Now().UTC().Format("2006-01")
+	month := clock.Month(time.Now())
 	if locked, err := mail.LockForTraffic(ctx, serviceID, month); err != nil || !locked {
 		t.Fatalf("lock: %v %v", locked, err)
 	}

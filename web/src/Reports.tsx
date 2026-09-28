@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from 'react'
 import { Flag, RefreshCw, X } from 'lucide-react'
 import { api, reportReasons, type ReportRecord } from './api'
+import { formatTime } from './shared/time'
 
 const nodeReasons = ['resources', 'oversell', 'false_info', 'other']
 const messageReasons = ['abuse', 'spam', 'other']
@@ -170,7 +171,7 @@ export function AdminReports() {
                   <span className={report.status === 'open' ? 'tag danger' : 'tag'}>{statusNames[report.status]}</span>
                   {report.resolution && <small className="block">{report.resolution}</small>}
                 </td>
-                <td>{new Date(report.created_at).toLocaleString()}</td>
+                <td>{formatTime(report.created_at)}</td>
                 <td className="row-actions">
                   {report.status === 'open' && (
                     <>

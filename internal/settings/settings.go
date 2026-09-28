@@ -13,6 +13,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"vpsbill/internal/clock"
 	"vpsbill/internal/config"
 	"vpsbill/internal/mail"
 	"vpsbill/internal/security"
@@ -397,13 +398,13 @@ const insertSQL = `INSERT INTO system_settings(app_name,public_url,timezone,paym
 	renewal_lead_seconds,overdue_grace_seconds,termination_retention_seconds,payment_gateway_type,payment_gateway_config_encrypted) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`
 
 func validate(in InstallInput) (Runtime, InstallResult, error) {
-	v := Runtime{Installed: true, AppName: strings.TrimSpace(in.AppName), PublicURL: strings.TrimRight(strings.TrimSpace(in.PublicURL), "/"), Timezone: strings.TrimSpace(in.Timezone),
+	v := Runtime{Installed: true, AppName: strings.TrimSpace(in.AppName), PublicURL: strings.TrimRight(strings.TrimSpace(in.PublicURL), "/"), Timezone: clock.DatabaseZone,
 		PaymentProviderName: strings.TrimSpace(in.PaymentProviderName), PaymentCheckoutURL: strings.TrimSpace(in.PaymentCheckoutURL), PaymentWebhookSecret: strings.TrimSpace(in.PaymentWebhookSecret),
 		NotificationWebhookURL: strings.TrimSpace(in.NotificationWebhookURL), NotificationWebhookSecret: strings.TrimSpace(in.NotificationWebhookSecret), MetricsToken: strings.TrimSpace(in.MetricsToken)}
 	v.PaymentGateway = PaymentGatewayConfig{Type: "disabled", AlipayGatewayURL: "https://openapi.alipay.com/gateway.do", EpayPaymentType: "alipay"}
 	v.MailNotifications, v.TicketAttachmentMaxMB, v.Marketplace = DefaultMailNotifications(), 5, DefaultMarketplaceSettings()
-	if v.AppName == "" || v.Timezone == "" || strings.TrimSpace(in.AdminDisplayName) == "" || strings.TrimSpace(in.AdminEmail) == "" {
-		return Runtime{}, InstallResult{}, errors.New("站点名称、时区和管理员信息不能为空")
+	if v.AppName == "" || strings.TrimSpace(in.AdminDisplayName) == "" || strings.TrimSpace(in.AdminEmail) == "" {
+		return Runtime{}, InstallResult{}, errors.New("站点名称和管理员信息不能为空")
 	}
 	if err := absoluteURL(v.PublicURL, true); err != nil {
 		return Runtime{}, InstallResult{}, errors.New("公开访问地址必须是完整的 HTTP(S) URL")

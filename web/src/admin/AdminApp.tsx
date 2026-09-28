@@ -239,7 +239,7 @@ export function InstallPage({ onInstalled }: { onInstalled: (user: StaffUser, ap
   const [form, setForm] = useState({
     app_name: 'VPSBill',
     public_url: window.location.origin,
-    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Shanghai',
+    timezone: 'Asia/Shanghai',
     notification_webhook_url: '',
     notification_webhook_secret: '',
     metrics_token: '',
@@ -325,7 +325,6 @@ export function InstallPage({ onInstalled }: { onInstalled: (user: StaffUser, ap
           <div className="installer-grid">
             <Field label="站点名称" value={form.app_name} onChange={update('app_name')} />
             <Field label="公开访问域名" value={form.public_url} onChange={update('public_url')} type="url" hint="用于外部支付与回调" />
-            <Field label="系统默认时区" value={form.timezone} onChange={update('timezone')} />
           </div>
         </section>
 

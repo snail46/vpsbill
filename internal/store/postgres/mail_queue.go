@@ -153,7 +153,7 @@ type TrafficTarget struct {
 	TrafficGB    int
 	Email        string
 	CustomerName string
-	// LockedMonth is the UTC month (YYYY-MM) the instance was stopped for
+	// LockedMonth is the UTC+8 month (YYYY-MM) the instance was stopped for
 	// using up its allowance, or empty.
 	LockedMonth string
 	NodeEndpoint

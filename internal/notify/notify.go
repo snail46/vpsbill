@@ -11,6 +11,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"vpsbill/internal/clock"
 	"vpsbill/internal/mail"
 	"vpsbill/internal/security"
 	"vpsbill/internal/settings"
@@ -75,12 +76,8 @@ func (n *Notifier) adminLink(path string) string {
 	return strings.TrimRight(current.PublicURL, "/") + path
 }
 
-func (n *Notifier) location() *time.Location {
-	if location, err := time.LoadLocation(n.settings.Current().Timezone); err == nil {
-		return location
-	}
-	return time.UTC
-}
+// location is the platform calendar; mail shows every time in UTC+8.
+func (n *Notifier) location() *time.Location { return clock.Zone }
 
 func (n *Notifier) siteName() string {
 	if name := n.settings.Current().AppName; name != "" {

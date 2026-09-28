@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useState } from 'react'
 import { ChevronRight, RefreshCw, X } from 'lucide-react'
 import { api, HostProbeRecord, NodeRecord, ProviderTypeRecord } from '../api'
 import { PageActions, StatusBadge, formatBytes, NodeExpiry, CapacityBar } from '../shared/ui'
+import { formatTime } from '../shared/time'
 
 export function NodesView() {
   const [nodes, setNodes] = useState<NodeRecord[]>([])
@@ -120,7 +121,7 @@ export function NodesView() {
                 </td>
                 <td>
                   <StatusBadge status={node.status} />
-                  <small>心跳 {node.last_seen_at ? new Date(node.last_seen_at).toLocaleString() : '—'}</small>
+                  <small>心跳 {node.last_seen_at ? formatTime(node.last_seen_at) : '—'}</small>
                 </td>
                 <td>
                   <NodeExpiry date={node.expires_at} />
@@ -386,7 +387,7 @@ export function HostsView({ onOpen }: { onOpen?: (id: string) => void }) {
 
             <footer>
               <span>虚拟化：{host.virtualization_types.join(' / ').toUpperCase()}</span>
-              <span>最后心跳：{host.last_seen_at ? new Date(host.last_seen_at).toLocaleString() : '从未'}</span>
+              <span>最后心跳：{host.last_seen_at ? formatTime(host.last_seen_at) : '从未'}</span>
             </footer>
 
             {host.provider_type === 'clicd' && onOpen && (
