@@ -19,7 +19,7 @@ function healthText(node: NodeSupply) {
   if (!health) return ''
   const parts = [`负载 ${health.load15.toFixed(2)}（${health.cpus} 核）`, `可用内存 ${health.mem_available_mb} / ${health.mem_total_mb} MB`]
   if (health.swap_total_mb > 0) parts.push(`交换 ${health.swap_total_mb - health.swap_free_mb} / ${health.swap_total_mb} MB`)
-  for (const disk of health.disks ?? []) parts.push(`${disk.name} 存储 ${disk.used_gb} / ${disk.total_gb} GB`)
+  for (const disk of health.disks ?? []) parts.push(`${disk.name.startsWith('host:') ? `宿主机磁盘 ${disk.name.slice(5)}` : `${disk.name} 存储`} ${disk.used_gb} / ${disk.total_gb} GB`)
   return parts.join(' · ')
 }
 

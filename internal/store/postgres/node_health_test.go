@@ -34,6 +34,12 @@ func TestEvaluateHealthHoldsOnlySustainedOverload(t *testing.T) {
 	if _, reason = evaluateHealth(full, since, start.Add(11*time.Minute)); !strings.Contains(reason, "podman 实例存储已用 97%") {
 		t.Fatalf("disk: %q", reason)
 	}
+	// A full host disk holds too, even while the pools inside it look empty.
+	hostFull := &provider.HostHealth{CPUs: 2, MemTotalMB: 1000, MemAvailableMB: 400, Disks: []provider.DiskUsage{{Name: "lxd", TotalGB: 20, UsedGB: 1}, {Name: "host:/", TotalGB: 30, UsedGB: 30}}}
+	since, _ = evaluateHealth(hostFull, healthSince{}, start)
+	if _, reason = evaluateHealth(hostFull, since, start.Add(11*time.Minute)); !strings.Contains(reason, "宿主机磁盘 / 已用 100%") {
+		t.Fatalf("host disk: %q", reason)
+	}
 	busy := &provider.HostHealth{CPUs: 2, MemTotalMB: 1000, MemAvailableMB: 400, Load15: 7}
 	since, _ = evaluateHealth(busy, healthSince{}, start)
 	if _, reason = evaluateHealth(busy, since, start.Add(23*time.Hour)); reason != "" {

@@ -221,6 +221,7 @@ func (s *Service) hostInfo(ctx context.Context) (protocol.HostInfo, error) {
 			quotaErrors[kind] = err.Error()
 		}
 	}
+	health.Disks = append(health.Disks, hostDisks()...)
 	if storageTotal > 0 {
 		detected.DiskGB = storageTotal >> 30
 	}

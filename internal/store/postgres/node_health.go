@@ -70,13 +70,22 @@ func evaluateHealth(health *provider.HostHealth, previous healthSince, now time.
 	}
 	next.Disk = track(fullestPercent > diskFullPercent, previous.Disk)
 	if next.Disk != nil && now.Sub(*next.Disk) >= diskHoldAfter {
-		reasons = append(reasons, fmt.Sprintf("%s 实例存储已用 %d%%", fullest, fullestPercent))
+		reasons = append(reasons, fmt.Sprintf("%s已用 %d%%", diskLabel(fullest), fullestPercent))
 	}
 	next.Load = track(health.CPUs > 0 && health.Load15 > float64(health.CPUs*loadPerCPU), previous.Load)
 	if next.Load != nil && now.Sub(*next.Load) >= loadHoldAfter {
 		reasons = append(reasons, fmt.Sprintf("负载持续 24 小时超过核数的 %d 倍（%.1f / %d 核）", loadPerCPU, health.Load15, health.CPUs))
 	}
 	return next, strings.Join(reasons, "；")
+}
+
+// diskLabel names a reported disk: a runtime's instance storage, or a host
+// file system ("host:/var/lib") holding file-backed pools.
+func diskLabel(name string) string {
+	if path, ok := strings.CutPrefix(name, "host:"); ok {
+		return "宿主机磁盘 " + path + " "
+	}
+	return name + " 实例存储"
 }
 
 // sellableCapacitySQL recomputes a node's sellable capacity: what its agent

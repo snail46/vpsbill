@@ -152,3 +152,28 @@ func sortedKeys[V any](m map[string]V) []string {
 	slices.Sort(keys)
 	return keys
 }
+
+// hostDiskPaths are where file-backed storage pools and the Podman data disk
+// live. When that file system fills up, the pools stop writing (ZFS
+// suspends) although each pool still looks mostly empty, so it is watched
+// on its own.
+var hostDiskPaths = []string{"/", "/var/lib"}
+
+// hostDisks reports the file systems under hostDiskPaths, each once.
+func hostDisks() []protocol.DiskUsage {
+	var result []protocol.DiskUsage
+	seen := map[[2]int64]bool{}
+	for _, path := range hostDiskPaths {
+		total, used, err := fsSpace(path)
+		if err != nil || total <= 0 || seen[[2]int64{total, used}] {
+			continue
+		}
+		seen[[2]int64{total, used}] = true
+		result = append(result, protocol.DiskUsage{Name: HostDiskPrefix + path, TotalGB: total >> 30, UsedGB: used >> 30})
+	}
+	return result
+}
+
+// HostDiskPrefix marks a host file system in the reported disks, as opposed
+// to a runtime's instance storage.
+const HostDiskPrefix = "host:"
