@@ -224,7 +224,18 @@ BASE="${BASE%/}/api/v1/agent/download"
 if [ "$USE_PODMAN" = 1 ]; then
   command -v podman >/dev/null 2>&1 || apt_install podman
   # lxcfs lets free, top and uptime inside a container show its own limits.
-  [ -e /var/lib/lxcfs/proc/meminfo ] || { apt_install lxcfs && systemctl enable --now lxcfs >/dev/null 2>&1; } || echo "warning: lxcfs unavailable; instances will see host memory in free" >&2
+  if [ ! -e /var/lib/lxcfs/proc/meminfo ]; then
+    command -v lxcfs >/dev/null 2>&1 || apt_install lxcfs
+    # Debian's unit skips containers; a host that is itself a container
+    # (common for small NAT servers) can still run it when FUSE is there.
+    if systemd-detect-virt --container >/dev/null 2>&1 && [ -c /dev/fuse ]; then
+      mkdir -p /etc/systemd/system/lxcfs.service.d
+      printf '[Unit]\nConditionVirtualization=\n' > /etc/systemd/system/lxcfs.service.d/hatch.conf
+      systemctl daemon-reload
+    fi
+    systemctl enable --now lxcfs >/dev/null 2>&1 && sleep 1 || true
+  fi
+  [ -e /var/lib/lxcfs/proc/meminfo ] || echo "warning: lxcfs unavailable; instances will see host memory in free" >&2
   setup_podman_disk
   systemctl enable --now podman.socket >/dev/null
   systemctl enable podman-restart.service >/dev/null 2>&1 || true

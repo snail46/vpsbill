@@ -111,7 +111,7 @@ curl -fsSL http://127.0.0.1:8088/api/v1/agent/download/install.sh | sh -s -- \
 ```
 
 - 脚本默认开启 zram（一半内存做压缩交换），小内存母机更稳；不需要时加 `--no-zram`。
-- 母机最低配置：只跑 Podman 时 1 核 / 512 MB 内存 / 10 GB 硬盘起步；跑 LXD/Incus 建议 1 GB 内存以上，存储池用 btrfs 比 zfs 省内存（ZFS 缓存会占用不少内存）。
+- 母机最低配置：只跑 Podman 时 1 核 / 256 MB 内存可以运行（实测：Agent、Podman 和系统空闲时共用约 30 MB，两台 64 MB 实例同时运行正常；单个实例内存超限只会杀掉该实例内的进程，母机和其他实例不受影响），硬盘建议 10 GB 起（Podman 数据盘、两个基础镜像和系统）。宿主机本身是容器（LXC 等小 NAT 机）时，需要能使用 /dev/fuse 和 loop 设备，否则实例内 `free` 看到的是宿主机内存，且无法建立带配额的 Podman 数据盘；跑 LXD/Incus 建议 1 GB 内存以上，存储池用 btrfs 比 zfs 省内存（ZFS 缓存会占用不少内存）。
 
 - 只用其中一种时，`--runtime` 写 `incus` 或 `podman`；用 LXD snap 时写 `lxd`。
 - 母鸡在另一台机器上时，`--server` 必须是 `https://计费域名`，下载地址同理。
