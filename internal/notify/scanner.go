@@ -171,7 +171,7 @@ func (n *Notifier) remindNodes(ctx context.Context) {
 			recipients = admins
 		}
 		if preferences.AdminNodeExpiry && node.ExpiresAt != nil {
-			date := node.ExpiresAt.UTC().Format("2006-01-02")
+			date := node.ExpiresAt.In(clock.Zone).Format("2006-01-02")
 			expires, _ := time.ParseInLocation("2006-01-02", date, location)
 			remaining := expires.Sub(now)
 			if remaining <= time.Duration(preferences.NodeExpiryReminderDays)*24*time.Hour {

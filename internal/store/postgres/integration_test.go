@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"vpsbill/internal/clock"
 	"vpsbill/internal/security"
 )
 
@@ -353,7 +354,7 @@ func TestBillingLifecycleIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 	watches, err := mailStore.NodeWatches(ctx)
-	if err != nil || len(watches) != 1 || watches[0].TrafficQuotaGB != 1000 || watches[0].UsedBytes != 5<<30 || watches[0].ExpiresAt == nil || watches[0].ExpiresAt.UTC().Format("2006-01-02") != "2026-12-31" {
+	if err != nil || len(watches) != 1 || watches[0].TrafficQuotaGB != 1000 || watches[0].UsedBytes != 5<<30 || watches[0].ExpiresAt == nil || watches[0].ExpiresAt.In(clock.Zone).Format("2006-01-02") != "2026-12-31" {
 		t.Fatalf("node watches: %+v err=%v", watches, err)
 	}
 	if _, err = db.Exec(ctx, `UPDATE services SET node_id=NULL WHERE id=$1`, serviceID); err != nil {
