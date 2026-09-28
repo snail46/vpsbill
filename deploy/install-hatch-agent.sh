@@ -61,7 +61,6 @@ done
 
 [ "$(id -u)" = "0" ] || { echo "run as root" >&2; exit 1; }
 [ -n "$SERVER" ] || { echo "--server is required" >&2; exit 2; }
-command -v nft >/dev/null 2>&1 || { echo "nftables (nft) is required" >&2; exit 1; }
 command -v systemctl >/dev/null 2>&1 || { echo "systemd is required" >&2; exit 1; }
 
 case ",$RUNTIME," in *,podman,*) USE_PODMAN=1 ;; *) USE_PODMAN=0 ;; esac
@@ -75,10 +74,20 @@ fetch() {
   fi
 }
 
+# apt_install refreshes the package lists once, since a fresh VPS image may
+# ship without them.
+APT_UPDATED=0
 apt_install() {
   command -v apt-get >/dev/null 2>&1 || { echo "please install: $*" >&2; exit 1; }
+  if [ "$APT_UPDATED" = 0 ]; then
+    DEBIAN_FRONTEND=noninteractive apt-get update -q >/dev/null
+    APT_UPDATED=1
+  fi
   DEBIAN_FRONTEND=noninteractive apt-get install -y -q "$@" >/dev/null
 }
+
+# Minimal images (LXC templates, small VPS) often come without nftables.
+command -v nft >/dev/null 2>&1 || apt_install nftables
 
 # zram gives small hosts compressed swap in RAM; instances may swap up to
 # their memory limit again, which lets 64 MB instances ride out peaks.
