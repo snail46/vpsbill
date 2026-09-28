@@ -420,15 +420,21 @@ func validatePlan(plan postgres.Plan) string {
 	if len(plan.Prices) == 0 {
 		return "至少需要一个价格"
 	}
-	for _, price := range plan.Prices {
+	seen := map[string]bool{}
+	for i, price := range plan.Prices {
 		if len(strings.TrimSpace(price.Currency)) != 3 || price.AmountMinor <= 0 {
 			return "价格币种或金额无效"
 		}
-		switch price.BillingCycle {
-		case "monthly", "quarterly", "semiannual", "annual":
-		default:
-			return "计费周期无效"
+		cycle := postgres.NormalizeBillingCycle(price.BillingCycle)
+		if cycle == "" {
+			return "计费周期无效（自定义周期为 1-365 天或 1-60 个月）"
 		}
+		key := strings.ToUpper(strings.TrimSpace(price.Currency)) + "/" + cycle
+		if seen[key] {
+			return "同一币种的计费周期不能重复"
+		}
+		seen[key] = true
+		plan.Prices[i].BillingCycle = cycle
 	}
 	return ""
 }

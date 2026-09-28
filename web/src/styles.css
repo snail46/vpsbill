@@ -3466,3 +3466,50 @@ td small.warn-text, .warn-text { color: var(--warning-text); }
 .check-row, .form-grid label.check-row { display: inline-flex; flex-direction: row; align-items: center; gap: 8px; font-size: 13px; color: var(--text-secondary); cursor: pointer; }
 .check-row input, .form-grid label.check-row input { width: 15px; height: 15px; margin: 0; padding: 0; flex: none; }
 td .tag, .tag { white-space: nowrap; }
+
+/* Per-cycle price editor shared by admin and hosted plans. */
+.cycle-prices {
+  display: grid;
+  gap: 10px;
+  padding: 18px !important;
+  border: 1px solid var(--border-default) !important;
+  border-radius: var(--radius-md);
+  background: var(--bg-card-subtle);
+}
+.cycle-prices legend { padding: 0 6px; font-weight: 600; }
+.cycle-price-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr)) minmax(0, 2fr);
+  gap: 12px 14px;
+  align-items: end;
+}
+.cycle-custom-row { display: grid; grid-template-columns: 1fr 88px 1.2fr; gap: 8px; }
+.field-hint { margin: 0; color: var(--text-muted); font-size: 12.5px; line-height: 1.6; }
+.price-line { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: baseline; }
+.price-chip { white-space: nowrap; }
+.price-line .price-chip + .price-chip strong { font-size: 18px; }
+.notice-text {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  background: var(--warning-bg);
+  color: var(--warning-text);
+  font-size: 13px;
+  line-height: 1.6;
+}
+@media (max-width: 900px) {
+  .cycle-price-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .cycle-custom { grid-column: 1 / -1; }
+}
+
+.topup-terms {
+  display: grid;
+  gap: 8px;
+  margin-top: 16px;
+  padding: 14px 16px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--bg-card-subtle);
+  font-size: 13px;
+}
+.topup-terms ul { margin: 0; padding-left: 18px; color: var(--text-secondary); line-height: 1.7; }

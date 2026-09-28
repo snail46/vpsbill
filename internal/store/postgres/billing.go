@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"vpsbill/internal/clock"
 	"vpsbill/internal/security"
 
 	"github.com/jackc/pgx/v5"
@@ -180,6 +181,20 @@ type pricedItem struct {
 	AllowedTemplateIDs []string
 	UnitAmountMinor    int64
 	SetupFeeMinor      int64
+	// ListAmountMinor is the plan price before a hosted lease shortened
+	// the first period to PeriodEnd.
+	ListAmountMinor int64
+	PeriodEnd       *time.Time
+}
+
+// lineDescription names the plan and cycle on the invoice, with the cut-off
+// date when the host lease shortened the period.
+func lineDescription(item pricedItem) string {
+	text := item.PlanName + " / " + BillingCycleName(item.Input.BillingCycle)
+	if item.PeriodEnd != nil {
+		text += "（按母机到期折算至 " + item.PeriodEnd.In(clock.Zone).Format("2006-01-02") + "）"
+	}
+	return text
 }
 
 func (s *BillingStore) CreateOrder(ctx context.Context, input CreateOrderInput) (Order, error) {
@@ -230,8 +245,15 @@ func (s *BillingStore) CreateOrder(ctx context.Context, input CreateOrderInput) 
 		if !stringAllowed(templateID, priced.AllowedTemplateIDs) {
 			return Order{}, errors.New("selected template is unavailable for this plan")
 		}
-		if err := validateHostedOrder(ctx, tx, item.PlanID, input.AccountID, item.RegionID, item.BillingCycle, item.Quantity, priced.VCPU, priced.RAMMB, priced.DiskGB); err != nil {
+		lease, err := validateHostedOrder(ctx, tx, item.PlanID, input.AccountID, item.RegionID, item.Quantity, priced.VCPU, priced.RAMMB, priced.DiskGB)
+		if err != nil {
 			return Order{}, err
+		}
+		// A host lease ending inside the cycle shortens the period and the
+		// price with it; renewals still use the full list price.
+		priced.ListAmountMinor = priced.UnitAmountMinor
+		if amount, end := ProrateToLease(priced.UnitAmountMinor, time.Now(), lease, item.BillingCycle); amount != priced.UnitAmountMinor {
+			priced.UnitAmountMinor, priced.PeriodEnd = amount, &end
 		}
 		quantity := int64(item.Quantity)
 		if priced.UnitAmountMinor > math.MaxInt64/quantity || priced.SetupFeeMinor > math.MaxInt64/quantity {
@@ -304,6 +326,10 @@ func (s *BillingStore) CreateOrder(ctx context.Context, input CreateOrderInput) 
 		for key, value := range item.Input.Configuration {
 			configuration[key] = value
 		}
+		if item.PeriodEnd != nil {
+			configuration["list_amount_minor"] = item.ListAmountMinor
+			configuration["period_end"] = item.PeriodEnd.UTC().Format(time.RFC3339)
+		}
 		configBody, _ := json.Marshal(configuration)
 		var orderItemID string
 		if err := tx.QueryRow(ctx, `
@@ -317,7 +343,7 @@ func (s *BillingStore) CreateOrder(ctx context.Context, input CreateOrderInput) 
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO invoice_lines(invoice_id, order_item_id, description, quantity, unit_amount_minor, tax_minor, total_minor)
 			VALUES($1, $2, $3, $4, $5, 0, $6)
-		`, order.InvoiceID, orderItemID, item.PlanName+" / "+item.Input.BillingCycle, item.Input.Quantity, item.UnitAmountMinor, lineTotal); err != nil {
+		`, order.InvoiceID, orderItemID, lineDescription(item), item.Input.Quantity, item.UnitAmountMinor, lineTotal); err != nil {
 			return Order{}, fmt.Errorf("create invoice line: %w", err)
 		}
 		if item.SetupFeeMinor > 0 {
@@ -730,7 +756,8 @@ func (s *BillingStore) processPayment(ctx context.Context, tx pgx.Tx, event Paym
 		rows, err := tx.Query(ctx, `
 		SELECT oi.id, oi.plan_id, oi.region_id, oi.quantity, oi.configuration,
 		       CASE WHEN oi.discount_unit_minor>0 THEN o.coupon_id::text END, oi.renewal_discount_type, oi.renewal_discount_value,
-		       CASE WHEN p.owner_account_id IS NOT NULL THEN oi.unit_amount_minor END
+		       CASE WHEN p.owner_account_id IS NOT NULL THEN coalesce((oi.configuration->>'list_amount_minor')::bigint, oi.unit_amount_minor) END,
+		       (SELECT n.expires_at FROM nodes n WHERE n.id=p.node_id AND n.owner_account_id IS NOT NULL)
 		FROM order_items oi JOIN orders o ON o.id=oi.order_id JOIN plans p ON p.id=oi.plan_id WHERE oi.order_id=$1 ORDER BY oi.created_at
 	`, result.OrderID)
 		if err != nil {
@@ -743,13 +770,15 @@ func (s *BillingStore) processPayment(ctx context.Context, tx pgx.Tx, event Paym
 			couponID             *string
 			renewalType          *string
 			renewalValue         *int64
-			// renewalPrice caps hosted renewals at the price paid.
+			// renewalPrice caps hosted renewals at the list price paid.
 			renewalPrice *int64
+			// nodeExpires is the host lease, which caps the paid period.
+			nodeExpires *time.Time
 		}
 		items := make([]itemRow, 0)
 		for rows.Next() {
 			var item itemRow
-			if err := rows.Scan(&item.id, &item.planID, &item.regionID, &item.quantity, &item.configuration, &item.couponID, &item.renewalType, &item.renewalValue, &item.renewalPrice); err != nil {
+			if err := rows.Scan(&item.id, &item.planID, &item.regionID, &item.quantity, &item.configuration, &item.couponID, &item.renewalType, &item.renewalValue, &item.renewalPrice, &item.nodeExpires); err != nil {
 				rows.Close()
 				return PaymentResult{}, err
 			}
@@ -774,6 +803,9 @@ func (s *BillingStore) processPayment(ctx context.Context, tx pgx.Tx, event Paym
 				}
 				instanceName := "svc-" + strings.ReplaceAll(serviceID, "-", "")[:16]
 				nextDue := addBillingCycle(time.Now().UTC(), cycle)
+				if lease := LeaseEnd(item.nodeExpires); lease != nil && lease.After(time.Now()) && lease.Before(nextDue) {
+					nextDue = lease.UTC()
+				}
 				if _, err := tx.Exec(ctx, `
 				INSERT INTO services(id, account_id, order_item_id, plan_id, region_id, status, instance_name, billing_cycle, next_due_at, expires_at,
 				                     coupon_id, renewal_discount_type, renewal_discount_value, renewal_price_minor)
@@ -824,19 +856,6 @@ func newDocumentNumber(prefix string) string {
 		token = token[:10]
 	}
 	return fmt.Sprintf("%s-%s-%s", prefix, time.Now().UTC().Format("20060102"), strings.ToUpper(token))
-}
-
-func addBillingCycle(value time.Time, cycle string) time.Time {
-	switch cycle {
-	case "quarterly":
-		return addMonthsClamped(value, 3)
-	case "semiannual":
-		return addMonthsClamped(value, 6)
-	case "annual":
-		return addMonthsClamped(value, 12)
-	default:
-		return addMonthsClamped(value, 1)
-	}
 }
 
 func addMonthsClamped(value time.Time, months int) time.Time {

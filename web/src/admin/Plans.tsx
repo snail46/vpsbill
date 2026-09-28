@@ -3,6 +3,7 @@ import { X } from 'lucide-react'
 import { api, imageLabel, AvailableTemplateRecord, ProviderTypeRecord, PlanRecord } from '../api'
 import { CouponManager } from '../Coupons'
 import { PageActions, StatusBadge, cycleLabel } from '../shared/ui'
+import { cycleOrder, CyclePriceFields, readCyclePrices } from '../shared/cycles'
 import { virtualizationLabel } from './Nodes'
 
 export function PlansView() {
@@ -94,11 +95,15 @@ export function PlansView() {
             </small>
 
             <div className="price-line">
-              {plan.prices[0] ? (
-                <>
-                  <strong>¥{(plan.prices[0].amount_minor / 100).toFixed(2)}</strong>
-                  <span>/ {cycleLabel(plan.prices[0].billing_cycle)}</span>
-                </>
+              {plan.prices.length ? (
+                [...plan.prices]
+                  .sort((a, b) => cycleOrder(a.billing_cycle) - cycleOrder(b.billing_cycle))
+                  .map(price => (
+                    <span key={price.billing_cycle} className="price-chip">
+                      <strong>¥{(price.amount_minor / 100).toFixed(2)}</strong>
+                      <span>/ {cycleLabel(price.billing_cycle)}</span>
+                    </span>
+                  ))
               ) : (
                 '暂无报价'
               )}
@@ -184,9 +189,14 @@ export function PlanForm({
       setError('请至少勾选一个可用操作系统模板并指定默认模板')
       return
     }
+    const data = new FormData(event.currentTarget)
+    const { prices, error: priceError } = readCyclePrices(data)
+    if (priceError) {
+      setError(priceError)
+      return
+    }
     setSaving(true)
     setError('')
-    const data = new FormData(event.currentTarget)
     const body = {
       code: data.get('code'),
       name: data.get('name'),
@@ -208,14 +218,12 @@ export function PlanForm({
       default_template_id: defaultTemplate,
       allowed_template_ids: allowed,
       enabled: plan?.enabled ?? true,
-      prices: [
-        {
-          currency: 'CNY',
-          billing_cycle: data.get('billing_cycle'),
-          amount_minor: Math.round(Number(data.get('price')) * 100),
-          setup_fee_minor: 0,
-        },
-      ],
+      prices: Object.entries(prices).map(([billing_cycle, amount_minor]) => ({
+        currency: 'CNY',
+        billing_cycle,
+        amount_minor,
+        setup_fee_minor: 0,
+      })),
     }
     try {
       await api(plan ? `/api/v1/admin/plans/${plan.id}` : '/api/v1/admin/plans', {
@@ -230,7 +238,6 @@ export function PlanForm({
     }
   }
 
-  const price = plan?.prices[0]
 
   return (
     <div className="inline-form">
@@ -311,26 +318,7 @@ export function PlanForm({
           <span>快照配额</span>
           <input name="snapshot_limit" type="number" min="0" defaultValue={plan?.snapshot_limit ?? 1} />
         </label>
-        <label>
-          <span>默认计费周期</span>
-          <select name="billing_cycle" defaultValue={price?.billing_cycle || 'monthly'}>
-            <option value="monthly">月付</option>
-            <option value="quarterly">季付</option>
-            <option value="semiannual">半年付</option>
-            <option value="annual">年付</option>
-          </select>
-        </label>
-        <label>
-          <span>销售单价（元）</span>
-          <input
-            name="price"
-            type="number"
-            min="0.01"
-            step="0.01"
-            defaultValue={((price?.amount_minor || 1900) / 100).toFixed(2)}
-            required
-          />
-        </label>
+        <CyclePriceFields prices={plan?.prices ?? (plan ? [] : [{ billing_cycle: 'monthly', amount_minor: 1900 }])} />
 
         <fieldset className="wide network-policy">
           <legend>网络策略配置</legend>

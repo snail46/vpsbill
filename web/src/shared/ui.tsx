@@ -132,16 +132,7 @@ export function StatusBadge({ status }: { status: string }) {
   return <span className={`status-badge ${status}`}>{labels[status] ?? status}</span>
 }
 
-export function cycleLabel(cycle: string) {
-  return (
-    ({
-      monthly: '月',
-      quarterly: '季',
-      semiannual: '半年',
-      annual: '年',
-    } as Record<string, string>)[cycle] ?? cycle
-  )
-}
+export { cycleUnit as cycleLabel } from './cycles'
 
 export function ticketStatusLabel(status: string) {
   return (

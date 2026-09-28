@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"time"
 
+	"vpsbill/internal/clock"
+
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -200,19 +202,27 @@ func (s *LifecycleStore) createRenewal(ctx context.Context, lead time.Duration) 
 	var amount int64
 	var discountType, couponCode *string
 	var discountValue, lockedPrice *int64
-	err = tx.QueryRow(ctx, `SELECT s.id,s.account_id,s.plan_id,s.billing_cycle,a.default_currency,p.name,s.next_due_at,pp.amount_minor,s.renewal_discount_type,s.renewal_discount_value,c.code,s.renewal_price_minor
+	var nodeExpires *time.Time
+	// Hosted services renew only up to the host lease; one ending less than
+	// a day after the due date waits until the host extends it.
+	err = tx.QueryRow(ctx, `SELECT s.id,s.account_id,s.plan_id,s.billing_cycle,a.default_currency,p.name,s.next_due_at,pp.amount_minor,s.renewal_discount_type,s.renewal_discount_value,c.code,s.renewal_price_minor,
+		(SELECT hn.expires_at FROM nodes hn WHERE hn.id=p.node_id AND hn.owner_account_id IS NOT NULL)
 		FROM services s JOIN accounts a ON a.id=s.account_id JOIN plans p ON p.id=s.plan_id LEFT JOIN coupons c ON c.id=s.coupon_id JOIN LATERAL (SELECT amount_minor FROM plan_prices WHERE plan_id=s.plan_id AND currency=a.default_currency AND billing_cycle=s.billing_cycle AND active_from<=now() AND (active_until IS NULL OR active_until>now()) ORDER BY active_from DESC LIMIT 1) pp ON true
 		WHERE s.status='active' AND s.next_due_at IS NOT NULL AND s.next_due_at<=now()+make_interval(secs=>$1)
 		AND NOT EXISTS(SELECT 1 FROM invoices i WHERE i.service_id=s.id AND i.period_start=s.next_due_at AND i.status IN ('draft','open','paid'))
-		ORDER BY s.next_due_at FOR UPDATE OF s SKIP LOCKED LIMIT 1`, int(lead.Seconds())).Scan(&serviceID, &accountID, &planID, &cycle, &currency, &planName, &nextDue, &amount, &discountType, &discountValue, &couponCode, &lockedPrice)
+		AND NOT EXISTS(SELECT 1 FROM nodes hn WHERE hn.id=p.node_id AND hn.owner_account_id IS NOT NULL AND (hn.expires_at + 1)::timestamptz < s.next_due_at + interval '1 day')
+		ORDER BY s.next_due_at FOR UPDATE OF s SKIP LOCKED LIMIT 1`, int(lead.Seconds())).Scan(&serviceID, &accountID, &planID, &cycle, &currency, &planName, &nextDue, &amount, &discountType, &discountValue, &couponCode, &lockedPrice, &nodeExpires)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}
 	if err != nil {
 		return false, err
 	}
-	periodEnd := addBillingCycle(nextDue, cycle)
-	amount = lockedRenewalPrice(amount, lockedPrice)
+	amount, periodEnd := ProrateToLease(lockedRenewalPrice(amount, lockedPrice), nextDue, LeaseEnd(nodeExpires), cycle)
+	description := planName + " / renewal"
+	if periodEnd.Before(addBillingCycle(nextDue, cycle)) {
+		description += "（按母机到期折算至 " + periodEnd.In(clock.Zone).Format("2006-01-02") + "）"
+	}
 	discount := amount - renewalAmount(amount, nil, discountType, discountValue)
 	number := newDocumentNumber("INV")
 	var invoiceID string
@@ -223,7 +233,7 @@ func (s *LifecycleStore) createRenewal(ctx context.Context, lead time.Duration) 
 	if err != nil {
 		return false, err
 	}
-	if _, err = tx.Exec(ctx, `INSERT INTO invoice_lines(invoice_id,description,quantity,unit_amount_minor,tax_minor,total_minor,metadata) VALUES($1,$2,1,$3,0,$3,jsonb_build_object('service_id',$4::text,'plan_id',$5::text,'billing_cycle',$6::text,'period_start',$7::timestamptz,'period_end',$8::timestamptz))`, invoiceID, planName+" / renewal", amount, serviceID, planID, cycle, nextDue, periodEnd); err != nil {
+	if _, err = tx.Exec(ctx, `INSERT INTO invoice_lines(invoice_id,description,quantity,unit_amount_minor,tax_minor,total_minor,metadata) VALUES($1,$2,1,$3,0,$3,jsonb_build_object('service_id',$4::text,'plan_id',$5::text,'billing_cycle',$6::text,'period_start',$7::timestamptz,'period_end',$8::timestamptz))`, invoiceID, description, amount, serviceID, planID, cycle, nextDue, periodEnd); err != nil {
 		return false, err
 	}
 	if discount > 0 {

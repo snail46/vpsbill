@@ -40,4 +40,3 @@ export function osLabel(id: string) {
   return id
 }
 
-export const cycleLabels: Record<string, string> = { monthly: '月', quarterly: '季', semiannual: '半年', annual: '年' }

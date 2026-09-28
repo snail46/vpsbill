@@ -3,8 +3,8 @@ import { AlertTriangle, ArrowLeftRight, RefreshCw, Tag, X } from 'lucide-react'
 import { api, type CustomerServiceRecord, type TradeListingRecord, type TradeRecord, type WalletRecord } from './api'
 import { walletMoney } from './Wallet'
 import { formatDate, formatTime } from './shared/time'
+import { cycleName } from './shared/cycles'
 
-const cycleNames: Record<string, string> = { monthly: '月付', quarterly: '季付', semiannual: '半年付', annual: '年付' }
 const statusNames: Record<TradeListingRecord['status'], string> = { listed: '挂售中', sold: '已售出', cancelled: '已下架' }
 
 export const TRADE_HOLD_DAYS = 31
@@ -72,7 +72,7 @@ function ListingSpecs({ listing }: { listing: TradeListingRecord }) {
         <div>
           <dt>续费</dt>
           <dd>
-            {listing.renewal_minor !== null ? `${walletMoney(listing.renewal_minor, listing.currency)} / ${cycleNames[listing.billing_cycle] || listing.billing_cycle}` : '续费价格暂不可用'}
+            {listing.renewal_minor !== null ? `${walletMoney(listing.renewal_minor, listing.currency)} / ${cycleName(listing.billing_cycle)}` : '续费价格暂不可用'}
           </dd>
         </div>
         <div>

@@ -69,6 +69,7 @@ export default function CustomerWallet() {
   const [checkoutEnabled, setCheckoutEnabled] = useState(false)
   const [amount, setAmount] = useState('50')
   const [created, setCreated] = useState<TopupInvoiceRecord | null>(null)
+  const [agreed, setAgreed] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
 
@@ -100,6 +101,10 @@ export default function CustomerWallet() {
   async function topup(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const yuan = Number(amount)
+    if (!agreed) {
+      setError('请先阅读并勾选同意充值须知')
+      return
+    }
     if (!Number.isFinite(yuan) || yuan < 1 || yuan > 100000) {
       setError('充值金额需在 ¥1 到 ¥100000 之间')
       return
@@ -109,7 +114,7 @@ export default function CustomerWallet() {
     try {
       const invoice = await api<TopupInvoiceRecord>('/api/v1/customer/wallet/topup', {
         method: 'POST',
-        body: JSON.stringify({ amount_minor: Math.round(yuan * 100) }),
+        body: JSON.stringify({ amount_minor: Math.round(yuan * 100), agree_terms: agreed }),
       })
       setCreated(invoice)
       if (checkoutEnabled) {
@@ -173,9 +178,20 @@ export default function CustomerWallet() {
             <span>金额（元）</span>
             <input type="number" min="1" max="100000" step="0.01" value={amount} onChange={event => setAmount(event.target.value)} />
           </label>
-          <button className="primary-button compact" disabled={busy}>
+          <button className="primary-button compact" disabled={busy || !agreed}>
             {busy ? '正在处理…' : checkoutEnabled ? '前往支付' : '生成充值账单'}
           </button>
+        </div>
+        <div className="topup-terms">
+          <strong>充值须知</strong>
+          <ul>
+            <li>请根据您的实际消费需求进行充值。我们建议「用多少充多少」，避免账户余额积压。</li>
+            <li>充值到账后，余额仅限用于平台服务消费，不支持提现或退款到原支付渠道，请知悉。</li>
+          </ul>
+          <label className="check-row">
+            <input type="checkbox" checked={agreed} onChange={event => setAgreed(event.target.checked)} />
+            我已阅读并同意以上充值须知
+          </label>
         </div>
         {created && !checkoutEnabled && (
           <p className="muted-text">

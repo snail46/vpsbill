@@ -67,16 +67,17 @@ func createEscrow(ctx context.Context, tx pgx.Tx, serviceID, invoiceID string, g
 }
 
 // validateHostedOrder checks a hosted plan before an order is created: the
-// market must be open, the node listed and online, the host lease must cover
-// the paid period and the node must have room for the instances.
-func validateHostedOrder(ctx context.Context, tx pgx.Tx, planID, buyerID, regionID, cycle string, quantity int, vcpu, ramMB, diskGB int) error {
+// market must be open, the node listed and online with room for the
+// instances. It returns when the host's lease ends, which caps the paid
+// period; nil for platform plans and nodes without an expiry date.
+func validateHostedOrder(ctx context.Context, tx pgx.Tx, planID, buyerID, regionID string, quantity int, vcpu, ramMB, diskGB int) (*time.Time, error) {
 	var nodeID, owner *string
 	var trafficGB int64
 	if err := tx.QueryRow(ctx, `SELECT node_id, owner_account_id, traffic_gb FROM plans WHERE id=$1`, planID).Scan(&nodeID, &owner, &trafficGB); err != nil {
-		return err
+		return nil, err
 	}
 	if nodeID == nil {
-		return nil
+		return nil, nil
 	}
 	var enabled bool
 	var nodeRegion, status, listing string
@@ -98,33 +99,36 @@ func validateHostedOrder(ctx context.Context, tx pgx.Tx, planID, buyerID, region
 		                       AND ts.status NOT IN ('terminating','terminated') AND tp.traffic_gb>0),0)::bigint END
 		FROM nodes n WHERE n.id=$1 FOR UPDATE OF n
 	`, *nodeID).Scan(&enabled, &nodeRegion, &status, &listing, &expires, &retired, &freeVCPU, &freeRAM, &freeDisk, &hold, &trafficRoom); err != nil {
-		return err
+		return nil, err
 	}
 	switch {
 	case !enabled:
-		return &HostedOrderError{"托管中心暂未开放"}
+		return nil, &HostedOrderError{"托管中心暂未开放"}
 	case owner != nil && *owner == buyerID:
-		return &HostedOrderError{"不能购买自己托管的母机"}
+		return nil, &HostedOrderError{"不能购买自己托管的母机"}
 	case retired != nil || listing != "listed":
-		return &HostedOrderError{"该母机已下架"}
+		return nil, &HostedOrderError{"该母机已下架"}
 	case status != "online":
-		return &HostedOrderError{"该母机当前离线，暂不可购买"}
+		return nil, &HostedOrderError{"该母机当前离线，暂不可购买"}
 	case hold != "":
-		return &HostedOrderError{"该母机负载过高，已暂停销售：" + hold}
+		return nil, &HostedOrderError{"该母机负载过高，已暂停销售：" + hold}
 	case regionID != nodeRegion:
-		return &HostedOrderError{"地域与母机不一致"}
+		return nil, &HostedOrderError{"地域与母机不一致"}
 	}
-	if expires != nil && expires.Before(addBillingCycle(time.Now().UTC(), cycle)) {
-		return &HostedOrderError{"母机租约将在本计费周期内到期，请选择更短周期"}
+	// A lease that ends inside the cycle is charged pro rata (see
+	// ProrateToLease); less than a day left is not worth selling.
+	lease := LeaseEnd(expires)
+	if lease != nil && lease.Before(time.Now().Add(24*time.Hour)) {
+		return nil, &HostedOrderError{"母机租约即将到期，暂不可购买"}
 	}
 	// Pending orders are not reserved yet, so this is a first check; the
 	// scheduler enforces capacity again when the instance is created.
 	q := int64(quantity)
 	if freeVCPU < int64(vcpu)*q || freeRAM < int64(ramMB)*q || freeDisk < int64(diskGB)*q {
-		return &HostedOrderError{"该母机剩余资源不足"}
+		return nil, &HostedOrderError{"该母机剩余资源不足"}
 	}
 	if trafficRoom != nil && trafficGB > 0 && *trafficRoom < trafficGB*q {
-		return &HostedOrderError{"该母机可售月流量不足"}
+		return nil, &HostedOrderError{"该母机可售月流量不足"}
 	}
 	// The purchase limit counts the buyer's live instances of the plan and
 	// units in unpaid orders that can still be paid.
@@ -136,15 +140,15 @@ func validateHostedOrder(ctx context.Context, tx pgx.Tx, planID, buyerID, region
 		                 WHERE oi.plan_id=p.id AND i.account_id=$2 AND i.status='open' AND i.due_at>now()),0)::int
 		FROM plans p WHERE p.id=$1
 	`, planID, buyerID).Scan(&limit, &held); err != nil {
-		return err
+		return nil, err
 	}
 	if limit > 0 && held+quantity > limit {
 		if held > 0 {
-			return &HostedOrderError{fmt.Sprintf("该套餐每人限购 %d 台，你已持有或有待支付的 %d 台", limit, held)}
+			return nil, &HostedOrderError{fmt.Sprintf("该套餐每人限购 %d 台，你已持有或有待支付的 %d 台", limit, held)}
 		}
-		return &HostedOrderError{fmt.Sprintf("该套餐每人限购 %d 台", limit)}
+		return nil, &HostedOrderError{fmt.Sprintf("该套餐每人限购 %d 台", limit)}
 	}
-	return nil
+	return lease, nil
 }
 
 type HostedService struct {

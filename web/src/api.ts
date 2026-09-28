@@ -105,6 +105,10 @@ export type Price = {
   billing_cycle: string
   amount_minor: number
   setup_fee_minor: number
+  // Set on hosted market listings when the host lease ends inside the
+  // cycle: what the buyer pays and until when.
+  charge_minor?: number
+  period_end?: string
 }
 
 export type PlanRecord = {

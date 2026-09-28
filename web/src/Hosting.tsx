@@ -22,6 +22,7 @@ import { TicketConversation, ticketStatusLabel } from './shared/ui'
 import { ticketRequestBody, useAttachmentLimit } from './TicketAttachments'
 import { walletMoney } from './Wallet'
 import { formatDate, formatTime } from './shared/time'
+import { cycleName, cycleOrder, CyclePriceFields, readCyclePrices } from './shared/cycles'
 import { OvercommitDialog, SupplyDetails, overcommitText } from './Supply'
 
 type Tab = 'market' | 'mine' | 'coupons' | 'tickets' | 'chat'
@@ -33,7 +34,6 @@ const tabs: [Tab, string, typeof Store][] = [
   ['chat', '聊天室', MessagesSquare],
 ]
 
-const cycleNames: Record<string, string> = { monthly: '月付', quarterly: '季付', semiannual: '半年付', annual: '年付' }
 const virtNames: Record<string, string> = { lxc: 'LXC 容器', podman: 'Podman 容器', kvm: 'KVM' }
 
 function tabFromURL(): Tab {
@@ -79,8 +79,10 @@ function lastSeen(node: HostedNodeRecord) {
 }
 
 function planPrice(plan: PlanRecord) {
-  const monthly = plan.prices.find(price => price.billing_cycle === 'monthly') || plan.prices[0]
-  return monthly ? `${walletMoney(monthly.amount_minor, monthly.currency)} / ${cycleNames[monthly.billing_cycle] || monthly.billing_cycle}` : '暂无报价'
+  const first = [...plan.prices].sort((a, b) => cycleOrder(a.billing_cycle) - cycleOrder(b.billing_cycle))[0]
+  if (!first) return '暂无报价'
+  const more = plan.prices.length > 1 ? ` 等 ${plan.prices.length} 种周期` : ''
+  return `${walletMoney(first.amount_minor, first.currency)} / ${cycleName(first.billing_cycle)}${more}`
 }
 
 function PlanSpecs({ plan }: { plan: PlanRecord }) {
@@ -220,7 +222,9 @@ function BuyDialog({
   onClose: () => void
   onDone: () => void
 }) {
-  const prices = plan.prices.filter(price => price.currency === customer.default_currency)
+  const prices = plan.prices
+    .filter(price => price.currency === customer.default_currency)
+    .sort((a, b) => cycleOrder(a.billing_cycle) - cycleOrder(b.billing_cycle))
   const [cycle, setCycle] = useState(prices[0]?.billing_cycle || 'monthly')
   const [template, setTemplate] = useState(plan.default_template_id)
   const [coupon, setCoupon] = useState('')
@@ -315,11 +319,17 @@ function BuyDialog({
               <select value={cycle} onChange={event => setCycle(event.target.value)}>
                 {prices.map(item => (
                   <option key={item.billing_cycle} value={item.billing_cycle}>
-                    {cycleNames[item.billing_cycle]} · {walletMoney(item.amount_minor, item.currency)}
+                    {cycleName(item.billing_cycle)} · {walletMoney(item.charge_minor ?? item.amount_minor, item.currency)}
+                    {item.charge_minor != null ? '（按母机到期折算）' : ''}
                   </option>
                 ))}
               </select>
             </label>
+            {price?.charge_minor != null && price.period_end && (
+              <p className="notice-text wide">
+                母机 {formatDate(price.period_end)} 到期，早于{cycleName(price.billing_cycle)}周期结束：按剩余时间折算，实付 {walletMoney(price.charge_minor, price.currency)}（原价 {walletMoney(price.amount_minor, price.currency)}），实例到期日为 {formatDate(price.period_end)}。续费时按原价计费，同样不超过母机到期日。
+              </p>
+            )}
             <label>
               <span>系统镜像</span>
               <select value={template} onChange={event => setTemplate(event.target.value)}>
@@ -336,7 +346,7 @@ function BuyDialog({
             <div className="form-actions wide">
               <button type="button" className="secondary-button" onClick={onClose}>取消</button>
               <button className="primary-button compact" disabled={busy || !price}>
-                {busy ? '正在下单…' : `下单 ${price ? walletMoney(price.amount_minor + price.setup_fee_minor - discount, price.currency) : ''}`}
+                {busy ? '正在下单…' : `下单 ${price ? walletMoney((price.charge_minor ?? price.amount_minor) + price.setup_fee_minor - discount, price.currency) : ''}`}
               </button>
             </div>
           </form>
@@ -748,7 +758,7 @@ function HostedNodeCard({
                   </small>
                 </td>
                 <td>{plan.vcpu} 核 / {plan.ram_mb} MB / {plan.disk_gb} GB / {plan.traffic_gb || '不限'} GB / NAT×{plan.port_mapping_count}</td>
-                <td>{plan.prices.map(price => `${cycleNames[price.billing_cycle]} ${walletMoney(price.amount_minor, price.currency)}`).join('，')}</td>
+                <td>{plan.prices.map(price => `${cycleName(price.billing_cycle)} ${walletMoney(price.amount_minor, price.currency)}`).join('，')}</td>
                 <td><span className={plan.enabled ? 'tag success' : 'tag'}>{plan.enabled ? '在售' : '已停售'}</span></td>
                 <td className="row-actions">
                   <button className="secondary-button compact" onClick={() => setPlanForm(plan)}>编辑</button>
@@ -818,18 +828,14 @@ function HostedPlanForm({ node, plan, onClose, onSaved }: { node: HostedNodeReco
   }, [node.id])
 
   const visible = images.filter(image => (image.type || 'lxc') === virtualization)
-  const price = (cycle: string) => {
-    const found = plan?.prices.find(item => item.billing_cycle === cycle)
-    return found ? String(found.amount_minor / 100) : ''
-  }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const form = new FormData(event.currentTarget)
-    const prices: Record<string, number> = {}
-    for (const cycle of Object.keys(cycleNames)) {
-      const value = Number(form.get(`price_${cycle}`) || 0)
-      if (value > 0) prices[cycle] = Math.round(value * 100)
+    const { prices, error: priceError } = readCyclePrices(form)
+    if (priceError) {
+      setError(priceError)
+      return
     }
     const body = {
       name: form.get('name'),
@@ -896,12 +902,10 @@ function HostedPlanForm({ node, plan, onClose, onSaved }: { node: HostedNodeReco
         <label><span>下行 Mbps（0 = 不限）</span><input name="network_down_mbps" type="number" min="0" required defaultValue={plan?.network_down_mbps ?? 50} /></label>
         <label><span>上行 Mbps（0 = 不限）</span><input name="network_up_mbps" type="number" min="0" required defaultValue={plan?.network_up_mbps ?? 20} /></label>
         <label><span>NAT 端口数</span><input name="port_mapping_count" type="number" min="1" max="100" required defaultValue={plan?.port_mapping_count ?? 5} /></label>
-        {Object.entries(cycleNames).map(([cycle, label]) => (
-          <label key={cycle}>
-            <span>{label}价格（元）{cycle === 'monthly' ? '' : '（可空）'}</span>
-            <input name={`price_${cycle}`} type="number" min="0" step="0.01" required={cycle === 'monthly'} defaultValue={price(cycle)} />
-          </label>
-        ))}
+        <CyclePriceFields
+          prices={plan?.prices ?? []}
+          hint="留空表示不支持该计费周期，至少填写一个。母机到期日早于周期结束时，买家按剩余时间折算付款（例如季付 ¥30、母机只剩 2 个月，买家付 ¥20），实例到期日与母机到期日相同。"
+        />
         <fieldset className="wide template-picker">
           <legend>可选系统镜像（读取自母机）</legend>
           {visible.map(image => (

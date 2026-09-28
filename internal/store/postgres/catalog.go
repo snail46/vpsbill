@@ -197,6 +197,10 @@ type Price struct {
 	SetupFeeMinor int64      `json:"setup_fee_minor"`
 	ActiveFrom    time.Time  `json:"active_from"`
 	ActiveUntil   *time.Time `json:"active_until"`
+	// ChargeMinor and PeriodEnd are set on hosted market listings when the
+	// host lease ends inside the cycle, so the buyer pays pro rata.
+	ChargeMinor *int64     `json:"charge_minor,omitempty"`
+	PeriodEnd   *time.Time `json:"period_end,omitempty"`
 }
 
 type Plan struct {

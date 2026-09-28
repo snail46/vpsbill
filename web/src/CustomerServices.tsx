@@ -26,7 +26,8 @@ import { api, imageLabel, serviceUsable, CustomerServiceRecord, PortMappingRecor
 import { walletMoney } from './Wallet'
 import { ListServiceDialog, tradeEligibleAt } from './Trade'
 import { formatDate, formatTime, platformMonth } from './shared/time'
-import { cycleLabels, navigatePortal, osLabel, portalPathPart } from './shared/nav'
+import { navigatePortal, osLabel, portalPathPart } from './shared/nav'
+import { cycleUnit } from './shared/cycles'
 import ChatRoom from './ChatRoom'
 
 const ServiceConsole = lazy(() => import('./ServiceConsole').then(module => ({ default: module.ServiceConsole })))
@@ -633,7 +634,7 @@ function SourceTags({ service }: { service: CustomerServiceRecord }) {
 
 function renewalText(service: CustomerServiceRecord) {
   if (service.renewal_price_minor == null) return '—'
-  return `${walletMoney(service.renewal_price_minor, service.currency)}/${cycleLabels[service.billing_cycle] ?? service.billing_cycle}`
+  return `${walletMoney(service.renewal_price_minor, service.currency)}/${cycleUnit(service.billing_cycle)}`
 }
 
 const serviceHref = (service: CustomerServiceRecord) => `/portal/services/${service.id}`
@@ -811,7 +812,7 @@ export default function CustomerServices() {
         {sourceFilters.map(([id, label]) => (
           <button key={id} role="tab" aria-selected={filter === id} className={filter === id ? 'chip-button active' : 'chip-button'} onClick={() => setFilter(id)}>
             {label}
-            <small>{(services ?? []).filter(item => item.status !== 'terminated' && matchesSource(item, id)).length}</small>
+            {services && <small>{services.filter(item => item.status !== 'terminated' && matchesSource(item, id)).length}</small>}
           </button>
         ))}
         {ended.length > 0 && (
@@ -826,6 +827,7 @@ export default function CustomerServices() {
         {visible.map(service => (
           <ServiceTile key={service.id} service={service} />
         ))}
+        {!services && !error && <div className="empty-card" style={{ gridColumn: '1 / -1' }}>正在加载实例…</div>}
         {services && !visible.length && (
           <div className="empty-card" style={{ gridColumn: '1 / -1' }}>
             {filter === 'all' ? '当前账户暂无 VPS 实例，可前往“选购 VPS”挑选配置。' : '没有这一来源的实例。'}
