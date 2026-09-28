@@ -82,6 +82,10 @@ func TestOversellIntegration(t *testing.T) {
 	if vcpu, ram, disk := sellable(n1); vcpu != 8 || ram != 6144 || disk != 100 {
 		t.Fatalf("oversold capacity = %d/%d/%d", vcpu, ram, disk)
 	}
+	// Plan validation reads the real hardware through NodeSecret.
+	if secret, err := catalog.NodeSecret(ctx, n1); err != nil || secret.ReportedVCPU != 4 || secret.ReportedRAMMB != 4096 || secret.ReportedDiskGB != 100 {
+		t.Fatalf("NodeSecret reported = %d/%d/%d, %v", secret.ReportedVCPU, secret.ReportedRAMMB, secret.ReportedDiskGB, err)
+	}
 	if err := catalog.SetOvercommit(ctx, n1, "", Overcommit{CPU: 5, RAM: 1, Disk: 1, Traffic: 1}, limits); !errors.Is(err, ErrOvercommitInvalid) {
 		t.Fatalf("ratio above the maximum: %v", err)
 	}

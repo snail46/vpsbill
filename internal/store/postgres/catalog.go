@@ -138,9 +138,11 @@ func (s *CatalogStore) NodeSecret(ctx context.Context, id string) (Node, error) 
 		SELECT n.id, n.region_id, r.code, r.name, n.name, n.provider_type, n.base_url, n.api_key_ciphertext,n.provider_options,
 		       n.status, n.virtualization_types, n.capacity, n.capacity_vcpu, n.capacity_ram_mb,
 		       n.capacity_disk_gb, n.last_seen_at, n.created_at,
-		       coalesce(n.owner_account_id::text,''), n.retired_at
+		       coalesce(n.owner_account_id::text,''), n.retired_at,
+		       coalesce(n.reported_vcpu, n.capacity_vcpu), coalesce(n.reported_ram_mb, n.capacity_ram_mb), coalesce(n.reported_disk_gb, n.capacity_disk_gb)
 		FROM nodes n JOIN regions r ON r.id=n.region_id WHERE n.id=$1
-	`, id).Scan(&node.ID, &node.RegionID, &node.RegionCode, &node.RegionName, &node.Name, &node.ProviderType, &node.BaseURL, &node.APIKeyCiphertext, &node.ProviderOptions, &node.Status, &node.VirtualizationTypes, &capacity, &node.CapacityVCPU, &node.CapacityRAMMB, &node.CapacityDiskGB, &node.LastSeenAt, &node.CreatedAt, &node.OwnerAccountID, &node.RetiredAt)
+	`, id).Scan(&node.ID, &node.RegionID, &node.RegionCode, &node.RegionName, &node.Name, &node.ProviderType, &node.BaseURL, &node.APIKeyCiphertext, &node.ProviderOptions, &node.Status, &node.VirtualizationTypes, &capacity, &node.CapacityVCPU, &node.CapacityRAMMB, &node.CapacityDiskGB, &node.LastSeenAt, &node.CreatedAt, &node.OwnerAccountID, &node.RetiredAt,
+		&node.ReportedVCPU, &node.ReportedRAMMB, &node.ReportedDiskGB)
 	_ = json.Unmarshal(capacity, &node.Capacity)
 	return node, err
 }
