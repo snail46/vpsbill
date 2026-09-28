@@ -182,7 +182,7 @@ function ServiceCard({ service, onReload }: { service: CustomerServiceRecord; on
         </div>
       )}
       {service.status === 'active' && <TradeAction service={service} onDone={onReload} />}
-      {service.host_name && ['active', 'overdue', 'suspended'].includes(service.status) && <RefundPanel service={service} onDone={onReload} />}
+      {service.host_name && ['active', 'overdue', 'suspended', 'error'].includes(service.status) && <RefundPanel service={service} onDone={onReload} />}
 
       {service.status === 'overdue' && (
         <div className="service-notice warning">
@@ -698,7 +698,7 @@ function RefundPanel({ service, onDone }: { service: CustomerServiceRecord; onDo
       </div>
       {error && <div className="form-error">{error}</div>}
       <div className="refund-summary">
-        <span>{quote.full ? '早期全额退款' : '按剩余天数比例退款'}</span>
+        <span>{quote.full ? (service.status === 'error' ? '开通失败，全额退款' : '早期全额退款') : '按剩余天数比例退款'}</span>
         <strong>{walletMoney(quote.refund_minor, quote.currency)}</strong>
         <small className="muted-text">
           已付 {walletMoney(quote.paid_minor, quote.currency)}

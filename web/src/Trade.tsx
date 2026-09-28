@@ -133,8 +133,8 @@ export default function TradeMarket() {
               </div>
               <ListingSpecs listing={listing} />
               <div className="market-plan-buy">
-                <span />
-                <button className="primary-button compact" disabled={listing.mine} onClick={() => setBuying(listing)}>购买</button>
+                {listing.node_online ? <span /> : <span className="tag danger">母机离线，暂不可购买</span>}
+                <button className="primary-button compact" disabled={listing.mine || !listing.node_online} onClick={() => setBuying(listing)}>购买</button>
               </div>
             </article>
           ))}

@@ -54,6 +54,7 @@ type TradeListing struct {
 	PortMappingCount int        `json:"port_mapping_count"`
 	RegionName       string     `json:"region_name"`
 	HostName         string     `json:"host_name,omitempty"`
+	NodeOnline       bool       `json:"node_online"`
 	BillingCycle     string     `json:"billing_cycle"`
 	ExpiresAt        *time.Time `json:"expires_at"`
 	RenewalMinor     *int64     `json:"renewal_minor"`
@@ -78,9 +79,9 @@ const listingSelect = `
 	       s.status='active' AND s.account_id=l.seller_account_id,
 	       (SELECT pp.amount_minor FROM plan_prices pp WHERE pp.plan_id=p.id AND pp.currency=l.currency AND pp.billing_cycle=s.billing_cycle
 	          AND pp.active_from<=now() AND (pp.active_until IS NULL OR pp.active_until>now()) ORDER BY pp.active_from DESC LIMIT 1),
-	       s.renewal_discount_type,s.renewal_discount_value
+	       s.renewal_discount_type,s.renewal_discount_value,coalesce(n.status='online',false)
 	FROM service_listings l JOIN services s ON s.id=l.service_id JOIN plans p ON p.id=s.plan_id JOIN regions r ON r.id=s.region_id
-	JOIN accounts sa ON sa.id=l.seller_account_id LEFT JOIN accounts h ON h.id=p.owner_account_id`
+	JOIN accounts sa ON sa.id=l.seller_account_id LEFT JOIN accounts h ON h.id=p.owner_account_id LEFT JOIN nodes n ON n.id=s.node_id`
 
 func scanListings(rows pgx.Rows, viewer string, owner bool) ([]TradeListing, error) {
 	defer rows.Close()
@@ -92,7 +93,7 @@ func scanListings(rows pgx.Rows, viewer string, owner bool) ([]TradeListing, err
 		var discountValue *int64
 		if err := rows.Scan(&l.ID, &l.ServiceID, &l.InstanceName, &seller, &l.SellerName, &l.Status, &l.CancelReason, &l.PriceMinor, &l.Currency, &l.Note,
 			&l.PlanName, &l.Virtualization, &l.VCPU, &l.RAMMB, &l.DiskGB, &l.TrafficGB, &l.PortMappingCount, &l.RegionName, &l.HostName,
-			&l.BillingCycle, &l.ExpiresAt, &l.ServiceCreatedAt, &l.CreatedAt, &l.SoldAt, &l.Available, &l.RenewalMinor, &discountType, &discountValue); err != nil {
+			&l.BillingCycle, &l.ExpiresAt, &l.ServiceCreatedAt, &l.CreatedAt, &l.SoldAt, &l.Available, &l.RenewalMinor, &discountType, &discountValue, &l.NodeOnline); err != nil {
 			return nil, err
 		}
 		if l.RenewalMinor != nil && discountType != nil && discountValue != nil {
@@ -232,11 +233,13 @@ func (s *TradeStore) Buy(ctx context.Context, buyer, userID, listingID string, e
 	var result TradeResult
 	var seller, status, serviceStatus, owner, buyerCurrency string
 	var planOwner *string
+	var nodeOnline bool
 	err = tx.QueryRow(ctx, `
-		SELECT l.id,l.service_id,l.seller_account_id,l.status,l.price_minor,l.currency,s.instance_name,s.status,s.account_id,p.name,p.owner_account_id
+		SELECT l.id,l.service_id,l.seller_account_id,l.status,l.price_minor,l.currency,s.instance_name,s.status,s.account_id,p.name,p.owner_account_id,
+		       coalesce((SELECT n.status='online' FROM nodes n WHERE n.id=s.node_id),false)
 		FROM service_listings l JOIN services s ON s.id=l.service_id JOIN plans p ON p.id=s.plan_id
 		WHERE l.id=$1 FOR UPDATE OF l, s
-	`, listingID).Scan(&result.ListingID, &result.ServiceID, &seller, &status, &result.PriceMinor, &result.Currency, &result.InstanceName, &serviceStatus, &owner, &result.PlanName, &planOwner)
+	`, listingID).Scan(&result.ListingID, &result.ServiceID, &seller, &status, &result.PriceMinor, &result.Currency, &result.InstanceName, &serviceStatus, &owner, &result.PlanName, &planOwner, &nodeOnline)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return TradeResult{}, ErrListingNotFound
 	}
@@ -258,6 +261,8 @@ func (s *TradeStore) Buy(ctx context.Context, buyer, userID, listingID string, e
 			return TradeResult{}, err
 		}
 		return TradeResult{}, &TradeError{"该实例已不是正常运行状态，挂售已自动下架"}
+	case !nodeOnline:
+		return TradeResult{}, &TradeError{"实例所在母机当前离线，暂不能购买"}
 	case result.PriceMinor != expectedMinor:
 		return TradeResult{}, ErrListingChanged
 	}

@@ -209,7 +209,7 @@ func tradeMarket(t *testing.T, ctx context.Context, db *pgxpool.Pool, serviceID,
 	if _, err := trade.CreateListing(ctx, sellerID, sellerUser, serviceID, 5000, ""); !errors.As(err, &rule) {
 		t.Fatalf("listed a provisioning instance: %v", err)
 	}
-	if _, err := db.Exec(ctx, `UPDATE services SET status='active',root_password_ciphertext='\x01' WHERE id=$1`, serviceID); err != nil {
+	if _, err := db.Exec(ctx, `UPDATE services SET status='active',root_password_ciphertext='\x01',node_id=(SELECT node_id FROM plans WHERE id=services.plan_id) WHERE id=$1`, serviceID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := trade.CreateListing(ctx, sellerID, sellerUser, serviceID, 5000, ""); !errors.As(err, &rule) {
@@ -241,6 +241,15 @@ func tradeMarket(t *testing.T, ctx context.Context, db *pgxpool.Pool, serviceID,
 	if _, err := trade.Buy(ctx, buyerID, sellerUser, listingID, 4000); !errors.Is(err, ErrListingChanged) {
 		t.Fatalf("bought at a stale price: %v", err)
 	}
+	if _, err := db.Exec(ctx, `UPDATE nodes SET status='offline' WHERE id=(SELECT node_id FROM services WHERE id=$1)`, serviceID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := trade.Buy(ctx, buyerID, sellerUser, listingID, 5000); !errors.As(err, &rule) {
+		t.Fatalf("bought an instance on an offline node: %v", err)
+	}
+	if _, err := db.Exec(ctx, `UPDATE nodes SET status='online' WHERE id=(SELECT node_id FROM services WHERE id=$1)`, serviceID); err != nil {
+		t.Fatal(err)
+	}
 	sellerBefore, buyerBefore := balanceOf(sellerID), balanceOf(buyerID)
 	result, err := trade.Buy(ctx, buyerID, sellerUser, listingID, 5000)
 	if err != nil || result.ServiceID != serviceID {
@@ -266,5 +275,48 @@ func tradeMarket(t *testing.T, ctx context.Context, db *pgxpool.Pool, serviceID,
 	}
 	if mine, _ := trade.SellerListings(ctx, sellerID); len(mine) != 1 || mine[0].Status != "sold" || mine[0].Available {
 		t.Fatalf("seller listings: %+v", mine)
+	}
+
+	// Staff terminating a hosted instance refunds the unused days to the
+	// current holder instead of leaving the escrow stuck.
+	holderBefore := balanceOf(buyerID)
+	if _, err := NewProvisioningStore(db).QueueAdminServiceAction(ctx, sellerUser, serviceID, "terminate", "", "test"); err != nil {
+		t.Fatal(err)
+	}
+	var holding int
+	if err := db.QueryRow(ctx, `SELECT count(*) FROM marketplace_escrows WHERE service_id=$1 AND status='holding'`, serviceID).Scan(&holding); err != nil || holding != 0 {
+		t.Fatalf("escrow still holding after admin termination: %d err=%v", holding, err)
+	}
+	if balanceOf(buyerID) <= holderBefore {
+		t.Fatalf("holder not refunded on termination: %d -> %d", holderBefore, balanceOf(buyerID))
+	}
+
+	// A gateway payment for an invoice that can no longer be paid goes to
+	// the balance instead of failing forever.
+	var paidNumber string
+	var paidAmount int64
+	if err := db.QueryRow(ctx, `SELECT number,total_minor FROM invoices WHERE account_id=$1 AND status='paid' AND kind='initial' ORDER BY created_at LIMIT 1`, sellerID).Scan(&paidNumber, &paidAmount); err != nil {
+		t.Fatal(err)
+	}
+	before := balanceOf(sellerID)
+	late, err := billing.ProcessPayment(ctx, PaymentEvent{Provider: "generic", ProviderEventID: "late-1", EventType: "payment.succeeded", ProviderTransactionID: "late-1", InvoiceNumber: paidNumber, AmountMinor: paidAmount, Currency: "CNY", Payload: []byte(`{}`)}, "payment_provider", "generic")
+	if err != nil || !late.CreditedToBalance || balanceOf(sellerID) != before+paidAmount {
+		t.Fatalf("late payment: %+v balance %d->%d err=%v", late, before, balanceOf(sellerID), err)
+	}
+	if _, err := billing.ProcessPayment(ctx, PaymentEvent{Provider: "manual", ProviderEventID: "late-2", EventType: "payment.succeeded", ProviderTransactionID: "late-2", InvoiceNumber: paidNumber, AmountMinor: paidAmount, Currency: "CNY", Payload: []byte(`{}`)}, "staff", ""); !errors.Is(err, ErrPaymentMismatch) {
+		t.Fatalf("manual confirmation of a paid invoice: %v", err)
+	}
+
+	// Unpaid new orders expire an hour after they fall due.
+	if _, err := db.Exec(ctx, `UPDATE invoices SET due_at=now()-interval '2 hours' WHERE status='open' AND kind='initial'`); err != nil {
+		t.Fatal(err)
+	}
+	expired, err := NewLifecycleStore(db).expireUnpaidOrders(ctx)
+	if err != nil || expired == 0 {
+		t.Fatalf("expire unpaid orders: %d err=%v", expired, err)
+	}
+	var open int
+	if err := db.QueryRow(ctx, `SELECT count(*) FROM invoices WHERE status='open' AND kind='initial'`).Scan(&open); err != nil || open != 0 {
+		t.Fatalf("open initial invoices after expiry: %d err=%v", open, err)
 	}
 }

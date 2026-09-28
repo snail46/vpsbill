@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -52,6 +53,9 @@ func (s *ProvisioningStore) QueueAdminServiceAction(ctx context.Context, staffID
 			return "", err
 		}
 		if _, err := tx.Exec(ctx, `UPDATE invoices SET status='void',updated_at=now() WHERE service_id=$1 AND status='open'`, serviceID); err != nil {
+			return "", err
+		}
+		if err := settleTerminatedEscrow(ctx, tx, serviceID, time.Now()); err != nil {
 			return "", err
 		}
 		if nodeID == nil {

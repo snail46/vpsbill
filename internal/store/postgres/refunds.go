@@ -123,6 +123,11 @@ func (m *MarketplaceStore) planRefund(ctx context.Context, tx pgx.Tx, accountID,
 	plan.TrafficBytes = traffic
 	switch plan.status {
 	case "active", "overdue", "suspended":
+	case "error":
+		if plan.nodeID != nil {
+			plan.Message = "实例处于异常状态，请提交工单处理"
+			return plan, nil
+		}
 	case "provisioning":
 		plan.Message = "实例正在开通，开通完成后才能申请退款"
 		return plan, nil
@@ -150,6 +155,10 @@ func (m *MarketplaceStore) planRefund(ctx context.Context, tx pgx.Tx, accountID,
 		return plan, err
 	}
 	switch {
+	case plan.status == "error":
+		// Provisioning failed for good: nothing was delivered.
+		plan.Full = true
+		plan.Message = "实例开通失败，全额退款"
 	case !plan.EarlyRefund:
 		plan.Message = "该套餐未开启早期全额退款，按剩余天数比例退款"
 	case now.Sub(plan.PurchasedAt) > EarlyRefundWindow:
@@ -230,7 +239,10 @@ func (m *MarketplaceStore) RefundService(ctx context.Context, accountID, service
 	}
 	if plan.RefundMinor > 0 {
 		label := "按剩余天数比例退款"
-		if plan.Full {
+		switch {
+		case plan.status == "error":
+			label = "开通失败全额退款"
+		case plan.Full:
 			label = "早期全额退款"
 		}
 		if _, err := applyWalletChange(ctx, tx, walletChange{
@@ -279,4 +291,60 @@ func (m *MarketplaceStore) RefundService(ctx context.Context, accountID, service
 		return RefundResult{}, err
 	}
 	return result, nil
+}
+
+// settleTerminatedEscrow closes the escrow of a hosted service that staff
+// terminated: the holder gets the unused whole days back as balance and the
+// host is paid for the days used. Platform services have no escrow.
+func settleTerminatedEscrow(ctx context.Context, tx pgx.Tx, serviceID string, now time.Time) error {
+	var holder, instance string
+	if err := tx.QueryRow(ctx, `SELECT account_id,instance_name FROM services WHERE id=$1`, serviceID).Scan(&holder, &instance); err != nil {
+		return err
+	}
+	rows, err := tx.Query(ctx, `
+		SELECT id,host_account_id,gross_minor,host_share_minor,released_gross_minor,released_host_minor,period_start,period_end
+		FROM marketplace_escrows WHERE service_id=$1 AND status='holding' ORDER BY period_start FOR UPDATE
+	`, serviceID)
+	if err != nil {
+		return err
+	}
+	type held struct {
+		refundEscrow
+		host string
+	}
+	escrows := make([]held, 0)
+	for rows.Next() {
+		var e held
+		if err := rows.Scan(&e.id, &e.host, &e.gross, &e.share, &e.releasedGross, &e.releasedHost, &e.start, &e.end); err != nil {
+			rows.Close()
+			return err
+		}
+		escrows = append(escrows, e)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	var refund int64
+	for _, e := range escrows {
+		e.settle(now, false)
+		if _, err := applyWalletChange(ctx, tx, walletChange{
+			AccountID: e.host, Kind: "earning", AmountMinor: e.hostTarget - e.releasedHost,
+			Description:   fmt.Sprintf("托管收益：%s 已使用部分（管理员终止实例）", instance),
+			ReferenceType: "escrow", ReferenceID: e.id, DedupKey: "escrow:" + e.id + ":terminate-settle",
+		}); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `UPDATE marketplace_escrows SET status='refunded',refunded_minor=$2,released_gross_minor=gross_minor-$2,released_host_minor=$3,cleared_at=now(),updated_at=now() WHERE id=$1`,
+			e.id, e.refund, e.hostTarget); err != nil {
+			return err
+		}
+		refund += e.refund
+	}
+	_, err = applyWalletChange(ctx, tx, walletChange{
+		AccountID: holder, Kind: "refund", AmountMinor: refund,
+		Description:   fmt.Sprintf("实例 %s 被管理员终止，按剩余天数退款", instance),
+		ReferenceType: "service", ReferenceID: serviceID, DedupKey: "terminate-refund:" + serviceID,
+	})
+	return err
 }

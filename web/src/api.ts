@@ -545,6 +545,7 @@ export type TradeListingRecord = {
   port_mapping_count: number
   region_name: string
   host_name?: string
+  node_online: boolean
   billing_cycle: string
   expires_at: string | null
   renewal_minor: number | null

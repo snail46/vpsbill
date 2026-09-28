@@ -565,6 +565,9 @@ type PaymentResult struct {
 	ServiceIDs    []string `json:"service_ids,omitempty"`
 	TransactionID string   `json:"transaction_id,omitempty"`
 	Topup         bool     `json:"topup,omitempty"`
+	// CreditedToBalance marks a payment for an invoice that was no longer
+	// payable; the amount went to the balance.
+	CreditedToBalance bool `json:"credited_to_balance,omitempty"`
 }
 
 func (s *BillingStore) ProcessPayment(ctx context.Context, event PaymentEvent, actorType, actorID string) (PaymentResult, error) {
@@ -612,6 +615,34 @@ func (s *BillingStore) processPayment(ctx context.Context, tx pgx.Tx, event Paym
 		FROM invoices WHERE number=$1 FOR UPDATE
 	`, event.InvoiceNumber).Scan(&result.InvoiceID, &accountID, &orderID, &renewalServiceID, &periodStart, &periodEnd, &status, &currency, &balance, &kind); err != nil {
 		return PaymentResult{}, fmt.Errorf("load invoice: %w", err)
+	}
+	if status != "open" && event.Provider != "balance" && event.Provider != "manual" && event.AmountMinor > 0 && strings.EqualFold(currency, event.Currency) {
+		// The gateway took the money but the invoice can no longer be paid:
+		// it was paid another way (balance, a second checkout) or voided by
+		// a refund or clearance. Keep the money as balance rather than
+		// rejecting the notification, which the gateway would retry forever.
+		if err := tx.QueryRow(ctx, `
+			INSERT INTO transactions(account_id, invoice_id, provider, provider_transaction_id, type, status, currency, amount_minor)
+			VALUES($1, $2, $3, $4, 'payment', 'succeeded', $5, $6) RETURNING id
+		`, accountID, result.InvoiceID, event.Provider, event.ProviderTransactionID, currency, event.AmountMinor).Scan(&result.TransactionID); err != nil {
+			return PaymentResult{}, fmt.Errorf("record transaction: %w", err)
+		}
+		if _, err := applyWalletChange(ctx, tx, walletChange{AccountID: accountID, Kind: "topup", AmountMinor: event.AmountMinor,
+			Description:   fmt.Sprintf("账单 %s 已无需支付，在线付款转入余额", event.InvoiceNumber),
+			ReferenceType: "invoice", ReferenceID: result.InvoiceID, DedupKey: "late-payment:" + event.Provider + ":" + event.ProviderTransactionID}); err != nil {
+			return PaymentResult{}, err
+		}
+		if _, err := tx.Exec(ctx, "UPDATE payment_events SET processed_at=now() WHERE id=$1", paymentEventID); err != nil {
+			return PaymentResult{}, err
+		}
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO audit_logs(actor_type, actor_id, action, target_type, target_id, metadata)
+			VALUES($1, nullif($2,''), 'invoice.late_payment_credited', 'invoice', $3, jsonb_build_object('provider',$4::text,'invoice_status',$5::text,'amount_minor',$6::bigint))
+		`, actorType, actorID, result.InvoiceID, event.Provider, status, event.AmountMinor); err != nil {
+			return PaymentResult{}, err
+		}
+		result.CreditedToBalance = true
+		return result, nil
 	}
 	if status != "open" || balance != event.AmountMinor || !strings.EqualFold(currency, event.Currency) || event.AmountMinor <= 0 {
 		return PaymentResult{}, ErrPaymentMismatch

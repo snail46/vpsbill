@@ -147,11 +147,19 @@ func (a *authenticator) customerRegister(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "validation_error", "message": "姓名和有效邮箱不能为空"})
 		return
 	}
+	// Sign-ups count against a per-address bucket in the login limiter: at
+	// most 10 accounts per IP every 15 minutes.
+	registerKey := "register:" + remoteIP(r)
+	if allowed, err := a.store.LoginAllowed(r.Context(), registerKey, ""); err != nil || !allowed {
+		writeJSON(w, http.StatusTooManyRequests, map[string]any{"error": "rate_limited", "message": "注册过于频繁，请稍后再试"})
+		return
+	}
 	passwordHash, err := security.HashPassword(input.Password)
 	if err != nil {
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "validation_error", "message": err.Error()})
 		return
 	}
+	_ = a.store.RecordLoginAttempt(r.Context(), registerKey, "", false)
 	identity, err := a.store.RegisterCustomer(r.Context(), input.Email, input.DisplayName, passwordHash)
 	if errors.Is(err, postgres.ErrEmailExists) {
 		writeJSON(w, http.StatusConflict, map[string]any{"error": "email_exists", "message": "该邮箱已被注册"})

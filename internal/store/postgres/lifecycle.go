@@ -14,7 +14,9 @@ type LifecycleStore struct{ db *pgxpool.Pool }
 
 func NewLifecycleStore(db *pgxpool.Pool) *LifecycleStore { return &LifecycleStore{db: db} }
 
-type LifecycleResult struct{ RenewalInvoices, PricingReview, Overdue, Suspended, TerminationQueued int }
+type LifecycleResult struct {
+	RenewalInvoices, PricingReview, Overdue, Suspended, TerminationQueued, ExpiredOrders int
+}
 
 func (s *LifecycleStore) Run(ctx context.Context, lead, grace, retention time.Duration) (LifecycleResult, error) {
 	var result LifecycleResult
@@ -42,7 +44,31 @@ func (s *LifecycleStore) Run(ctx context.Context, lead, grace, retention time.Du
 		return result, err
 	}
 	result.TerminationQueued, err = s.queueTerminations(ctx)
+	if err != nil {
+		return result, err
+	}
+	result.ExpiredOrders, err = s.expireUnpaidOrders(ctx)
 	return result, err
+}
+
+// expireUnpaidOrders voids new-order invoices an hour past their due date
+// with no checkout still open, so held coupon uses and purchase-limit slots
+// are released. A gateway payment that still arrives is credited to the
+// balance.
+func (s *LifecycleStore) expireUnpaidOrders(ctx context.Context) (int, error) {
+	command, err := s.db.Exec(ctx, `
+		WITH expired AS (
+			UPDATE invoices i SET status='void',updated_at=now()
+			WHERE i.kind='initial' AND i.status='open' AND i.due_at < now() - interval '1 hour'
+			  AND NOT EXISTS(SELECT 1 FROM payment_intents p WHERE p.invoice_id=i.id AND p.status IN ('pending','redirected') AND p.expires_at > now())
+			RETURNING i.order_id
+		)
+		UPDATE orders o SET status='cancelled',updated_at=now() FROM expired e WHERE o.id=e.order_id AND o.status='pending_payment'
+	`)
+	if err != nil {
+		return 0, err
+	}
+	return int(command.RowsAffected()), nil
 }
 
 func (s *LifecycleStore) markPricingReview(ctx context.Context, lead time.Duration) (int, error) {
