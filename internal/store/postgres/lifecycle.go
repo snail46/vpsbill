@@ -221,7 +221,7 @@ func (s *LifecycleStore) createRenewal(ctx context.Context, lead time.Duration) 
 	amount, periodEnd := ProrateToLease(lockedRenewalPrice(amount, lockedPrice), nextDue, LeaseEnd(nodeExpires), cycle)
 	description := planName + " / renewal"
 	if periodEnd.Before(addBillingCycle(nextDue, cycle)) {
-		description += "（按母机到期折算至 " + periodEnd.In(clock.Zone).Format("2006-01-02") + "）"
+		description += "（按母机到期折算至 " + periodEnd.Add(-time.Second).In(clock.Zone).Format("2006-01-02") + "）"
 	}
 	discount := amount - renewalAmount(amount, nil, discountType, discountValue)
 	number := newDocumentNumber("INV")

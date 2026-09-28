@@ -192,7 +192,7 @@ type pricedItem struct {
 func lineDescription(item pricedItem) string {
 	text := item.PlanName + " / " + BillingCycleName(item.Input.BillingCycle)
 	if item.PeriodEnd != nil {
-		text += "（按母机到期折算至 " + item.PeriodEnd.In(clock.Zone).Format("2006-01-02") + "）"
+		text += "（按母机到期折算至 " + item.PeriodEnd.Add(-time.Second).In(clock.Zone).Format("2006-01-02") + "）"
 	}
 	return text
 }

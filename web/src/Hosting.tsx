@@ -79,7 +79,8 @@ function lastSeen(node: HostedNodeRecord) {
 }
 
 function planPrice(plan: PlanRecord) {
-  const first = [...plan.prices].sort((a, b) => cycleOrder(a.billing_cycle) - cycleOrder(b.billing_cycle))[0]
+  const sorted = [...plan.prices].sort((a, b) => cycleOrder(a.billing_cycle) - cycleOrder(b.billing_cycle))
+  const first = sorted.find(price => price.billing_cycle === 'monthly') ?? sorted[0]
   if (!first) return '暂无报价'
   const more = plan.prices.length > 1 ? ` 等 ${plan.prices.length} 种周期` : ''
   return `${walletMoney(first.amount_minor, first.currency)} / ${cycleName(first.billing_cycle)}${more}`
@@ -327,7 +328,7 @@ function BuyDialog({
             </label>
             {price?.charge_minor != null && price.period_end && (
               <p className="notice-text wide">
-                母机 {formatDate(price.period_end)} 到期，早于{cycleName(price.billing_cycle)}周期结束：按剩余时间折算，实付 {walletMoney(price.charge_minor, price.currency)}（原价 {walletMoney(price.amount_minor, price.currency)}），实例到期日为 {formatDate(price.period_end)}。续费时按原价计费，同样不超过母机到期日。
+                母机 {node.expires_at} 到期，早于{cycleName(price.billing_cycle)}周期结束：按剩余时间折算，实付 {walletMoney(price.charge_minor, price.currency)}（原价 {walletMoney(price.amount_minor, price.currency)}），实例随母机在 {node.expires_at} 当天结束时到期。续费按原价计费，同样不超过母机到期日。
               </p>
             )}
             <label>

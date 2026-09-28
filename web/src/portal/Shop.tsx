@@ -2,6 +2,14 @@ import { FormEvent, useEffect, useState } from 'react'
 import { api, CustomerCatalogRecord, CustomerIdentity, OrderRecord, PaymentIntentRecord } from '../api'
 import { CouponField } from '../Coupons'
 import { cycleLabel, money } from '../shared/ui'
+import { cycleOrder } from '../shared/cycles'
+
+// cardPrice shows the monthly price when the plan sells one, otherwise the
+// shortest cycle.
+function cardPrice<T extends { currency: string; billing_cycle: string }>(prices: T[], currency: string) {
+  const own = prices.filter(price => price.currency === currency)
+  return own.find(price => price.billing_cycle === 'monthly') ?? own[0]
+}
 
 export function CustomerShop({ customer }: { customer: CustomerIdentity }) {
   const [catalog, setCatalog] = useState<CustomerCatalogRecord | null>(null)
@@ -17,11 +25,12 @@ export function CustomerShop({ customer }: { customer: CustomerIdentity }) {
   useEffect(() => {
     api<CustomerCatalogRecord>('/api/v1/customer/catalog')
       .then(value => {
+        for (const plan of value.plans) plan.prices.sort((a, b) => cycleOrder(a.billing_cycle) - cycleOrder(b.billing_cycle))
         setCatalog(value)
         const first = value.plans.find(plan => plan.prices.some(price => price.currency === customer.default_currency))
         if (first) {
           setSelectedID(first.id)
-          const price = first.prices.find(item => item.currency === customer.default_currency)
+          const price = cardPrice(first.prices, customer.default_currency)
           if (price) setCycle(price.billing_cycle)
         }
       })
@@ -102,7 +111,7 @@ export function CustomerShop({ customer }: { customer: CustomerIdentity }) {
 
       <div className="shop-grid">
         {plans.map(plan => {
-          const price = plan.prices.find(item => item.currency === customer.default_currency)
+          const price = cardPrice(plan.prices, customer.default_currency)
           return (
             <button
               type="button"

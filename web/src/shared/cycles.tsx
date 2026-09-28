@@ -57,7 +57,7 @@ export function CyclePriceFields({ prices, hint }: { prices: PriceLike[]; hint?:
           </label>
         ))}
         <label className="cycle-custom">
-          <span>自定义周期</span>
+          <span>自定义周期（长度、单位、价格）</span>
           <div className="cycle-custom-row">
             <input name="custom_cycle_length" type="number" min="1" max={unit === 'd' ? 365 : 60} placeholder="长度" defaultValue={custom?.n ?? ''} />
             <select name="custom_cycle_unit" value={unit} onChange={event => setUnit(event.target.value as 'd' | 'm')}>
