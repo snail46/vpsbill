@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -36,9 +37,11 @@ type Podman struct {
 	diskMu sync.Mutex
 	disk   map[string]diskSample // instance name -> last measured root fs size
 
-	// mount and space inspect the host file systems; replaced in tests.
-	mount func(path string) (mountEntry, bool)
-	space func(path string) (int64, int64, error)
+	// mount and space inspect the host file systems, exists checks for a
+	// file; replaced in tests.
+	mount  func(path string) (mountEntry, bool)
+	space  func(path string) (int64, int64, error)
+	exists func(path string) bool
 }
 
 const libpod = "/v4.0.0/libpod"
@@ -46,7 +49,7 @@ const libpod = "/v4.0.0/libpod"
 func NewPodman(config PodmanConfig) *Podman {
 	return &Podman{
 		client: newUnixClient(config.Socket), config: config, run: runCommand, shaped: map[string]string{}, disk: map[string]diskSample{},
-		mount: mountOf, space: fsSpace,
+		mount: mountOf, space: fsSpace, exists: func(path string) bool { _, err := os.Stat(path); return err == nil },
 		interfaceName: func(index int) (string, error) {
 			iface, err := net.InterfaceByIndex(index)
 			if err != nil {
@@ -177,6 +180,27 @@ const (
 	podmanLogSize = 1 << 20
 )
 
+// lxcfsFiles are the /proc and /sys views lxcfs renders from a container's
+// cgroup, so free, top and uptime inside it show its own limits instead of
+// the host's.
+var lxcfsFiles = []string{
+	"/proc/cpuinfo", "/proc/diskstats", "/proc/meminfo", "/proc/stat", "/proc/swaps", "/proc/uptime", "/proc/loadavg",
+	"/sys/devices/system/cpu/online",
+}
+
+const lxcfsRoot = "/var/lib/lxcfs"
+
+// lxcfsMounts binds the lxcfs views that exist on the host.
+func (p *Podman) lxcfsMounts() []map[string]any {
+	var mounts []map[string]any
+	for _, file := range lxcfsFiles {
+		if source := lxcfsRoot + file; p.exists(source) {
+			mounts = append(mounts, map[string]any{"destination": file, "type": "bind", "source": source, "options": []string{"rbind"}})
+		}
+	}
+	return mounts
+}
+
 func (p *Podman) Create(ctx context.Context, spec RuntimeSpec) error {
 	memory := int64(spec.RAMMB) << 20
 	body := map[string]any{
@@ -195,6 +219,9 @@ func (p *Podman) Create(ctx context.Context, spec RuntimeSpec) error {
 		},
 		"storage_opts":      map[string]string{"size": fmt.Sprintf("%dG", spec.DiskGB)},
 		"log_configuration": map[string]any{"driver": "k8s-file", "size": podmanLogSize},
+	}
+	if mounts := p.lxcfsMounts(); len(mounts) > 0 {
+		body["mounts"] = mounts
 	}
 	if err := p.request(ctx, http.MethodPost, "/containers/create", body, nil); err != nil {
 		return err

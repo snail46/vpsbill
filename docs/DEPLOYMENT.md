@@ -96,6 +96,8 @@ Podman 不用手动准备：下一步的安装脚本带 `--runtime podman`（或
 - `localhost/hatch-debian12:latest`：Debian 12 + systemd + sshd；
 - `localhost/hatch-alpine:latest`：Alpine + OpenRC + sshd。
 
+脚本还会安装 lxcfs，实例里的 `free`、`top`、`uptime` 显示的是实例自己的限额，而不是母机的。
+
 两个镜像空闲时只占几 MB 内存，**1 核 / 64 MB / 1 GB** 的套餐可以正常开机和 SSH 登录。套餐的系统模板 ID 填这两个名字。数据盘大小用 `--podman-disk 20G` 指定，默认是剩余空间减 2 GiB（空间会预先占用）。已有 Podman 容器的机器需要先删除容器再迁移存储。
 
 ### 4C. 安装 Hatch Agent

@@ -64,7 +64,7 @@ export function ReportDialog({ nodeID, nodeName, messageID, onClose }: { nodeID:
             <label className="wide">
               <span>说明（可选）</span>
               <textarea name="detail" rows={4} maxLength={1000} placeholder={messageID ? '补充说明' : '例如：实测只有 1 核 512MB，与套餐不符'} />
-              {!messageID && <small>请在实例里运行 <code>nproc; free -m; df -h /</code>，把结果贴在这里，便于管理员核实。</small>}
+              {!messageID && <small>请在实例里运行 <code>free -m; df -h /</code>，把结果贴在这里，便于管理员核实。Podman 实例的 CPU 是按配额限制的，<code>nproc</code> 会显示母机核数，属正常现象。</small>}
             </label>
             <p className="muted-text wide">举报只有平台管理员能看到，机主和其他用户看不到举报人。</p>
             <div className="form-actions wide">

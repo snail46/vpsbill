@@ -91,6 +91,7 @@ func TestPodmanAppliesBandwidthLimitsOncePerVeth(t *testing.T) {
 	runtime := NewPodman(PodmanConfig{Socket: socket, Network: "podman"})
 	commands := &recorder{}
 	runtime.run = commands.run
+	runtime.exists = func(path string) bool { return path == lxcfsRoot+"/proc/meminfo" }
 	runtime.interfaceName = func(index int) (string, error) {
 		if index != 15 {
 			t.Fatalf("unexpected ifindex %d", index)
@@ -106,6 +107,9 @@ func TestPodmanAppliesBandwidthLimitsOncePerVeth(t *testing.T) {
 	memory := limits["memory"].(map[string]any)
 	if memory["limit"] != float64(512<<20) || memory["swap"] != float64(1024<<20) || limits["pids"].(map[string]any)["limit"] != float64(podmanPidsLimit) {
 		t.Fatalf("resource limits = %v", limits)
+	}
+	if mounts, _ := (*created)["mounts"].([]any); len(mounts) != 1 || mounts[0].(map[string]any)["destination"] != "/proc/meminfo" {
+		t.Fatalf("lxcfs mounts = %v", (*created)["mounts"])
 	}
 	if size := (*created)["storage_opts"].(map[string]any)["size"]; size != "5G" {
 		t.Fatalf("disk size limit = %v", size)

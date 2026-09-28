@@ -179,7 +179,7 @@ CMD ["/sbin/init"]
 EOF
   cat > "$DIR/alpine/Containerfile" <<'EOF'
 FROM docker.io/library/alpine:3.22
-RUN apk add --no-cache openrc openssh iproute2 ca-certificates curl nano \
+RUN apk add --no-cache openrc openssh iproute2 procps-ng ca-certificates curl nano \
  && sed -i 's/^tty/#tty/' /etc/inittab \
  && sed -i -e 's/^#\?rc_sys=.*/rc_sys="docker"/' -e 's/^#\?rc_provide=.*/rc_provide="loopback net"/' /etc/rc.conf \
  && rm -f /etc/ssh/ssh_host_* \
@@ -204,6 +204,8 @@ BASE="${BASE%/}/api/v1/agent/download"
 
 if [ "$USE_PODMAN" = 1 ]; then
   command -v podman >/dev/null 2>&1 || apt_install podman
+  # lxcfs lets free, top and uptime inside a container show its own limits.
+  [ -e /var/lib/lxcfs/proc/meminfo ] || { apt_install lxcfs && systemctl enable --now lxcfs >/dev/null 2>&1; } || echo "warning: lxcfs unavailable; instances will see host memory in free" >&2
   setup_podman_disk
   systemctl enable --now podman.socket >/dev/null
   systemctl enable podman-restart.service >/dev/null 2>&1 || true
@@ -237,7 +239,7 @@ if [ -z "$BINARY" ]; then
 fi
 [ -f "$BINARY" ] || { echo "--binary must point to the hatch-agent binary" >&2; exit 2; }
 
-install -m 0755 "$BINARY" /usr/local/bin/hatch-agent
+[ "$BINARY" -ef /usr/local/bin/hatch-agent ] || install -m 0755 "$BINARY" /usr/local/bin/hatch-agent
 install -d -m 0700 /etc/hatch /var/lib/hatch
 
 if [ ! -f /etc/hatch/agent.json ]; then
