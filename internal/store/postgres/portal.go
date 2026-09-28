@@ -61,6 +61,20 @@ type CustomerService struct {
 	TrafficRXBytes     *int64 `json:"traffic_rx_bytes"`
 	TrafficTXBytes     *int64 `json:"traffic_tx_bytes"`
 	TrafficLockedMonth string `json:"traffic_locked_month,omitempty"`
+	// Source is "platform" or "hosted"; ViaTrade marks an instance the
+	// customer bought in the trading market. NodeID names a hosted node,
+	// whose chat room buyers can join.
+	Source   string `json:"source"`
+	ViaTrade bool   `json:"via_trade"`
+	NodeID   string `json:"node_id,omitempty"`
+	// TemplateID is the installed system.
+	TemplateID   string `json:"template_id"`
+	AutoRenew    bool   `json:"auto_renew"`
+	BillingCycle string `json:"billing_cycle"`
+	Currency     string `json:"currency"`
+	// RenewalPriceMinor is what the next renewal costs, with a hosted price
+	// lock and a recurring coupon applied; nil when the plan has no price.
+	RenewalPriceMinor *int64 `json:"renewal_price_minor"`
 }
 
 type CustomerServiceAccess struct {
@@ -168,9 +182,19 @@ func (s *PortalStore) ListServices(ctx context.Context, accountID string) ([]Cus
 		       s.next_due_at,s.grace_until,s.termination_scheduled_at,s.last_reconciled_at,coalesce(s.last_reconcile_error,''),
 		       coalesce(h.display_name,''),coalesce(s.termination_reason,''),
 		       s.acquired_at,coalesce(l.id::text,''),coalesce(l.price_minor,0),
-		       s.traffic_used_bytes,s.traffic_rx_bytes,s.traffic_tx_bytes,coalesce(s.traffic_locked_month,'')
-		FROM services s JOIN plans p ON p.id=s.plan_id JOIN regions r ON r.id=s.region_id LEFT JOIN accounts h ON h.id=p.owner_account_id
+		       s.traffic_used_bytes,s.traffic_rx_bytes,s.traffic_tx_bytes,coalesce(s.traffic_locked_month,''),
+		       CASE WHEN p.owner_account_id IS NULL THEN 'platform' ELSE 'hosted' END,
+		       EXISTS(SELECT 1 FROM service_listings b WHERE b.service_id=s.id AND b.status='sold' AND b.buyer_account_id=s.account_id),
+		       CASE WHEN p.owner_account_id IS NULL THEN '' ELSE coalesce(p.node_id::text,'') END,
+		       coalesce(s.template_id, oi.configuration->>'template_id', p.default_template_id),
+		       s.auto_renew, s.billing_cycle, a.default_currency,
+		       pp.amount_minor, s.renewal_price_minor, s.renewal_discount_type, s.renewal_discount_value
+		FROM services s JOIN plans p ON p.id=s.plan_id JOIN regions r ON r.id=s.region_id JOIN accounts a ON a.id=s.account_id
+		LEFT JOIN accounts h ON h.id=p.owner_account_id
+		LEFT JOIN order_items oi ON oi.id=s.order_item_id
 		LEFT JOIN service_listings l ON l.service_id=s.id AND l.status='listed'
+		LEFT JOIN LATERAL (SELECT amount_minor FROM plan_prices WHERE plan_id=s.plan_id AND currency=a.default_currency AND billing_cycle=s.billing_cycle
+		                   AND active_from<=now() AND (active_until IS NULL OR active_until>now()) ORDER BY active_from DESC LIMIT 1) pp ON true
 		WHERE s.account_id=$1 ORDER BY s.created_at DESC
 	`, accountID)
 	if err != nil {
@@ -180,9 +204,17 @@ func (s *PortalStore) ListServices(ctx context.Context, accountID string) ([]Cus
 	result := make([]CustomerService, 0)
 	for rows.Next() {
 		var row CustomerService
+		var price, locked, discountValue *int64
+		var discountType *string
 		if err := rows.Scan(&row.ID, &row.PlanName, &row.RegionName, &row.Status, &row.RuntimeStatus, &row.DesiredRuntimeStatus, &row.InstanceName, &row.Virtualization, &row.VCPU, &row.RAMMB, &row.DiskGB, &row.TrafficGB, &row.PrimaryIPv4, &row.PrimaryIPv6, &row.NextDueAt, &row.GraceUntil, &row.TerminationAt, &row.LastReconciledAt, &row.LastReconcileError, &row.HostName, &row.TerminationReason, &row.AcquiredAt, &row.ListingID, &row.ListingPriceMinor,
-			&row.TrafficUsedBytes, &row.TrafficRXBytes, &row.TrafficTXBytes, &row.TrafficLockedMonth); err != nil {
+			&row.TrafficUsedBytes, &row.TrafficRXBytes, &row.TrafficTXBytes, &row.TrafficLockedMonth,
+			&row.Source, &row.ViaTrade, &row.NodeID, &row.TemplateID, &row.AutoRenew, &row.BillingCycle, &row.Currency,
+			&price, &locked, &discountType, &discountValue); err != nil {
 			return nil, err
+		}
+		if price != nil {
+			amount := renewalAmount(*price, locked, discountType, discountValue)
+			row.RenewalPriceMinor = &amount
 		}
 		result = append(result, row)
 	}

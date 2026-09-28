@@ -1,6 +1,7 @@
 import { FormEvent, lazy, Suspense, useEffect, useState } from 'react'
 import {
   Activity,
+  ArrowLeft,
   Check,
   Copy,
   Eye,
@@ -9,6 +10,7 @@ import {
   Globe,
   HardDrive,
   KeyRound,
+  MessagesSquare,
   Monitor,
   Network,
   Power,
@@ -24,6 +26,8 @@ import { api, imageLabel, serviceUsable, CustomerServiceRecord, PortMappingRecor
 import { walletMoney } from './Wallet'
 import { ListServiceDialog, tradeEligibleAt } from './Trade'
 import { formatDate, formatTime, platformMonth } from './shared/time'
+import { cycleLabels, navigatePortal, osLabel, portalPathPart } from './shared/nav'
+import ChatRoom from './ChatRoom'
 
 const ServiceConsole = lazy(() => import('./ServiceConsole').then(module => ({ default: module.ServiceConsole })))
 
@@ -66,7 +70,9 @@ function Meter({ label, value, text, Icon }: { label: string; value: number; tex
   )
 }
 
-function ServiceCard({ service, onReload }: { service: CustomerServiceRecord; onReload: () => void }) {
+// ServiceManager is the live part of the detail page: notices, monitoring,
+// access details and every operation on the instance.
+function ServiceManager({ service, onReload }: { service: CustomerServiceRecord; onReload: () => void }) {
   const [runtime, setRuntime] = useState<ServiceRuntimeRecord | null>(null)
   const [error, setError] = useState('')
   const [acting, setActing] = useState('')
@@ -168,18 +174,7 @@ function ServiceCard({ service, onReload }: { service: CustomerServiceRecord; on
   const formatWhen = (value?: string) => (value ? formatTime(value) : '—')
 
   return (
-    <article className="service-card enhanced">
-      <div className="service-card-head">
-        <div>
-          <span className="tag">{service.virtualization.toUpperCase()}</span>
-          <h3>{service.instance_name}</h3>
-          <p>
-            {service.plan_name} · {service.region_name}
-            {service.host_name ? ` · 托管母机（机主 ${service.host_name}）` : ''}
-          </p>
-        </div>
-        <StatusBadge status={usable ? liveStatus : service.status} />
-      </div>
+    <article className="service-card enhanced service-manager">
 
       {service.termination_reason && (
         <div className="note-banner warn">
@@ -405,11 +400,6 @@ function ServiceCard({ service, onReload }: { service: CustomerServiceRecord; on
       </div>
       </>)}
 
-      <footer>
-        <span>业务状态：<StatusBadge status={service.status} /></span>
-        <span>到期时间：{service.next_due_at ? formatDate(service.next_due_at) : '—'}</span>
-      </footer>
-
       {consoleKind && (
         <Suspense fallback={<div className="modal-backdrop"><div className="session-loading"><div className="spinner" /><strong>正在加载控制台…</strong></div></div>}>
           <ServiceConsole serviceID={service.id} name={service.instance_name} kind={consoleKind} onClose={() => setConsoleKind(null)} />
@@ -618,9 +608,154 @@ function ServiceDialog({
   )
 }
 
-export default function CustomerServices() {
-  const [services, setServices] = useState<CustomerServiceRecord[]>([])
+type SourceFilter = 'all' | 'platform' | 'hosted' | 'trade'
+
+const sourceFilters: [SourceFilter, string][] = [
+  ['all', '全部'],
+  ['platform', '平台自营'],
+  ['hosted', '托管市场'],
+  ['trade', '交易市场'],
+]
+
+const matchesSource = (service: CustomerServiceRecord, filter: SourceFilter) =>
+  filter === 'all' || (filter === 'trade' ? service.via_trade : service.source === filter)
+
+// SourceTags tells where an instance came from: the platform's own nodes or
+// a hosted node, and whether it was bought in the trading market.
+function SourceTags({ service }: { service: CustomerServiceRecord }) {
+  return (
+    <>
+      {service.source === 'hosted' ? <span className="tag source-hosted">托管市场</span> : <span className="tag source-platform">平台自营</span>}
+      {service.via_trade && <span className="tag source-trade">交易市场购入</span>}
+    </>
+  )
+}
+
+function renewalText(service: CustomerServiceRecord) {
+  if (service.renewal_price_minor == null) return '—'
+  return `${walletMoney(service.renewal_price_minor, service.currency)}/${cycleLabels[service.billing_cycle] ?? service.billing_cycle}`
+}
+
+const serviceHref = (service: CustomerServiceRecord) => `/portal/services/${service.id}`
+
+// ServiceTile is the compact card on the list; the detail page holds
+// everything else.
+function ServiceTile({ service }: { service: CustomerServiceRecord }) {
+  const status = serviceUsable(service.status) ? service.runtime_status : service.status
+  return (
+    <a
+      className={`service-tile source-${service.source}${service.status === 'terminated' ? ' ended' : ''}`}
+      href={serviceHref(service)}
+      onClick={event => {
+        event.preventDefault()
+        navigatePortal(serviceHref(service))
+      }}
+    >
+      <div className="service-tile-head">
+        <strong>{service.instance_name}</strong>
+        <StatusBadge status={status} />
+      </div>
+      <div className="service-tile-tags">
+        <SourceTags service={service} />
+        <span className="tag">{service.virtualization.toUpperCase()}</span>
+      </div>
+      <dl className="service-tile-facts">
+        <div><dt>配置</dt><dd>{service.vcpu} 核 · {service.ram_mb >= 1024 ? `${+(service.ram_mb / 1024).toFixed(1)} GB` : `${service.ram_mb} MB`} · {service.disk_gb} GB</dd></div>
+        <div><dt>系统</dt><dd>{osLabel(service.template_id)}</dd></div>
+        <div><dt>地域</dt><dd>{service.region_name}</dd></div>
+        <div><dt>IP</dt><dd>{service.primary_ipv4 || service.primary_ipv6 || '—'}</dd></div>
+        <div><dt>到期</dt><dd>{service.next_due_at ? formatDate(service.next_due_at) : '—'}</dd></div>
+        <div>
+          <dt>续费</dt>
+          <dd>{renewalText(service)}{service.status !== 'terminated' && <small>{service.auto_renew ? ' · 自动' : ' · 手动'}</small>}</dd>
+        </div>
+      </dl>
+    </a>
+  )
+}
+
+// AutoRenewSwitch turns balance renewal on or off for one instance.
+function AutoRenewSwitch({ service, onChanged }: { service: CustomerServiceRecord; onChanged: () => void }) {
+  const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  async function toggle() {
+    setBusy(true)
+    setError('')
+    try {
+      await api(`/api/v1/customer/services/${service.id}/auto-renew`, { method: 'PUT', body: JSON.stringify({ enabled: !service.auto_renew }) })
+      onChanged()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '保存失败')
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <div className="auto-renew">
+      <label className="switch">
+        <input type="checkbox" checked={service.auto_renew} disabled={busy} onChange={() => void toggle()} />
+        <span />
+        自动余额续费
+      </label>
+      <small className="muted-text">
+        {service.auto_renew ? '到期前 24 小时从账户余额扣款续费；余额不足时请手动支付续费账单。' : '已关闭，到期前需要手动支付续费账单。'}
+      </small>
+      {error && <small className="danger-text">{error}</small>}
+    </div>
+  )
+}
+
+// ServiceDetail is the page for one instance: its facts, renewal and
+// every operation.
+function ServiceDetail({ service, onReload }: { service: CustomerServiceRecord; onReload: () => void }) {
+  const [chat, setChat] = useState(false)
+  const ended = service.status === 'terminating' || service.status === 'terminated'
+  return (
+    <>
+      <button className="text-button back-link" onClick={() => navigatePortal('/portal/services')}>
+        <ArrowLeft size={14} />返回我的 VPS
+      </button>
+      <section className="panel service-detail-head">
+        <div className="panel-heading">
+          <div>
+            <h2>{service.instance_name}</h2>
+            <div className="service-tile-tags">
+              <SourceTags service={service} />
+              <span className="tag">{service.virtualization.toUpperCase()}</span>
+            </div>
+          </div>
+          <StatusBadge status={serviceUsable(service.status) ? service.runtime_status : service.status} />
+        </div>
+        <dl className="detail-facts">
+          <div><dt>套餐</dt><dd>{service.plan_name}</dd></div>
+          <div><dt>地域</dt><dd>{service.region_name}</dd></div>
+          <div><dt>配置</dt><dd>{service.vcpu} 核 · {service.ram_mb} MB · {service.disk_gb} GB · 月流量 {service.traffic_gb || '不限'}{service.traffic_gb ? ' GB' : ''}</dd></div>
+          <div><dt>系统</dt><dd>{osLabel(service.template_id)}</dd></div>
+          <div><dt>来源</dt><dd>{service.source === 'hosted' ? `托管市场 · 机主 ${service.host_name || '—'}` : '平台自营'}{service.via_trade ? ' · 交易市场购入' : ''}</dd></div>
+          <div><dt>业务状态</dt><dd><StatusBadge status={service.status} /></dd></div>
+          <div><dt>到期时间</dt><dd>{service.next_due_at ? formatTime(service.next_due_at) : '—'}</dd></div>
+          <div><dt>续费价格</dt><dd>{renewalText(service)}</dd></div>
+        </dl>
+        {!ended && <AutoRenewSwitch service={service} onChanged={onReload} />}
+        {service.source === 'hosted' && service.node_id && !ended && (
+          <div className="form-actions">
+            <button className="secondary-button" onClick={() => setChat(value => !value)}>
+              <MessagesSquare size={14} />{chat ? '收起母机聊天室' : '母机聊天室'}
+            </button>
+          </div>
+        )}
+      </section>
+      {chat && service.node_id && <ChatRoom base="/api/v1/customer/chat/rooms" nodeID={service.node_id} title={`${service.host_name || ''} 的母机聊天室`} />}
+      <ServiceManager service={service} onReload={onReload} />
+    </>
+  )
+}
+
+export default function CustomerServices() {
+  const [services, setServices] = useState<CustomerServiceRecord[] | null>(null)
+  const [error, setError] = useState('')
+  const [selected, setSelected] = useState(() => portalPathPart(2))
+  const [filter, setFilter] = useState<SourceFilter>('all')
 
   const load = () =>
     api<CustomerServiceRecord[]>('/api/v1/customer/services')
@@ -630,15 +765,37 @@ export default function CustomerServices() {
 
   useEffect(() => {
     void load()
+    const follow = () => setSelected(portalPathPart(2))
+    window.addEventListener('popstate', follow)
+    return () => window.removeEventListener('popstate', follow)
   }, [])
 
+  const current = selected ? services?.find(item => item.id === selected) : undefined
+  if (selected) {
+    return (
+      <section className="workspace-panel">
+        {error && <div className="form-error">{error}</div>}
+        {current ? (
+          <ServiceDetail key={current.id} service={current} onReload={load} />
+        ) : (
+          services && (
+            <div className="empty-card">
+              找不到这台实例。<button className="text-button" onClick={() => navigatePortal('/portal/services')}>返回我的 VPS</button>
+            </div>
+          )
+        )}
+      </section>
+    )
+  }
+
+  const visible = (services ?? []).filter(item => matchesSource(item, filter))
   return (
     <section className="workspace-panel">
       <div className="page-actions">
         <div>
           <p className="eyebrow">COMPUTE</p>
           <h2>我的 VPS</h2>
-          <p>实时监控指标每 10 秒自动刷新；所有电源管理、控制台与系统操作均受服务端租户隔离保护。</p>
+          <p>点击实例进入详情页，查看监控、登录信息并执行开关机、重装等操作。</p>
         </div>
         <button className="secondary-button" onClick={() => void load()}>
           <RefreshCw size={15} />刷新
@@ -647,13 +804,22 @@ export default function CustomerServices() {
 
       {error && <div className="form-error">{error}</div>}
 
-      <div className="service-grid">
-        {services.map(service => (
-          <ServiceCard key={service.id} service={service} onReload={load} />
+      <div className="filter-chips" role="tablist" aria-label="按来源筛选">
+        {sourceFilters.map(([id, label]) => (
+          <button key={id} role="tab" aria-selected={filter === id} className={filter === id ? 'chip-button active' : 'chip-button'} onClick={() => setFilter(id)}>
+            {label}
+            <small>{(services ?? []).filter(item => item.status !== 'terminated' && matchesSource(item, id)).length}</small>
+          </button>
         ))}
-        {!services.length && (
+      </div>
+
+      <div className="service-tiles">
+        {visible.map(service => (
+          <ServiceTile key={service.id} service={service} />
+        ))}
+        {services && !visible.length && (
           <div className="empty-card" style={{ gridColumn: '1 / -1' }}>
-            当前账户暂无有效 VPS 服务实例，可前往“选购 VPS”挑选心仪配置。
+            {filter === 'all' ? '当前账户暂无 VPS 实例，可前往“选购 VPS”挑选配置。' : '没有这一来源的实例。'}
           </div>
         )}
       </div>

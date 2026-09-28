@@ -15,7 +15,7 @@ type LifecycleStore struct{ db *pgxpool.Pool }
 func NewLifecycleStore(db *pgxpool.Pool) *LifecycleStore { return &LifecycleStore{db: db} }
 
 type LifecycleResult struct {
-	RenewalInvoices, PricingReview, Overdue, Suspended, TerminationQueued, ExpiredOrders, ClosedListings int
+	RenewalInvoices, AutoRenewed, PricingReview, Overdue, Suspended, TerminationQueued, ExpiredOrders, ClosedListings int
 }
 
 func (s *LifecycleStore) Run(ctx context.Context, lead, grace, retention time.Duration) (LifecycleResult, error) {
@@ -31,6 +31,11 @@ func (s *LifecycleStore) Run(ctx context.Context, lead, grace, retention time.Du
 		result.RenewalInvoices++
 	}
 	var err error
+	// Paying before overdue marking keeps auto-renewed instances active.
+	result.AutoRenewed, err = s.autoRenew(ctx)
+	if err != nil {
+		return result, err
+	}
 	result.PricingReview, err = s.markPricingReview(ctx, lead)
 	if err != nil {
 		return result, err
@@ -53,6 +58,72 @@ func (s *LifecycleStore) Run(ctx context.Context, lead, grace, retention time.Du
 	}
 	result.ClosedListings, err = s.closeExpiringListings(ctx)
 	return result, err
+}
+
+// lockedRenewalPrice applies a hosted instance's price lock: it renews at
+// the price it was bought at when the host has raised it since; a lower
+// current price applies as it is.
+func lockedRenewalPrice(price int64, locked *int64) int64 {
+	if locked != nil && *locked > 0 && *locked < price {
+		return *locked
+	}
+	return price
+}
+
+// renewalAmount is what a renewal at the current plan price costs after
+// the price lock and a recurring coupon discount.
+func renewalAmount(price int64, locked *int64, discountType *string, discountValue *int64) int64 {
+	amount := lockedRenewalPrice(price, locked)
+	if discountType != nil && discountValue != nil {
+		amount -= CouponDiscount(*discountType, *discountValue, amount)
+	}
+	return amount
+}
+
+// autoRenewWindow is how long before expiry a renewal is paid from the
+// balance, leaving customers time to switch auto-renewal off.
+const autoRenewWindow = 24 * time.Hour
+
+// autoRenew pays open renewal invoices from the balance for instances with
+// auto-renewal on, once they are due within autoRenewWindow (or already
+// overdue) and the balance covers them.
+func (s *LifecycleStore) autoRenew(ctx context.Context) (int, error) {
+	rows, err := s.db.Query(ctx, `
+		SELECT i.id, i.account_id FROM invoices i
+		JOIN services s ON s.id=i.service_id JOIN accounts a ON a.id=i.account_id
+		WHERE i.kind='renewal' AND i.status='open' AND i.balance_minor>0 AND s.auto_renew
+		  AND s.status IN ('active','overdue','suspended') AND i.due_at<=now()+make_interval(secs=>$1)
+		  AND a.balance_minor>=i.balance_minor
+		ORDER BY i.due_at LIMIT 200`, autoRenewWindow.Seconds())
+	if err != nil {
+		return 0, err
+	}
+	type due struct{ invoice, account string }
+	var items []due
+	for rows.Next() {
+		var item due
+		if err := rows.Scan(&item.invoice, &item.account); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		items = append(items, item)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	billing, paid := NewBillingStore(s.db), 0
+	for _, item := range items {
+		_, err := billing.payInvoiceWithBalance(ctx, item.account, item.invoice, "system", "")
+		switch {
+		case errors.Is(err, ErrInsufficientBalance), errors.Is(err, ErrInvoiceUnavailable):
+		case err != nil:
+			return paid, err
+		default:
+			paid++
+		}
+	}
+	return paid, nil
 }
 
 // closeExpiringListings withdraws trading market listings whose instance
@@ -141,17 +212,8 @@ func (s *LifecycleStore) createRenewal(ctx context.Context, lead time.Duration) 
 		return false, err
 	}
 	periodEnd := addBillingCycle(nextDue, cycle)
-	// Hosted instances renew at the price they were bought at when the host
-	// has raised it since; a lower current price applies as it is.
-	if lockedPrice != nil && *lockedPrice > 0 && *lockedPrice < amount {
-		amount = *lockedPrice
-	}
-	// Instances bought with a recurring coupon renew with the same discount
-	// off the current price.
-	var discount int64
-	if discountType != nil && discountValue != nil {
-		discount = CouponDiscount(*discountType, *discountValue, amount)
-	}
+	amount = lockedRenewalPrice(amount, lockedPrice)
+	discount := amount - renewalAmount(amount, nil, discountType, discountValue)
 	number := newDocumentNumber("INV")
 	var invoiceID string
 	err = tx.QueryRow(ctx, `INSERT INTO invoices(number,account_id,service_id,kind,status,currency,subtotal_minor,tax_minor,total_minor,balance_minor,issued_at,due_at,period_start,period_end) VALUES($1,$2,$3,'renewal','open',$4,$5,0,$5,$5,now(),$6,$6,$7) ON CONFLICT(service_id,period_end) WHERE service_id IS NOT NULL DO NOTHING RETURNING id`, number, accountID, serviceID, currency, amount-discount, nextDue, periodEnd).Scan(&invoiceID)

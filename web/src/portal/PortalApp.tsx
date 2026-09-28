@@ -8,7 +8,8 @@ import TradeMarket from '../Trade'
 import { ThemeToggle } from '../ThemeToggle'
 import { EmailVerifyBanner } from '../EmailVerify'
 import { Meta, SessionLoading, Field } from '../shared/ui'
-import { CustomerOverview } from './Overview'
+import { CustomerAnnouncements, CustomerOverview } from './Overview'
+import { navigatePortal } from '../shared/nav'
 import { CustomerShop } from './Shop'
 import { CustomerBilling } from './Billing'
 import { CustomerProfile } from './Profile'
@@ -16,9 +17,9 @@ import { CustomerSupport } from './Support'
 
 export type CustomerAuthScreen = 'loading' | 'login' | 'register' | 'forgot' | 'reset' | 'ready' | 'uninstalled'
 
-export type PortalView = 'overview' | 'shop' | 'services' | 'billing' | 'wallet' | 'hosting' | 'trade' | 'support' | 'profile'
+export type PortalView = 'overview' | 'shop' | 'services' | 'billing' | 'wallet' | 'hosting' | 'trade' | 'support' | 'profile' | 'announcements'
 
-export const portalViews: PortalView[] = ['overview', 'shop', 'services', 'billing', 'wallet', 'hosting', 'trade', 'support', 'profile']
+export const portalViews: PortalView[] = ['overview', 'shop', 'services', 'billing', 'wallet', 'hosting', 'trade', 'support', 'profile', 'announcements']
 
 export function portalViewFromPath(): PortalView {
   const candidate = window.location.pathname.split('/').filter(Boolean)[1] as PortalView
@@ -263,7 +264,9 @@ export function CustomerShell({ customer, onLogout }: { customer: CustomerIdenti
   const [view, setView] = useState<PortalView>(portalViewFromPath)
 
   useEffect(() => {
-    if (window.location.pathname !== `/portal/${view}`) {
+    // Pages may add a segment, e.g. /portal/services/<id>.
+    const path = window.location.pathname
+    if (path !== `/portal/${view}` && !path.startsWith(`/portal/${view}/`)) {
       window.history.replaceState(null, '', `/portal/${view}${view === 'hosting' ? window.location.search : ''}`)
     }
     const pop = () => setView(portalViewFromPath())
@@ -271,11 +274,9 @@ export function CustomerShell({ customer, onLogout }: { customer: CustomerIdenti
     return () => window.removeEventListener('popstate', pop)
   }, [view])
 
-  const navigate = (next: PortalView) => {
-    if (next === view) return
-    window.history.pushState(null, '', `/portal/${next}`)
-    setView(next)
-  }
+  // Choosing the current page again leaves any item on it (e.g. a service
+  // detail) for the page itself.
+  const navigate = (next: PortalView) => navigatePortal(`/portal/${next}`)
 
   const items: [PortalView, string, typeof LayoutDashboard][] = [
     ['overview', '服务概览', LayoutDashboard],
@@ -299,6 +300,7 @@ export function CustomerShell({ customer, onLogout }: { customer: CustomerIdenti
     trade: '交易市场',
     support: '支持工单',
     profile: '账户资料',
+    announcements: '平台公告',
   }
 
   return (
@@ -350,6 +352,7 @@ export function CustomerShell({ customer, onLogout }: { customer: CustomerIdenti
 
         {!customer.email_verified && <EmailVerifyBanner email={customer.email} />}
         {view === 'overview' && <CustomerOverview customer={customer} />}
+        {view === 'announcements' && <CustomerAnnouncements />}
         {view === 'shop' && <CustomerShop customer={customer} />}
         {view === 'services' && <CustomerServicesPanel />}
         {view === 'billing' && <CustomerBilling />}

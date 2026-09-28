@@ -304,6 +304,9 @@ func (p *customerPortal) reinstallService(w http.ResponseWriter, r *http.Request
 		err = p.store.SaveRootPassword(r.Context(), identity.AccountID, access.ServiceID, ciphertext)
 	}
 	if err == nil {
+		err = p.store.SetServiceTemplate(r.Context(), identity.AccountID, access.ServiceID, input.TemplateID)
+	}
+	if err == nil {
 		err = p.store.RecordServiceOperation(r.Context(), identity.UserID, access.ServiceID, "service.reinstall", remoteIP(r), r.UserAgent(), map[string]any{"template_id": input.TemplateID, "external_task_id": taskID})
 	}
 	if err != nil {

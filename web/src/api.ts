@@ -275,6 +275,24 @@ export type CustomerServiceRecord = {
   traffic_rx_bytes?: number | null
   traffic_tx_bytes?: number | null
   traffic_used_bytes?: number | null
+  // source is where the instance was sold; via_trade marks a trading
+  // market purchase. node_id names a hosted node (its chat room).
+  source: 'platform' | 'hosted'
+  via_trade: boolean
+  node_id?: string
+  template_id: string
+  auto_renew: boolean
+  billing_cycle: string
+  currency: string
+  renewal_price_minor: number | null
+}
+
+export type AnnouncementRecord = { id: string; title: string; body: string; pinned: boolean; published: boolean; created_at: string; updated_at: string }
+export type CustomerOverviewRecord = {
+  balance_minor: number
+  currency: string
+  hosting: { nodes: number; pending_minor: number; released_minor: number }
+  announcements: AnnouncementRecord[]
 }
 
 // Overdue services keep running through the grace period, so customers can

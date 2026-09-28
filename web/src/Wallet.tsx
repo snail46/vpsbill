@@ -80,6 +80,14 @@ export default function CustomerWallet() {
       ])
       setWallet(w)
       setCheckoutEnabled(c.checkout_enabled)
+      // The overview's top-up button lands here with #topup.
+      if (window.location.hash === '#topup') {
+        window.setTimeout(() => {
+          const form = document.getElementById('topup')
+          form?.scrollIntoView({ block: 'center' })
+          form?.querySelector<HTMLInputElement>('input[type=number]')?.focus()
+        }, 0)
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : '加载失败')
     }
@@ -150,7 +158,7 @@ export default function CustomerWallet() {
         <div className="note-banner warn">余额为负，是托管母机清退时产生的赔付。结清前不能发布新母机，之后的托管收益会先用于抵扣。</div>
       )}
 
-      <form className="panel" onSubmit={topup}>
+      <form className="panel" id="topup" onSubmit={topup}>
         <div className="panel-heading">
           <h3>充值</h3>
           <span className="tag">不可提现</span>

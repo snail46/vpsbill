@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react'
-import { ArrowLeftRight, Boxes, CheckCircle2, ChevronRight, CircleDollarSign, Cpu, CreditCard, Headphones, LayoutDashboard, LogOut, PackageOpen, ReceiptText, ScrollText, ServerCog, Settings, SlidersHorizontal, ShieldCheck, Store, Users } from 'lucide-react'
+import { ArrowLeftRight, Boxes, CheckCircle2, ChevronRight, CircleDollarSign, Cpu, CreditCard, Headphones, LayoutDashboard, Megaphone, LogOut, PackageOpen, ReceiptText, ScrollText, ServerCog, Settings, SlidersHorizontal, ShieldCheck, Store, Users } from 'lucide-react'
 import { api, StaffUser } from '../api'
 import HostDetailPanel from '../HostDetail'
 import AdminMarketplace from '../AdminMarketplace'
@@ -14,6 +14,7 @@ import { ServicesView } from './Services'
 import { NodesView, HostsView } from './Nodes'
 import { PlansView } from './Plans'
 import { AdminSupport, AuditView } from './Support'
+import { AnnouncementsView } from './Announcements'
 
 export type View =
   | 'overview'
@@ -29,6 +30,7 @@ export type View =
   | 'marketplace'
   | 'trade'
   | 'audit'
+  | 'announcements'
   | 'settings'
   | 'security'
 
@@ -48,6 +50,7 @@ export const navItems: Array<{ id: View; label: string; icon: typeof LayoutDashb
   { id: 'marketplace', label: '托管管理', icon: Store },
   { id: 'trade', label: '交易市场', icon: ArrowLeftRight },
   { id: 'audit', label: '审计日志', icon: ScrollText },
+  { id: 'announcements', label: '平台公告', icon: Megaphone },
   { id: 'settings', label: '站点设置', icon: SlidersHorizontal },
   { id: 'security', label: '安全中心', icon: Settings },
 ]
@@ -66,6 +69,7 @@ export const adminViews: View[] = [
   'marketplace',
   'trade',
   'audit',
+  'announcements',
   'settings',
   'security',
 ]
@@ -463,6 +467,7 @@ export function AdminShell({ meta, user, onLogout }: { meta: Meta | null; user: 
         {view === 'marketplace' && <AdminMarketplace />}
         {view === 'trade' && <section className="workspace-panel"><AdminTradeListings /></section>}
         {view === 'audit' && <AuditView />}
+        {view === 'announcements' && <AnnouncementsView />}
         {view === 'security' && <SecuritySettings enabled={user.mfa_enabled} />}
       </main>
     </div>
@@ -485,6 +490,7 @@ export function viewTitle(view: View) {
       marketplace: '托管管理',
       trade: '交易市场',
       audit: '安全审计日志',
+      announcements: '平台公告',
       settings: '站点设置',
       security: '账户安全设置',
     } as Record<View, string>)[view]

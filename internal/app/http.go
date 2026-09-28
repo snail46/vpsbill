@@ -72,6 +72,7 @@ func NewHandler(deps Dependencies) (http.Handler, error) {
 	}
 	market := &marketplaceAPI{store: marketStore, catalog: catalogStore, billing: billingStore, settings: deps.Settings, box: secretBox, service: marketService, hub: deps.ChatHub}
 	coupons := &couponAPI{coupons: postgres.NewCouponStore(deps.DB), settings: deps.Settings, market: market}
+	overview := &overviewAPI{announcements: postgres.NewAnnouncementStore(deps.DB), billing: billingStore, market: marketStore}
 	trade := &tradeAPI{store: postgres.NewTradeStore(deps.DB), notifier: notifier, hosting: marketService, settings: deps.Settings}
 	install := &installer{settings: deps.Settings, auth: auth, logger: deps.Logger}
 
@@ -128,6 +129,13 @@ func NewHandler(deps Dependencies) (http.Handler, error) {
 	mux.Handle("POST /api/v1/customer/auth/mfa/disable", auth.requireCustomer(http.HandlerFunc(auth.customerMFADisable)))
 	mux.Handle("POST /api/v1/customer/auth/password", auth.requireCustomer(http.HandlerFunc(auth.customerChangePassword)))
 	mux.Handle("GET /api/v1/customer/services", auth.requireCustomer(http.HandlerFunc(portal.listServices)))
+	mux.Handle("PUT /api/v1/customer/services/{id}/auto-renew", auth.requireCustomer(http.HandlerFunc(portal.setAutoRenew)))
+	mux.Handle("GET /api/v1/customer/overview", auth.requireCustomer(http.HandlerFunc(overview.customerOverview)))
+	mux.Handle("GET /api/v1/customer/announcements", auth.requireCustomer(http.HandlerFunc(overview.customerAnnouncements)))
+	mux.Handle("GET /api/v1/admin/announcements", auth.require("settings:read", http.HandlerFunc(overview.adminAnnouncements)))
+	mux.Handle("POST /api/v1/admin/announcements", auth.require("settings:write", http.HandlerFunc(overview.saveAnnouncement)))
+	mux.Handle("PUT /api/v1/admin/announcements/{id}", auth.require("settings:write", http.HandlerFunc(overview.saveAnnouncement)))
+	mux.Handle("DELETE /api/v1/admin/announcements/{id}", auth.require("settings:write", http.HandlerFunc(overview.deleteAnnouncement)))
 	mux.Handle("POST /api/v1/customer/services/{id}/actions/{action}", auth.requireCustomer(http.HandlerFunc(portal.serviceAction)))
 	mux.Handle("GET /api/v1/customer/services/{id}/runtime", auth.requireCustomer(http.HandlerFunc(portal.serviceRuntime)))
 	mux.Handle("GET /api/v1/customer/services/{id}/credential", auth.requireCustomer(http.HandlerFunc(portal.serviceCredential)))

@@ -169,6 +169,12 @@ func (s *BillingStore) CreateTopupInvoice(ctx context.Context, accountID, userID
 // PayInvoiceWithBalance settles an open invoice from the account balance and
 // then runs the same fulfilment as any other payment.
 func (s *BillingStore) PayInvoiceWithBalance(ctx context.Context, accountID, invoiceID, userID string) (PaymentResult, error) {
+	return s.payInvoiceWithBalance(ctx, accountID, invoiceID, "customer", userID)
+}
+
+// payInvoiceWithBalance pays for the customer (actorType "customer") or for
+// automatic renewal ("system", with no user).
+func (s *BillingStore) payInvoiceWithBalance(ctx context.Context, accountID, invoiceID, actorType, userID string) (PaymentResult, error) {
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		return PaymentResult{}, err
@@ -193,7 +199,7 @@ func (s *BillingStore) PayInvoiceWithBalance(ctx context.Context, accountID, inv
 		Provider: "balance", ProviderEventID: "balance:" + invoiceID, EventType: "payment.succeeded",
 		ProviderTransactionID: "balance:" + invoiceID, InvoiceNumber: number, AmountMinor: balance, Currency: currency,
 		Payload: []byte(`{"source":"wallet"}`),
-	}, "customer", userID)
+	}, actorType, userID)
 	if err != nil {
 		return PaymentResult{}, err
 	}
