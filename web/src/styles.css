@@ -3458,3 +3458,11 @@ td small.warn-text, .warn-text { color: var(--warning-text); }
 .announcement-row small { color: var(--text-subtle); font-family: var(--font-mono); }
 .announcement-body { white-space: pre-wrap; line-height: 1.7; color: var(--text-secondary); margin: 0; }
 .panel.announcement + .panel.announcement { margin-top: 12px; }
+.back-link { align-self: flex-start; justify-self: start; justify-content: flex-start; width: max-content; }
+.filter-ended { margin-left: auto; font-size: 12.5px; color: var(--text-muted); }
+.filter-chips { align-items: center; }
+.filter-chips .filter-ended { display: inline-flex; align-items: center; gap: 6px; flex-direction: row; cursor: pointer; }
+.filter-chips .filter-ended input { width: 14px; height: 14px; margin: 0; padding: 0; }
+.check-row, .form-grid label.check-row { display: inline-flex; flex-direction: row; align-items: center; gap: 8px; font-size: 13px; color: var(--text-secondary); cursor: pointer; }
+.check-row input, .form-grid label.check-row input { width: 15px; height: 15px; margin: 0; padding: 0; flex: none; }
+td .tag, .tag { white-space: nowrap; }

@@ -71,11 +71,11 @@ export function AnnouncementsView() {
             <span>正文（最多 4000 字，换行会保留）</span>
             <textarea name="body" rows={6} maxLength={4000} defaultValue={current?.body} />
           </label>
-          <label className="notify-option">
+          <label className="check-row">
             <input type="checkbox" name="published" defaultChecked={current ? current.published : true} />
             发布（不勾选则保存为草稿）
           </label>
-          <label className="notify-option">
+          <label className="check-row">
             <input type="checkbox" name="pinned" defaultChecked={current?.pinned} />
             置顶
           </label>

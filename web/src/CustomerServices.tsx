@@ -642,6 +642,7 @@ const serviceHref = (service: CustomerServiceRecord) => `/portal/services/${serv
 // everything else.
 function ServiceTile({ service }: { service: CustomerServiceRecord }) {
   const status = serviceUsable(service.status) ? service.runtime_status : service.status
+  const ended = service.status === 'terminating' || service.status === 'terminated'
   return (
     <a
       className={`service-tile source-${service.source}${service.status === 'terminated' ? ' ended' : ''}`}
@@ -664,10 +665,10 @@ function ServiceTile({ service }: { service: CustomerServiceRecord }) {
         <div><dt>系统</dt><dd>{osLabel(service.template_id)}</dd></div>
         <div><dt>地域</dt><dd>{service.region_name}</dd></div>
         <div><dt>IP</dt><dd>{service.primary_ipv4 || service.primary_ipv6 || '—'}</dd></div>
-        <div><dt>到期</dt><dd>{service.next_due_at ? formatDate(service.next_due_at) : '—'}</dd></div>
+        <div><dt>到期</dt><dd>{service.next_due_at && !ended ? formatDate(service.next_due_at) : '—'}</dd></div>
         <div>
           <dt>续费</dt>
-          <dd>{renewalText(service)}{service.status !== 'terminated' && <small>{service.auto_renew ? ' · 自动' : ' · 手动'}</small>}</dd>
+          <dd>{ended ? '—' : renewalText(service)}{!ended && <small>{service.auto_renew ? ' · 自动' : ' · 手动'}</small>}</dd>
         </div>
       </dl>
     </a>
@@ -756,6 +757,7 @@ export default function CustomerServices() {
   const [error, setError] = useState('')
   const [selected, setSelected] = useState(() => portalPathPart(2))
   const [filter, setFilter] = useState<SourceFilter>('all')
+  const [showEnded, setShowEnded] = useState(false)
 
   const load = () =>
     api<CustomerServiceRecord[]>('/api/v1/customer/services')
@@ -788,7 +790,8 @@ export default function CustomerServices() {
     )
   }
 
-  const visible = (services ?? []).filter(item => matchesSource(item, filter))
+  const ended = (services ?? []).filter(item => item.status === 'terminated')
+  const visible = (services ?? []).filter(item => matchesSource(item, filter) && (showEnded || item.status !== 'terminated'))
   return (
     <section className="workspace-panel">
       <div className="page-actions">
@@ -811,6 +814,12 @@ export default function CustomerServices() {
             <small>{(services ?? []).filter(item => item.status !== 'terminated' && matchesSource(item, id)).length}</small>
           </button>
         ))}
+        {ended.length > 0 && (
+          <label className="notify-option filter-ended">
+            <input type="checkbox" checked={showEnded} onChange={event => setShowEnded(event.target.checked)} />
+            显示已删除（{ended.length}）
+          </label>
+        )}
       </div>
 
       <div className="service-tiles">
