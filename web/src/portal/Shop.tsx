@@ -129,7 +129,7 @@ export function CustomerShop({ customer }: { customer: CustomerIdentity }) {
             </button>
           )
         })}
-        {!plans.length && <div className="empty-card" style={{ gridColumn: '1 / -1' }}>当前币种暂无可售套餐</div>}
+        {catalog && !plans.length && <div className="empty-card" style={{ gridColumn: '1 / -1' }}>当前币种暂无可售套餐</div>}
       </div>
 
       {selected && (

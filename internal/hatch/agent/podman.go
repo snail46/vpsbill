@@ -226,7 +226,15 @@ func (p *Podman) Create(ctx context.Context, spec RuntimeSpec) error {
 	if err := p.request(ctx, http.MethodPost, "/containers/create", body, nil); err != nil {
 		return err
 	}
-	return p.Start(ctx, spec.Name)
+	// A container that cannot start (an address already taken on the
+	// bridge, a bad mount) is removed so the next attempt starts clean.
+	if err := p.Start(ctx, spec.Name); err != nil {
+		if cleanup := p.Delete(ctx, spec.Name); cleanup != nil {
+			return fmt.Errorf("%w (remove failed container: %v)", err, cleanup)
+		}
+		return err
+	}
+	return nil
 }
 
 func (p *Podman) State(ctx context.Context, name string) (RuntimeState, error) {

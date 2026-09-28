@@ -63,6 +63,16 @@ func fakeLibpod(t *testing.T) (string, *map[string]any) {
 	mux.HandleFunc("POST /v4.0.0/libpod/containers/svc/start", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	})
+	mux.HandleFunc("POST /v4.0.0/libpod/containers/svc-clash/start", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"message":"IPAM error: requested ip address 10.89.0.254 is already allocated"}`))
+	})
+	mux.HandleFunc("DELETE /v4.0.0/libpod/containers/svc-clash", func(w http.ResponseWriter, _ *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		created["removed"] = true
+		w.WriteHeader(http.StatusOK)
+	})
 	mux.HandleFunc("GET /v4.0.0/libpod/containers/svc/json", func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		defer mu.Unlock()
@@ -176,5 +186,19 @@ func TestPodmanRequiresProjectQuota(t *testing.T) {
 	}
 	if asked != "/var/lib/hatch/podman-storage/storage" {
 		t.Fatalf("checked %q instead of the graph root", asked)
+	}
+}
+
+func TestPodmanRemovesContainerThatFailsToStart(t *testing.T) {
+	socket, created := fakeLibpod(t)
+	runtime := NewPodman(PodmanConfig{Socket: socket, Network: "podman"})
+	runtime.run = (&recorder{}).run
+	runtime.exists = func(string) bool { return false }
+	err := runtime.Create(context.Background(), RuntimeSpec{Name: "svc-clash", Image: "vps:latest", VCPU: 1, RAMMB: 64, DiskGB: 1, IPv4: netip.MustParseAddr("10.89.0.254")})
+	if err == nil || !strings.Contains(err.Error(), "already allocated") {
+		t.Fatalf("create error = %v", err)
+	}
+	if (*created)["removed"] != true {
+		t.Fatal("container that failed to start was left behind")
 	}
 }

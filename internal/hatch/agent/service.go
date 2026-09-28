@@ -270,7 +270,7 @@ func (s *Service) ensure(ctx context.Context, spec protocol.CreateSpec) (protoco
 	defer s.lock(spec.Name)()
 
 	record, exists := s.store.Get(spec.Name)
-	_, stateErr := runtime.State(ctx, spec.Name)
+	state, stateErr := runtime.State(ctx, spec.Name)
 	runtimeHas := stateErr == nil
 	if stateErr != nil && !errors.Is(stateErr, ErrInstanceNotFound) {
 		return protocol.EnsureResult{}, fmt.Errorf("inspect instance: %w", stateErr)
@@ -297,6 +297,13 @@ func (s *Service) ensure(ctx context.Context, spec protocol.CreateSpec) (protoco
 			return protocol.EnsureResult{}, fmt.Errorf("create instance: %w", err)
 		}
 		created = true
+	}
+	// An instance left stopped by an interrupted create cannot take its
+	// password until it runs again.
+	if !created && record.PasswordPending() && state.Status != "running" {
+		if err := runtime.Start(ctx, spec.Name); err != nil {
+			return protocol.EnsureResult{}, fmt.Errorf("start instance: %w", err)
+		}
 	}
 	password := ""
 	if created || record.PasswordPending() {

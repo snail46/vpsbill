@@ -87,6 +87,26 @@ func TestEnsureResumesAfterCrashBeforePassword(t *testing.T) {
 	}
 }
 
+func TestEnsureStartsInstanceLeftStopped(t *testing.T) {
+	dir := t.TempDir()
+	runtime, nat := agenttest.NewRuntime("lxc"), &agenttest.NAT{}
+	service := newService(t, dir, runtime, nat)
+	runtime.FailExec = 100
+	if _, err := call[protocol.EnsureResult](t, service, protocol.MethodEnsure, spec); err == nil {
+		t.Fatal("expected password failure")
+	}
+	// The create was interrupted and the instance stopped before its
+	// password was set; the retry starts it instead of failing forever.
+	runtime.FailExec = 0
+	if err := runtime.Stop(context.Background(), spec.Name); err != nil {
+		t.Fatal(err)
+	}
+	result, err := call[protocol.EnsureResult](t, service, protocol.MethodEnsure, spec)
+	if err != nil || result.Instance.Password == "" || result.Instance.Status != "running" || runtime.Creates != 1 {
+		t.Fatalf("retry failed: %+v creates=%d err=%v", result, runtime.Creates, err)
+	}
+}
+
 func TestUnmanagedInstanceIsNotAdopted(t *testing.T) {
 	runtime := agenttest.NewRuntime("lxc")
 	runtime.Instances["svc-1"] = &agenttest.Instance{Status: "running"}

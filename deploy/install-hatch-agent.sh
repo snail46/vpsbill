@@ -149,8 +149,18 @@ EOF
 setup_podman_network() {
   podman network exists "$PODMAN_NETWORK" 2>/dev/null && return
   # Podman's default 10.88.0.0/16 often collides with existing bridges.
-  podman network create --subnet 10.89.0.0/24 "$PODMAN_NETWORK" >/dev/null
-  echo "Created Podman network $PODMAN_NETWORK (10.89.0.0/24)"
+  # A second agent on the same host needs its own network, so take the next
+  # free 10.89.N.0/24.
+  N=0
+  while [ "$N" -lt 255 ]; do
+    if podman network create --subnet "10.89.$N.0/24" "$PODMAN_NETWORK" >/dev/null 2>&1; then
+      echo "Created Podman network $PODMAN_NETWORK (10.89.$N.0/24)"
+      return
+    fi
+    N=$((N + 1))
+  done
+  echo "Could not create Podman network $PODMAN_NETWORK" >&2
+  exit 1
 }
 
 # The images keep only an init, sshd and basic tools so an idle instance

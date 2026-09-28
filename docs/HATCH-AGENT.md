@@ -106,7 +106,7 @@ fib daddr type local tcp dport 20022 dnat to 10.20.30.254:22
 - Agent 还上报本机标识（`/etc/machine-id` 的哈希）和负载（负载、内存、交换、各存储用量）。同一台机器上的多个 Agent 会被识别出来，资源合并计算。另外 `port_range_start`/`port_range_end` 不要和同机其他 NAT 面板（如 LXDAPI）的端口段重叠。
 - `server_url` 必须是 HTTPS（仅回环地址允许 HTTP，用于测试）。计费站点使用私有 CA 时，可以用 `ca_file` 指定。
 - 删除 `lxd` 或 `podman` 段落即可禁用对应运行时。
-- 同一台宿主机要运行两个 Agent（例如一个管 Incus、一个管 LXD snap，分别接入为两个节点）时，给第二个 Agent 单独的配置文件、`state_dir`、端口段和 `nft_table`（如 `"nft_table": "hatch_lxd"`），并复制一份 systemd 单元改用新配置、`ReadWritePaths` 指向新的 `state_dir`。`nft_table` 默认 `hatch`，两个 Agent 共用同一张表会互相覆盖端口转发。
+- 同一台宿主机要运行两个 Agent（例如一个管 Incus、一个管 LXD snap，分别接入为两个节点）时，给第二个 Agent 单独的配置文件、`state_dir`、端口段和 `nft_table`（如 `"nft_table": "hatch_lxd"`），并复制一份 systemd 单元改用新配置、`ReadWritePaths` 指向新的 `state_dir`。`nft_table` 默认 `hatch`，两个 Agent 共用同一张表会互相覆盖端口转发。两个 Agent 都管 Podman 时，第二个还要用单独的 Podman 网络（安装时加 `--podman-network hatchpod2`，脚本会自动选一个空闲的 `10.89.N.0/24`）：每个 Agent 只知道自己分配过的内网地址，共用一个网络会分到同一个地址，实例开不起来。
 
 ## 反向代理
 

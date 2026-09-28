@@ -113,6 +113,9 @@ func (r *Runtime) Exec(_ context.Context, name, _ string, env map[string]string)
 	if !ok {
 		return agent.ErrInstanceNotFound
 	}
+	if instance.Status != "running" {
+		return errors.New("can only exec in running instances")
+	}
 	if r.FailExec > 0 {
 		r.FailExec--
 		return errors.New("instance still booting")
