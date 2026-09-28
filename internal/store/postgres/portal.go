@@ -47,6 +47,11 @@ type CustomerService struct {
 	// explains a clearance.
 	HostName          string `json:"host_name,omitempty"`
 	TerminationReason string `json:"termination_reason,omitempty"`
+	// AcquiredAt starts the trading hold; ListingID and ListingPriceMinor are
+	// set while the instance is listed in the trading market.
+	AcquiredAt        time.Time `json:"acquired_at"`
+	ListingID         string    `json:"listing_id,omitempty"`
+	ListingPriceMinor int64     `json:"listing_price_minor,omitempty"`
 }
 
 type CustomerServiceAccess struct {
@@ -148,8 +153,10 @@ func (s *PortalStore) ListServices(ctx context.Context, accountID string) ([]Cus
 		SELECT s.id,p.name,r.name,s.status,s.runtime_status,coalesce(s.desired_runtime_status,''),s.instance_name,
 		       p.virtualization,p.vcpu,p.ram_mb,p.disk_gb,p.traffic_gb,coalesce(host(s.primary_ipv4),''),coalesce(host(s.primary_ipv6),''),
 		       s.next_due_at,s.grace_until,s.termination_scheduled_at,s.last_reconciled_at,coalesce(s.last_reconcile_error,''),
-		       coalesce(h.display_name,''),coalesce(s.termination_reason,'')
+		       coalesce(h.display_name,''),coalesce(s.termination_reason,''),
+		       s.acquired_at,coalesce(l.id::text,''),coalesce(l.price_minor,0)
 		FROM services s JOIN plans p ON p.id=s.plan_id JOIN regions r ON r.id=s.region_id LEFT JOIN accounts h ON h.id=p.owner_account_id
+		LEFT JOIN service_listings l ON l.service_id=s.id AND l.status='listed'
 		WHERE s.account_id=$1 ORDER BY s.created_at DESC
 	`, accountID)
 	if err != nil {
@@ -159,7 +166,7 @@ func (s *PortalStore) ListServices(ctx context.Context, accountID string) ([]Cus
 	result := make([]CustomerService, 0)
 	for rows.Next() {
 		var row CustomerService
-		if err := rows.Scan(&row.ID, &row.PlanName, &row.RegionName, &row.Status, &row.RuntimeStatus, &row.DesiredRuntimeStatus, &row.InstanceName, &row.Virtualization, &row.VCPU, &row.RAMMB, &row.DiskGB, &row.TrafficGB, &row.PrimaryIPv4, &row.PrimaryIPv6, &row.NextDueAt, &row.GraceUntil, &row.TerminationAt, &row.LastReconciledAt, &row.LastReconcileError, &row.HostName, &row.TerminationReason); err != nil {
+		if err := rows.Scan(&row.ID, &row.PlanName, &row.RegionName, &row.Status, &row.RuntimeStatus, &row.DesiredRuntimeStatus, &row.InstanceName, &row.Virtualization, &row.VCPU, &row.RAMMB, &row.DiskGB, &row.TrafficGB, &row.PrimaryIPv4, &row.PrimaryIPv6, &row.NextDueAt, &row.GraceUntil, &row.TerminationAt, &row.LastReconciledAt, &row.LastReconcileError, &row.HostName, &row.TerminationReason, &row.AcquiredAt, &row.ListingID, &row.ListingPriceMinor); err != nil {
 			return nil, err
 		}
 		result = append(result, row)

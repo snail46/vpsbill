@@ -237,6 +237,9 @@ export type CustomerServiceRecord = {
   last_reconcile_error?: string
   host_name?: string
   termination_reason?: string
+  acquired_at?: string
+  listing_id?: string
+  listing_price_minor?: number
 }
 
 // Overdue services keep running through the grace period, so customers can
@@ -377,7 +380,7 @@ export function imageLabel(item: { name: string; release?: string; arch?: string
 
 export type WalletEntryRecord = {
   id: string
-  kind: 'topup' | 'earning' | 'payment' | 'clearance_refund' | 'clearance_penalty' | 'adjustment' | 'refund'
+  kind: 'topup' | 'earning' | 'payment' | 'clearance_refund' | 'clearance_penalty' | 'adjustment' | 'refund' | 'trade_purchase' | 'trade_sale'
   amount_minor: number
   balance_after_minor: number
   currency: string
@@ -520,3 +523,34 @@ export type RefundQuoteRecord = {
   traffic_bytes: number | null
   purchased_at: string
 }
+
+export type TradeListingRecord = {
+  id: string
+  service_id?: string
+  instance_name?: string
+  seller_name: string
+  mine: boolean
+  status: 'listed' | 'sold' | 'cancelled'
+  available: boolean
+  cancel_reason?: string
+  price_minor: number
+  currency: string
+  note: string
+  plan_name: string
+  virtualization: string
+  vcpu: number
+  ram_mb: number
+  disk_gb: number
+  traffic_gb: number
+  port_mapping_count: number
+  region_name: string
+  host_name?: string
+  billing_cycle: string
+  expires_at: string | null
+  renewal_minor: number | null
+  service_created_at: string
+  created_at: string
+  sold_at?: string
+}
+
+export type TradeRecord = { listings: TradeListingRecord[]; mine: TradeListingRecord[]; hold_days: number }

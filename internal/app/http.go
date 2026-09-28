@@ -71,6 +71,7 @@ func NewHandler(deps Dependencies) (http.Handler, error) {
 	}
 	market := &marketplaceAPI{store: marketStore, catalog: catalogStore, billing: billingStore, settings: deps.Settings, box: secretBox, service: marketService, hub: deps.ChatHub}
 	coupons := &couponAPI{coupons: postgres.NewCouponStore(deps.DB), settings: deps.Settings, market: market}
+	trade := &tradeAPI{store: postgres.NewTradeStore(deps.DB), notifier: notifier}
 	install := &installer{settings: deps.Settings, auth: auth, logger: deps.Logger}
 
 	mux := http.NewServeMux()
@@ -165,6 +166,10 @@ func NewHandler(deps Dependencies) (http.Handler, error) {
 	mux.Handle("POST /api/v1/customer/coupons/quote", auth.requireCustomer(http.HandlerFunc(coupons.quote)))
 	mux.Handle("GET /api/v1/customer/services/{id}/refund", auth.requireCustomer(http.HandlerFunc(coupons.refundQuote)))
 	mux.Handle("POST /api/v1/customer/services/{id}/refund", auth.requireCustomer(http.HandlerFunc(coupons.refund)))
+	mux.Handle("GET /api/v1/customer/trade", auth.requireCustomer(http.HandlerFunc(trade.market)))
+	mux.Handle("POST /api/v1/customer/trade/listings", auth.requireCustomer(http.HandlerFunc(trade.createListing)))
+	mux.Handle("POST /api/v1/customer/trade/listings/{id}/cancel", auth.requireCustomer(http.HandlerFunc(trade.cancelListing)))
+	mux.Handle("POST /api/v1/customer/trade/listings/{id}/buy", auth.requireCustomer(http.HandlerFunc(trade.buy)))
 	mux.Handle("GET /api/v1/customer/chat/rooms", auth.requireCustomer(http.HandlerFunc(market.customerChatRooms)))
 	mux.Handle("GET /api/v1/customer/chat/rooms/{node}/messages", auth.requireCustomer(http.HandlerFunc(market.customerChatMessages)))
 	mux.Handle("POST /api/v1/customer/chat/rooms/{node}/messages", auth.requireCustomer(http.HandlerFunc(market.customerPostChat)))
@@ -222,6 +227,8 @@ func NewHandler(deps Dependencies) (http.Handler, error) {
 	mux.Handle("POST /api/v1/admin/marketplace/nodes/{id}/clear", auth.require("nodes:write", http.HandlerFunc(market.adminClearNode)))
 	mux.Handle("PUT /api/v1/admin/marketplace/nodes/{id}/hold", auth.require("nodes:write", http.HandlerFunc(market.adminHoldClearance)))
 	mux.Handle("POST /api/v1/admin/marketplace/nodes/{id}/listing", auth.require("nodes:write", http.HandlerFunc(market.adminSetListing)))
+	mux.Handle("GET /api/v1/admin/trade/listings", auth.require("services:read", http.HandlerFunc(trade.adminListings)))
+	mux.Handle("POST /api/v1/admin/trade/listings/{id}/cancel", auth.require("services:write", http.HandlerFunc(trade.adminCancel)))
 	mux.Handle("GET /api/v1/admin/coupons", auth.require("plans:read", http.HandlerFunc(coupons.adminList)))
 	mux.Handle("POST /api/v1/admin/coupons", auth.require("plans:write", http.HandlerFunc(coupons.adminCreate)))
 	mux.Handle("PUT /api/v1/admin/coupons/{id}", auth.require("plans:write", http.HandlerFunc(coupons.adminUpdate)))

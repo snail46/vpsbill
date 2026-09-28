@@ -75,3 +75,23 @@ func (n *Notifier) ServiceRefunded(ctx context.Context, result postgres.RefundRe
 		n.enqueue(ctx, result.HostEmail, subject, body, "service-refunded:"+result.ServiceID+":host")
 	}
 }
+
+// TradeCompleted tells both sides of a trading market sale what happened.
+func (n *Notifier) TradeCompleted(ctx context.Context, result postgres.TradeResult) {
+	if !n.enabled() {
+		return
+	}
+	price := money(result.PriceMinor, result.Currency)
+	if result.SellerEmail != "" {
+		subject := fmt.Sprintf("[%s] 你挂售的实例 %s 已售出", n.siteName(), result.InstanceName)
+		body := fmt.Sprintf("您好，%s：\n\n你在交易市场挂售的实例 %s（%s）已售出，成交价 %s 已存入你的账户余额，可用于本平台消费。\n实例已转给买家，你的账户里不再显示它。\n\n查看余额：%s\n",
+			result.SellerName, result.InstanceName, result.PlanName, price, n.link("/portal/wallet"))
+		n.enqueue(ctx, result.SellerEmail, subject, body, "trade:"+result.ListingID+":seller")
+	}
+	if result.BuyerEmail != "" {
+		subject := fmt.Sprintf("[%s] 你已买下实例 %s", n.siteName(), result.InstanceName)
+		body := fmt.Sprintf("您好，%s：\n\n你在交易市场以 %s 买下了实例 %s（%s），实例已转入你的账户。\n\n为了安全，请尽快在「我的 VPS」重置 root 密码；如果不确定原主人是否留下了其他登录方式，建议重装系统。\n交易市场的交易不退款。\n\n我的 VPS：%s\n",
+			result.BuyerName, price, result.InstanceName, result.PlanName, n.link("/portal/services"))
+		n.enqueue(ctx, result.BuyerEmail, subject, body, "trade:"+result.ListingID+":buyer")
+	}
+}

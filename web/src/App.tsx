@@ -1,5 +1,6 @@
 import { ChangeEvent, FormEvent, useEffect, useState } from 'react'
 import {
+  ArrowLeftRight,
   Activity,
   AlertCircle,
   ArrowLeft,
@@ -70,6 +71,8 @@ import CustomerWallet from './Wallet'
 import HostingCenter from './Hosting'
 import AdminMarketplace from './AdminMarketplace'
 import { CouponField, CouponManager } from './Coupons'
+import TradeMarket, { AdminTradeListings } from './Trade'
+import { ThemeToggle } from './ThemeToggle'
 import { AdminWalletPanel, walletMoney } from './Wallet'
 
 type Meta = { name: string; environment: string; installed: boolean; capabilities: string[]; password_reset_mail?: boolean }
@@ -85,6 +88,7 @@ type View =
   | 'plans'
   | 'support'
   | 'marketplace'
+  | 'trade'
   | 'audit'
   | 'settings'
   | 'security'
@@ -112,6 +116,7 @@ const navItems: Array<{ id: View; label: string; icon: typeof LayoutDashboard }>
   { id: 'hosts', label: '宿主机探针', icon: Cpu },
   { id: 'support', label: '客户工单', icon: Headphones },
   { id: 'marketplace', label: '托管管理', icon: Store },
+  { id: 'trade', label: '交易市场', icon: ArrowLeftRight },
   { id: 'audit', label: '审计日志', icon: ScrollText },
   { id: 'settings', label: '站点设置', icon: SlidersHorizontal },
   { id: 'security', label: '安全中心', icon: Settings },
@@ -129,6 +134,7 @@ const adminViews: View[] = [
   'plans',
   'support',
   'marketplace',
+  'trade',
   'audit',
   'settings',
   'security',
@@ -252,6 +258,7 @@ function AuthPage({
 
   return (
     <main className="auth-page">
+      <div className="auth-theme"><ThemeToggle /></div>
       <section className="auth-brand-panel">
         <div className="brand auth-brand">
           <div className="brand-mark">VB</div>
@@ -473,8 +480,8 @@ function Field({
 }
 
 type CustomerAuthScreen = 'loading' | 'login' | 'register' | 'forgot' | 'reset' | 'ready'
-type PortalView = 'overview' | 'shop' | 'services' | 'billing' | 'wallet' | 'hosting' | 'support' | 'profile'
-const portalViews: PortalView[] = ['overview', 'shop', 'services', 'billing', 'wallet', 'hosting', 'support', 'profile']
+type PortalView = 'overview' | 'shop' | 'services' | 'billing' | 'wallet' | 'hosting' | 'trade' | 'support' | 'profile'
+const portalViews: PortalView[] = ['overview', 'shop', 'services', 'billing', 'wallet', 'hosting', 'trade', 'support', 'profile']
 
 function portalViewFromPath(): PortalView {
   const candidate = window.location.pathname.split('/').filter(Boolean)[1] as PortalView
@@ -725,6 +732,7 @@ function CustomerShell({ customer, onLogout }: { customer: CustomerIdentity; onL
     ['billing', '订单与账单', WalletCards],
     ['wallet', '账户余额', Coins],
     ['hosting', '托管中心', Store],
+    ['trade', '交易市场', ArrowLeftRight],
     ['support', '支持工单', Headphones],
     ['profile', '账户资料', UserCircle],
   ]
@@ -736,6 +744,7 @@ function CustomerShell({ customer, onLogout }: { customer: CustomerIdentity; onL
     billing: '订单与账单',
     wallet: '账户余额',
     hosting: '托管中心',
+    trade: '交易市场',
     support: '支持工单',
     profile: '账户资料',
   }
@@ -778,6 +787,7 @@ function CustomerShell({ customer, onLogout }: { customer: CustomerIdentity; onL
             <h1>{titles[view]}</h1>
           </div>
           <div className="operator">
+            <ThemeToggle />
             <span>{customer.email}</span>
             <div className="avatar">{customer.display_name.slice(0, 1)}</div>
             <button className="icon-button" aria-label="退出登录" onClick={onLogout} title="退出登录">
@@ -792,6 +802,7 @@ function CustomerShell({ customer, onLogout }: { customer: CustomerIdentity; onL
         {view === 'billing' && <CustomerBilling />}
         {view === 'wallet' && <CustomerWallet />}
         {view === 'hosting' && <HostingCenter customer={customer} />}
+        {view === 'trade' && <TradeMarket />}
         {view === 'support' && <CustomerSupport />}
         {view === 'profile' && <CustomerProfile customer={customer} />}
       </main>
@@ -1210,7 +1221,7 @@ function CustomerBilling() {
                     <small className="block">{({ initial: '新购', renewal: '续费', topup: '余额充值' } as Record<string, string>)[item.kind] || item.kind}</small>
                   </td>
                   <td><strong>{money(item.total_minor, item.currency)}</strong></td>
-                  <td style={{ color: item.balance_minor > 0 ? '#fbbf24' : 'inherit' }}>
+                  <td style={{ color: item.balance_minor > 0 ? 'var(--warning-text)' : 'inherit' }}>
                     <strong>{money(item.balance_minor, item.currency)}</strong>
                   </td>
                   <td><StatusBadge status={item.status} /></td>
@@ -2050,6 +2061,7 @@ function AdminShell({ meta, user, onLogout }: { meta: Meta | null; user: StaffUs
             <h1>{route.hostID ? '宿主机探针详情' : viewTitle(view)}</h1>
           </div>
           <div className="operator">
+            <ThemeToggle />
             <span>{user.display_name}</span>
             <div className="avatar">{user.display_name.slice(0, 1)}</div>
             <button className="icon-button" aria-label="退出登录" onClick={onLogout} title="退出登录">
@@ -2075,6 +2087,7 @@ function AdminShell({ meta, user, onLogout }: { meta: Meta | null; user: StaffUs
         {view === 'plans' && <PlansView />}
         {view === 'support' && <AdminSupport />}
         {view === 'marketplace' && <AdminMarketplace />}
+        {view === 'trade' && <section className="workspace-panel"><AdminTradeListings /></section>}
         {view === 'audit' && <AuditView />}
         {view === 'security' && <SecuritySettings enabled={user.mfa_enabled} />}
       </main>
@@ -2174,13 +2187,13 @@ function Overview() {
           <div className="attention-list">
             <span>
               逾期欠费服务
-              <strong style={{ color: data.overdue_services > 0 ? '#fb7185' : 'inherit' }}>
+              <strong style={{ color: data.overdue_services > 0 ? 'var(--danger-text)' : 'inherit' }}>
                 {data.overdue_services}
               </strong>
             </span>
             <span>
               执行失败任务
-              <strong style={{ color: data.failed_jobs > 0 ? '#fb7185' : 'inherit' }}>
+              <strong style={{ color: data.failed_jobs > 0 ? 'var(--danger-text)' : 'inherit' }}>
                 {data.failed_jobs}
               </strong>
             </span>
@@ -2190,7 +2203,7 @@ function Overview() {
             </span>
             <span>
               离线集群节点
-              <strong style={{ color: data.nodes - data.online_nodes > 0 ? '#fbbf24' : 'inherit' }}>
+              <strong style={{ color: data.nodes - data.online_nodes > 0 ? 'var(--warning-text)' : 'inherit' }}>
                 {data.nodes - data.online_nodes}
               </strong>
             </span>
@@ -2794,7 +2807,7 @@ function BillingView() {
                   <td><strong>{invoice.number}</strong></td>
                   <td>{invoice.customer_name}</td>
                   <td><strong>{money(invoice.total_minor, invoice.currency)}</strong></td>
-                  <td style={{ color: invoice.balance_minor > 0 ? '#fbbf24' : 'inherit' }}>
+                  <td style={{ color: invoice.balance_minor > 0 ? 'var(--warning-text)' : 'inherit' }}>
                     <strong>{money(invoice.balance_minor, invoice.currency)}</strong>
                   </td>
                   <td><StatusBadge status={invoice.status} /></td>
@@ -3614,7 +3627,7 @@ function ServicesView() {
                   <td>
                     <StatusBadge status={service.runtime_status} />
                     {service.last_reconcile_error && (
-                      <small title={service.last_reconcile_error} style={{ color: '#fb7185' }}>
+                      <small title={service.last_reconcile_error} style={{ color: 'var(--danger-text)' }}>
                         对账异常：{service.last_reconcile_error}
                       </small>
                     )}
@@ -4670,6 +4683,7 @@ function viewTitle(view: View) {
       plans: '商品套餐管理',
       support: '工单管理',
       marketplace: '托管管理',
+      trade: '交易市场',
       audit: '安全审计日志',
       settings: '站点设置',
       security: '账户安全设置',

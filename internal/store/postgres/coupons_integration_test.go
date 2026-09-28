@@ -182,7 +182,89 @@ func hostedTermsAndCoupons(t *testing.T, ctx context.Context, db *pgxpool.Pool, 
 		t.Fatal("refunded twice")
 	}
 	// The limit counts live instances only, so the buyer may buy again.
-	if _, err := order(buyerID, ""); err != nil {
+	again, err := order(buyerID, "")
+	if err != nil {
 		t.Fatalf("order after refund: %v", err)
+	}
+	bought, err := billing.PayInvoiceWithBalance(ctx, buyerID, again.InvoiceID, buyerUser)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tradeMarket(t, ctx, db, bought.ServiceIDs[0], hostID, buyerID, buyerUser, strangerID)
+}
+
+// tradeMarket resells the buyer's hosted instance to the stranger.
+func tradeMarket(t *testing.T, ctx context.Context, db *pgxpool.Pool, serviceID, hostID, sellerID, sellerUser, buyerID string) {
+	t.Helper()
+	trade := NewTradeStore(db)
+	billing := NewBillingStore(db)
+	balanceOf := func(accountID string) int64 {
+		wallet, err := billing.Wallet(ctx, accountID, 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return wallet.BalanceMinor
+	}
+	var rule *TradeError
+	if _, err := trade.CreateListing(ctx, sellerID, sellerUser, serviceID, 5000, ""); !errors.As(err, &rule) {
+		t.Fatalf("listed a provisioning instance: %v", err)
+	}
+	if _, err := db.Exec(ctx, `UPDATE services SET status='active',root_password_ciphertext='\x01' WHERE id=$1`, serviceID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := trade.CreateListing(ctx, sellerID, sellerUser, serviceID, 5000, ""); !errors.As(err, &rule) {
+		t.Fatalf("listed an instance held for less than 31 days: %v", err)
+	}
+	if _, err := db.Exec(ctx, `UPDATE services SET acquired_at=now()-interval '32 days' WHERE id=$1`, serviceID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := trade.CreateListing(ctx, buyerID, sellerUser, serviceID, 5000, ""); !errors.Is(err, ErrServiceNotFound) {
+		t.Fatalf("listed someone else's instance: %v", err)
+	}
+	listingID, err := trade.CreateListing(ctx, sellerID, sellerUser, serviceID, 5000, "急出")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := trade.CreateListing(ctx, sellerID, sellerUser, serviceID, 6000, ""); !errors.As(err, &rule) {
+		t.Fatalf("listed twice: %v", err)
+	}
+	market, err := trade.Market(ctx, buyerID)
+	if err != nil || len(market) != 1 || market[0].ServiceID != "" || market[0].SellerName != "B**" || market[0].RenewalMinor == nil {
+		t.Fatalf("market: %+v err=%v", market, err)
+	}
+	if _, err := trade.Buy(ctx, sellerID, sellerUser, listingID, 5000); !errors.As(err, &rule) {
+		t.Fatalf("seller bought own listing: %v", err)
+	}
+	if _, err := trade.Buy(ctx, hostID, sellerUser, listingID, 5000); !errors.As(err, &rule) {
+		t.Fatalf("host bought an instance on its own node: %v", err)
+	}
+	if _, err := trade.Buy(ctx, buyerID, sellerUser, listingID, 4000); !errors.Is(err, ErrListingChanged) {
+		t.Fatalf("bought at a stale price: %v", err)
+	}
+	sellerBefore, buyerBefore := balanceOf(sellerID), balanceOf(buyerID)
+	result, err := trade.Buy(ctx, buyerID, sellerUser, listingID, 5000)
+	if err != nil || result.ServiceID != serviceID {
+		t.Fatalf("buy: %+v err=%v", result, err)
+	}
+	if balanceOf(sellerID) != sellerBefore+5000 || balanceOf(buyerID) != buyerBefore-5000 {
+		t.Fatalf("trade balances seller %d->%d buyer %d->%d", sellerBefore, balanceOf(sellerID), buyerBefore, balanceOf(buyerID))
+	}
+	var owner, escrowBuyer string
+	var password []byte
+	if err := db.QueryRow(ctx, `SELECT s.account_id,s.root_password_ciphertext,e.buyer_account_id FROM services s JOIN marketplace_escrows e ON e.service_id=s.id WHERE s.id=$1 AND e.status='holding'`, serviceID).Scan(&owner, &password, &escrowBuyer); err != nil {
+		t.Fatal(err)
+	}
+	if owner != buyerID || escrowBuyer != buyerID || password != nil {
+		t.Fatalf("after trade owner=%s escrow=%s password=%v", owner, escrowBuyer, password)
+	}
+	if _, err := trade.Buy(ctx, buyerID, sellerUser, listingID, 5000); !errors.As(err, &rule) {
+		t.Fatalf("sold twice: %v", err)
+	}
+	// The new owner starts a fresh holding period.
+	if _, err := trade.CreateListing(ctx, buyerID, sellerUser, serviceID, 5000, ""); !errors.As(err, &rule) {
+		t.Fatalf("relisted right after buying: %v", err)
+	}
+	if mine, _ := trade.SellerListings(ctx, sellerID); len(mine) != 1 || mine[0].Status != "sold" || mine[0].Available {
+		t.Fatalf("seller listings: %+v", mine)
 	}
 }

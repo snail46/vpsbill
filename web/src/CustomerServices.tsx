@@ -22,6 +22,7 @@ import {
 } from 'lucide-react'
 import { api, imageLabel, serviceUsable, CustomerServiceRecord, PortMappingRecord, RefundQuoteRecord, ServiceCredentialRecord, ServiceRuntimeRecord } from './api'
 import { walletMoney } from './Wallet'
+import { ListServiceDialog, tradeEligibleAt } from './Trade'
 
 const ServiceConsole = lazy(() => import('./ServiceConsole').then(module => ({ default: module.ServiceConsole })))
 
@@ -180,6 +181,7 @@ function ServiceCard({ service, onReload }: { service: CustomerServiceRecord; on
             : `${service.termination_reason}。实例已停止服务，按托管准则计算的补偿已存入账户余额。`}
         </div>
       )}
+      {service.status === 'active' && <TradeAction service={service} onDone={onReload} />}
       {service.host_name && ['active', 'overdue', 'suspended'].includes(service.status) && <RefundPanel service={service} onDone={onReload} />}
 
       {service.status === 'overdue' && (
@@ -712,5 +714,44 @@ function RefundPanel({ service, onDone }: { service: CustomerServiceRecord; onDo
         </button>
       </div>
     </div>
+  )
+}
+
+// TradeAction offers the instance on the trading market once it has been
+// held long enough, or shows its open listing.
+function TradeAction({ service, onDone }: { service: CustomerServiceRecord; onDone: () => void }) {
+  const [open, setOpen] = useState(false)
+  if (service.listing_id) {
+    return (
+      <div className="service-refund">
+        <span className="tag">交易市场挂售中 · {walletMoney(service.listing_price_minor || 0)}</span>
+        <a className="secondary-button compact" href="/portal/trade">管理挂售</a>
+      </div>
+    )
+  }
+  const eligibleAt = tradeEligibleAt(service)
+  if (eligibleAt.getTime() > Date.now()) {
+    return (
+      <div className="service-refund">
+        <small className="muted-text">持有满 31 天后可在交易市场挂售（{eligibleAt.toLocaleDateString()} 起）</small>
+      </div>
+    )
+  }
+  return (
+    <>
+      <div className="service-refund">
+        <button className="secondary-button compact" onClick={() => setOpen(true)}>挂售到交易市场</button>
+      </div>
+      {open && (
+        <ListServiceDialog
+          service={service}
+          onClose={() => setOpen(false)}
+          onDone={() => {
+            setOpen(false)
+            onDone()
+          }}
+        />
+      )}
+    </>
   )
 }
