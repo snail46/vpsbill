@@ -330,6 +330,17 @@ func (a *adminCatalog) createPlan(w http.ResponseWriter, r *http.Request) {
 	for index := range input.AllowedTemplateIDs {
 		input.AllowedTemplateIDs[index] = strings.TrimSpace(input.AllowedTemplateIDs[index])
 	}
+	if message := validatePriceLimits(input.Prices); message != "" {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "validation_error", "message": message})
+		return
+	}
+	if message, err := checkPlanStock(r.Context(), a.store, input, ""); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "internal_error"})
+		return
+	} else if message != "" {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "stock_exceeded", "message": message})
+		return
+	}
 	plan, err := a.store.CreatePlan(r.Context(), input)
 	if err != nil {
 		writeJSON(w, http.StatusConflict, map[string]any{"error": "plan_create_failed", "message": "套餐编码可能已存在或参数无效"})
@@ -372,12 +383,34 @@ func (a *adminCatalog) replacePlan(w http.ResponseWriter, r *http.Request) {
 	for index := range input.AllowedTemplateIDs {
 		input.AllowedTemplateIDs[index] = strings.TrimSpace(input.AllowedTemplateIDs[index])
 	}
+	if message := validatePriceLimits(input.Prices); message != "" {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "validation_error", "message": message})
+		return
+	}
+	if message, err := checkPlanStock(r.Context(), a.store, input, r.PathValue("id")); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "internal_error"})
+		return
+	} else if message != "" {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "stock_exceeded", "message": message})
+		return
+	}
 	plan, err := a.store.UpdatePlan(r.Context(), r.PathValue("id"), input)
 	if err != nil {
 		writeJSON(w, http.StatusConflict, map[string]any{"error": "plan_update_failed", "message": "套餐不存在、编码重复或参数无效"})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": plan})
+}
+
+// planStockCapacity previews the stock ceiling for a platform plan draft;
+// "id" names the plan being edited.
+func (a *adminCatalog) planStockCapacity(w http.ResponseWriter, r *http.Request) {
+	var input postgres.Plan
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	input.OwnerAccountID, input.NodeID = "", ""
+	writeStockCapacity(w, r, a.store, input, input.ID)
 }
 
 func validatePlan(plan postgres.Plan) string {

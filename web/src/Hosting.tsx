@@ -11,6 +11,7 @@ import {
   type OrderRecord,
   type PaymentIntentRecord,
   type PlanRecord,
+  type StockCapacityRecord,
   type TicketDetailRecord,
   type TicketRecord,
   type WalletRecord,
@@ -22,7 +23,8 @@ import { TicketConversation, ticketStatusLabel } from './shared/ui'
 import { ticketRequestBody, useAttachmentLimit } from './TicketAttachments'
 import { walletMoney } from './Wallet'
 import { formatDate, formatTime } from './shared/time'
-import { cycleName, cycleOrder, CyclePriceFields, readCyclePrices } from './shared/cycles'
+import { cycleName, cycleOrder, CyclePriceFields, priceLeft, readCyclePrices } from './shared/cycles'
+import { readStock, stockLeft, StockField, StockTag } from './shared/stock'
 import { OvercommitDialog, SupplyDetails, overcommitText } from './Supply'
 
 type Tab = 'market' | 'mine' | 'coupons' | 'tickets' | 'chat'
@@ -183,6 +185,7 @@ function Market({ customer }: { customer: CustomerIdentity }) {
                   <div>
                     <strong>{plan.name}</strong>
                     <span className="tag">{virtNames[plan.virtualization] || plan.virtualization}</span>
+                    <StockTag plan={plan} />
                   </div>
                   <PlanSpecs plan={plan} />
                   {plan.description && <p className="plan-description">{plan.description}</p>}
@@ -191,10 +194,10 @@ function Market({ customer }: { customer: CustomerIdentity }) {
                     <strong>{planPrice(plan)}</strong>
                     <button
                       className="primary-button compact"
-                      disabled={node.mine || node.status !== 'online' || !!node.health_hold_reason}
+                      disabled={node.mine || node.status !== 'online' || !!node.health_hold_reason || stockLeft(plan) === 0}
                       onClick={() => setBuying({ node, plan })}
                     >
-                      购买
+                      {stockLeft(plan) === 0 ? '已售罄' : '购买'}
                     </button>
                   </div>
                 </div>
@@ -226,7 +229,7 @@ function BuyDialog({
   const prices = plan.prices
     .filter(price => price.currency === customer.default_currency)
     .sort((a, b) => cycleOrder(a.billing_cycle) - cycleOrder(b.billing_cycle))
-  const [cycle, setCycle] = useState(prices[0]?.billing_cycle || 'monthly')
+  const [cycle, setCycle] = useState((prices.find(item => priceLeft(item) !== 0) ?? prices[0])?.billing_cycle || 'monthly')
   const [template, setTemplate] = useState(plan.default_template_id)
   const [coupon, setCoupon] = useState('')
   const [discount, setDiscount] = useState(0)
@@ -319,9 +322,10 @@ function BuyDialog({
               <span>计费周期</span>
               <select value={cycle} onChange={event => setCycle(event.target.value)}>
                 {prices.map(item => (
-                  <option key={item.billing_cycle} value={item.billing_cycle}>
+                  <option key={item.billing_cycle} value={item.billing_cycle} disabled={priceLeft(item) === 0}>
                     {cycleName(item.billing_cycle)} · {walletMoney(item.charge_minor ?? item.amount_minor, item.currency)}
                     {item.charge_minor != null ? '（按母机到期折算）' : ''}
+                    {priceLeft(item) === 0 ? '（已达限购次数）' : priceLeft(item) !== null ? `（限购剩 ${priceLeft(item)} 次）` : ''}
                   </option>
                 ))}
               </select>
@@ -759,7 +763,10 @@ function HostedNodeCard({
                   </small>
                 </td>
                 <td>{plan.vcpu} 核 / {plan.ram_mb} MB / {plan.disk_gb} GB / {plan.traffic_gb || '不限'} GB / NAT×{plan.port_mapping_count}</td>
-                <td>{plan.prices.map(price => `${cycleName(price.billing_cycle)} ${walletMoney(price.amount_minor, price.currency)}`).join('，')}</td>
+                <td>
+                  {plan.prices.map(price => `${cycleName(price.billing_cycle)} ${walletMoney(price.amount_minor, price.currency)}${price.purchase_limit ? `（限购 ${price.purchase_limit}，已售 ${price.sold ?? 0}）` : ''}`).join('，')}
+                  <small className="block">{plan.stock_limit == null ? '库存不限（受资源限制）' : `库存 ${plan.stock_limit}，已售及待支付 ${plan.stock_held ?? 0}`}</small>
+                </td>
                 <td><span className={plan.enabled ? 'tag success' : 'tag'}>{plan.enabled ? '在售' : '已停售'}</span></td>
                 <td className="row-actions">
                   <button className="secondary-button compact" onClick={() => setPlanForm(plan)}>编辑</button>
@@ -833,7 +840,7 @@ function HostedPlanForm({ node, plan, onClose, onSaved }: { node: HostedNodeReco
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const form = new FormData(event.currentTarget)
-    const { prices, error: priceError } = readCyclePrices(form)
+    const { prices, limits, error: priceError } = readCyclePrices(form)
     if (priceError) {
       setError(priceError)
       return
@@ -851,6 +858,8 @@ function HostedPlanForm({ node, plan, onClose, onSaved }: { node: HostedNodeReco
       allowed_template_ids: allowed,
       default_template_id: allowed.includes(fallback) ? fallback : allowed[0] || '',
       prices,
+      price_limits: limits,
+      stock_limit: readStock(form),
       enabled: form.get('enabled') === 'on',
       description: String(form.get('description') || ''),
       purchase_limit: limited ? Number(form.get('purchase_limit') || 0) : 0,
@@ -890,7 +899,7 @@ function HostedPlanForm({ node, plan, onClose, onSaved }: { node: HostedNodeReco
         </label>
         <label>
           <span>虚拟化</span>
-          <select value={virtualization} onChange={event => { setVirtualization(event.target.value); setAllowed([]) }}>
+          <select name="virtualization" value={virtualization} onChange={event => { setVirtualization(event.target.value); setAllowed([]) }}>
             {node.virtualization_types.map(item => (
               <option key={item} value={item}>{virtNames[item] || item}</option>
             ))}
@@ -903,6 +912,23 @@ function HostedPlanForm({ node, plan, onClose, onSaved }: { node: HostedNodeReco
         <label><span>下行 Mbps（0 = 不限）</span><input name="network_down_mbps" type="number" min="0" required defaultValue={plan?.network_down_mbps ?? 50} /></label>
         <label><span>上行 Mbps（0 = 不限）</span><input name="network_up_mbps" type="number" min="0" required defaultValue={plan?.network_up_mbps ?? 20} /></label>
         <label><span>NAT 端口数</span><input name="port_mapping_count" type="number" min="1" max="100" required defaultValue={plan?.port_mapping_count ?? 5} /></label>
+        <StockField
+          plan={plan ?? undefined}
+          preview={formElement => {
+            const data = new FormData(formElement)
+            return api<StockCapacityRecord>(`/api/v1/customer/hosting/nodes/${node.id}/stock-capacity`, {
+              method: 'POST',
+              body: JSON.stringify({
+                plan_id: plan?.id ?? '',
+                virtualization: data.get('virtualization'),
+                vcpu: Number(data.get('vcpu')),
+                ram_mb: Number(data.get('ram_mb')),
+                disk_gb: Number(data.get('disk_gb')),
+                traffic_gb: Number(data.get('traffic_gb')),
+              }),
+            })
+          }}
+        />
         <CyclePriceFields
           prices={plan?.prices ?? []}
           hint="留空表示不支持该计费周期，至少填写一个。母机到期日早于周期结束时，买家按剩余时间折算付款（例如季付 ¥30、母机只剩 2 个月，买家付 ¥20），实例到期日与母机到期日相同。"

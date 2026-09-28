@@ -4,6 +4,8 @@ import { api, imageLabel, AvailableTemplateRecord, ProviderTypeRecord, PlanRecor
 import { CouponManager } from '../Coupons'
 import { PageActions, StatusBadge, cycleLabel } from '../shared/ui'
 import { cycleOrder, CyclePriceFields, readCyclePrices } from '../shared/cycles'
+import { readStock, StockField, StockTag } from '../shared/stock'
+import type { StockCapacityRecord } from '../api'
 import { virtualizationLabel } from './Nodes'
 
 export function PlansView() {
@@ -94,6 +96,7 @@ export function PlansView() {
                 .join(' / ')}
             </small>
 
+            <StockTag plan={plan} />
             <div className="price-line">
               {plan.prices.length ? (
                 [...plan.prices]
@@ -190,7 +193,7 @@ export function PlanForm({
       return
     }
     const data = new FormData(event.currentTarget)
-    const { prices, error: priceError } = readCyclePrices(data)
+    const { prices, limits, error: priceError } = readCyclePrices(data)
     if (priceError) {
       setError(priceError)
       return
@@ -223,7 +226,9 @@ export function PlanForm({
         billing_cycle,
         amount_minor,
         setup_fee_minor: 0,
+        purchase_limit: limits[billing_cycle] ?? null,
       })),
+      stock_limit: readStock(data),
     }
     try {
       await api(plan ? `/api/v1/admin/plans/${plan.id}` : '/api/v1/admin/plans', {
@@ -319,6 +324,24 @@ export function PlanForm({
           <input name="snapshot_limit" type="number" min="0" defaultValue={plan?.snapshot_limit ?? 1} />
         </label>
         <CyclePriceFields prices={plan?.prices ?? (plan ? [] : [{ billing_cycle: 'monthly', amount_minor: 1900 }])} />
+        <StockField
+          plan={plan ?? undefined}
+          preview={form => {
+            const data = new FormData(form)
+            return api<StockCapacityRecord>('/api/v1/admin/plans/stock-capacity', {
+              method: 'POST',
+              body: JSON.stringify({
+                id: plan?.id ?? '',
+                provider_type: providerType,
+                virtualization: data.get('virtualization') || virtualization,
+                vcpu: Number(data.get('vcpu')),
+                ram_mb: Number(data.get('ram_mb')),
+                disk_gb: Number(data.get('disk_gb')),
+                traffic_gb: Number(data.get('traffic_gb')),
+              }),
+            })
+          }}
+        />
 
         <fieldset className="wide network-policy">
           <legend>网络策略配置</legend>

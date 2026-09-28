@@ -169,4 +169,28 @@ func TestHostedLeaseProrationIntegration(t *testing.T) {
 	if !periodEnd.Equal(*LeaseEnd(&nodeExpires)) {
 		t.Fatalf("renewal period end %v, lease %v", periodEnd, LeaseEnd(&nodeExpires))
 	}
+
+	// The host did not extend the lease: at the due date the service ends
+	// with it (suspended, deleted after the retention period).
+	if _, err = db.Exec(ctx, `UPDATE invoices SET status='void' WHERE service_id=$1 AND kind='renewal'`, serviceID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Exec(ctx, `UPDATE nodes SET expires_at=(now() AT TIME ZONE 'Asia/Shanghai')::date - 1 WHERE id=$1`, nodeID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Exec(ctx, `UPDATE services SET next_due_at=((now() AT TIME ZONE 'Asia/Shanghai')::date)::timestamptz WHERE id=$1`, serviceID); err != nil {
+		t.Fatal(err)
+	}
+	result2, err := lifecycle.Run(ctx, 7*24*time.Hour, 72*time.Hour, 168*time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var status string
+	var scheduled *time.Time
+	if err = db.QueryRow(ctx, `SELECT status,termination_scheduled_at FROM services WHERE id=$1`, serviceID).Scan(&status, &scheduled); err != nil {
+		t.Fatal(err)
+	}
+	if result2.LeaseEnded != 1 || status != "suspended" || scheduled == nil {
+		t.Fatalf("lease end: %+v status=%s scheduled=%v", result2, status, scheduled)
+	}
 }

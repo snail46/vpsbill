@@ -3514,3 +3514,10 @@ td .tag, .tag { white-space: nowrap; }
   font-size: 13px;
 }
 .topup-terms ul { margin: 0; padding-left: 18px; color: var(--text-secondary); line-height: 1.7; }
+
+/* Stock and per-price purchase limits. */
+.stock-tag { background: var(--success-bg, rgba(16, 185, 129, 0.12)); color: var(--success-text, #047857); }
+.stock-tag.sold-out { background: var(--warning-bg); color: var(--warning-text); }
+.stock-field { display: grid; gap: 6px; align-content: start; }
+.cycle-price-cell { display: grid; gap: 6px; align-content: start; }
+.cycle-custom-row { grid-template-columns: minmax(0, 110px) 90px minmax(0, 140px) minmax(0, 140px); }

@@ -2,7 +2,8 @@ import { FormEvent, useEffect, useState } from 'react'
 import { api, CustomerCatalogRecord, CustomerIdentity, OrderRecord, PaymentIntentRecord } from '../api'
 import { CouponField } from '../Coupons'
 import { cycleLabel, money } from '../shared/ui'
-import { cycleOrder } from '../shared/cycles'
+import { cycleOrder, priceLeft } from '../shared/cycles'
+import { stockLeft, StockTag } from '../shared/stock'
 
 // cardPrice shows the monthly price when the plan sells one, otherwise the
 // shortest cycle.
@@ -44,8 +45,8 @@ export function CustomerShop({ customer }: { customer: CustomerIdentity }) {
   const prices = selected?.prices.filter(price => price.currency === customer.default_currency) || []
 
   useEffect(() => {
-    if (prices.length && !prices.some(price => price.billing_cycle === cycle)) {
-      setCycle(prices[0].billing_cycle)
+    if (prices.length && !prices.some(price => price.billing_cycle === cycle && priceLeft(price) !== 0)) {
+      setCycle((prices.find(price => priceLeft(price) !== 0) ?? prices[0]).billing_cycle)
     }
   }, [selectedID])
 
@@ -121,6 +122,7 @@ export function CustomerShop({ customer }: { customer: CustomerIdentity }) {
             >
               <div>
                 <span className="tag">{plan.virtualization.toUpperCase()}</span>
+                <StockTag plan={plan} />
                 {selectedID === plan.id && <span className="selected-mark">已选定</span>}
               </div>
               <h3>{plan.name}</h3>
@@ -165,15 +167,16 @@ export function CustomerShop({ customer }: { customer: CustomerIdentity }) {
               <span>计费周期</span>
               <select name="billing_cycle" value={cycle} onChange={event => setCycle(event.target.value)}>
                 {prices.map(price => (
-                  <option key={price.billing_cycle} value={price.billing_cycle}>
+                  <option key={price.billing_cycle} value={price.billing_cycle} disabled={priceLeft(price) === 0}>
                     {cycleLabel(price.billing_cycle)} 付款 · {money(price.amount_minor, price.currency)}
+                    {priceLeft(price) === 0 ? '（已达限购次数）' : priceLeft(price) !== null ? `（限购剩 ${priceLeft(price)} 次）` : ''}
                   </option>
                 ))}
               </select>
             </label>
             <label>
               <span>购买数量</span>
-              <input name="quantity" type="number" min="1" max="20" defaultValue="1" />
+              <input name="quantity" type="number" min="1" max={Math.max(1, Math.min(20, stockLeft(selected) ?? 20))} defaultValue="1" />
             </label>
             <label>
               <span>操作系统镜像</span>
@@ -196,7 +199,7 @@ export function CustomerShop({ customer }: { customer: CustomerIdentity }) {
               </strong>
             </div>
             <div className="form-actions wide">
-              <button className="primary-button compact" disabled={saving || !catalog?.regions.length}>
+              <button className="primary-button compact" disabled={saving || !catalog?.regions.length || stockLeft(selected) === 0}>
                 {saving ? '正在生成订单…' : '立即下单'}
               </button>
             </div>

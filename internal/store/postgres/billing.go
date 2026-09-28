@@ -249,6 +249,9 @@ func (s *BillingStore) CreateOrder(ctx context.Context, input CreateOrderInput) 
 		if err != nil {
 			return Order{}, err
 		}
+		if err := checkPlanLimits(ctx, tx, item.PlanID, item.BillingCycle, item.Quantity); err != nil {
+			return Order{}, err
+		}
 		// A host lease ending inside the cycle shortens the period and the
 		// price with it; renewals still use the full list price.
 		priced.ListAmountMinor = priced.UnitAmountMinor
@@ -757,7 +760,8 @@ func (s *BillingStore) processPayment(ctx context.Context, tx pgx.Tx, event Paym
 		SELECT oi.id, oi.plan_id, oi.region_id, oi.quantity, oi.configuration,
 		       CASE WHEN oi.discount_unit_minor>0 THEN o.coupon_id::text END, oi.renewal_discount_type, oi.renewal_discount_value,
 		       CASE WHEN p.owner_account_id IS NOT NULL THEN coalesce((oi.configuration->>'list_amount_minor')::bigint, oi.unit_amount_minor) END,
-		       (SELECT n.expires_at FROM nodes n WHERE n.id=p.node_id AND n.owner_account_id IS NOT NULL)
+		       (SELECT n.expires_at FROM nodes n WHERE n.id=p.node_id AND n.owner_account_id IS NOT NULL),
+		       coalesce((oi.configuration->>'list_amount_minor')::bigint, oi.unit_amount_minor)
 		FROM order_items oi JOIN orders o ON o.id=oi.order_id JOIN plans p ON p.id=oi.plan_id WHERE oi.order_id=$1 ORDER BY oi.created_at
 	`, result.OrderID)
 		if err != nil {
@@ -774,11 +778,13 @@ func (s *BillingStore) processPayment(ctx context.Context, tx pgx.Tx, event Paym
 			renewalPrice *int64
 			// nodeExpires is the host lease, which caps the paid period.
 			nodeExpires *time.Time
+			// listPrice renews the service if its cycle stops being sold.
+			listPrice int64
 		}
 		items := make([]itemRow, 0)
 		for rows.Next() {
 			var item itemRow
-			if err := rows.Scan(&item.id, &item.planID, &item.regionID, &item.quantity, &item.configuration, &item.couponID, &item.renewalType, &item.renewalValue, &item.renewalPrice, &item.nodeExpires); err != nil {
+			if err := rows.Scan(&item.id, &item.planID, &item.regionID, &item.quantity, &item.configuration, &item.couponID, &item.renewalType, &item.renewalValue, &item.renewalPrice, &item.nodeExpires, &item.listPrice); err != nil {
 				rows.Close()
 				return PaymentResult{}, err
 			}
@@ -808,9 +814,9 @@ func (s *BillingStore) processPayment(ctx context.Context, tx pgx.Tx, event Paym
 				}
 				if _, err := tx.Exec(ctx, `
 				INSERT INTO services(id, account_id, order_item_id, plan_id, region_id, status, instance_name, billing_cycle, next_due_at, expires_at,
-				                     coupon_id, renewal_discount_type, renewal_discount_value, renewal_price_minor)
-				VALUES($1, $2, $3, $4, $5, 'provisioning', $6, $7, $8, $8, $9::uuid, $10, $11, $12)
-			`, serviceID, accountID, item.id, item.planID, item.regionID, instanceName, cycle, nextDue, item.couponID, item.renewalType, item.renewalValue, item.renewalPrice); err != nil {
+				                     coupon_id, renewal_discount_type, renewal_discount_value, renewal_price_minor, list_price_minor)
+				VALUES($1, $2, $3, $4, $5, 'provisioning', $6, $7, $8, $8, $9::uuid, $10, $11, $12, $13)
+			`, serviceID, accountID, item.id, item.planID, item.regionID, instanceName, cycle, nextDue, item.couponID, item.renewalType, item.renewalValue, item.renewalPrice, item.listPrice); err != nil {
 					return PaymentResult{}, fmt.Errorf("create service: %w", err)
 				}
 				deduplicationKey := serviceID + ":provision:v1"

@@ -96,8 +96,8 @@ const listingSelect = `
 	       p.name,p.virtualization,p.vcpu,p.ram_mb,p.disk_gb,p.traffic_gb,p.port_mapping_count,r.name,coalesce(h.display_name,''),
 	       s.billing_cycle,s.next_due_at,s.created_at,l.created_at,l.sold_at,
 	       s.status='active' AND s.account_id=l.seller_account_id,
-	       least((SELECT pp.amount_minor FROM plan_prices pp WHERE pp.plan_id=p.id AND pp.currency=l.currency AND pp.billing_cycle=s.billing_cycle
-	          AND pp.active_from<=now() AND (pp.active_until IS NULL OR pp.active_until>now()) ORDER BY pp.active_from DESC LIMIT 1),s.renewal_price_minor),
+	       least(coalesce((SELECT pp.amount_minor FROM plan_prices pp WHERE pp.plan_id=p.id AND pp.currency=l.currency AND pp.billing_cycle=s.billing_cycle
+	          AND pp.active_from<=now() AND (pp.active_until IS NULL OR pp.active_until>now()) ORDER BY pp.active_from DESC LIMIT 1),s.list_price_minor),s.renewal_price_minor),
 	       s.renewal_discount_type,s.renewal_discount_value,coalesce(n.status='online',false),
 	       coalesce(l.traffic_total_bytes,0),l.traffic_rx_bytes,l.traffic_tx_bytes,l.fee_minor,l.seller_proceeds_minor
 	FROM service_listings l JOIN services s ON s.id=l.service_id JOIN plans p ON p.id=s.plan_id JOIN regions r ON r.id=s.region_id

@@ -188,7 +188,7 @@ func (s *PortalStore) ListServices(ctx context.Context, accountID string) ([]Cus
 		       CASE WHEN p.owner_account_id IS NULL THEN '' ELSE coalesce(p.node_id::text,'') END,
 		       coalesce(s.template_id, oi.configuration->>'template_id', p.default_template_id),
 		       s.auto_renew, s.billing_cycle, a.default_currency,
-		       pp.amount_minor, s.renewal_price_minor, s.renewal_discount_type, s.renewal_discount_value
+		       coalesce(pp.amount_minor, s.list_price_minor), s.renewal_price_minor, s.renewal_discount_type, s.renewal_discount_value
 		FROM services s JOIN plans p ON p.id=s.plan_id JOIN regions r ON r.id=s.region_id JOIN accounts a ON a.id=s.account_id
 		LEFT JOIN accounts h ON h.id=p.owner_account_id
 		LEFT JOIN order_items oi ON oi.id=s.order_item_id

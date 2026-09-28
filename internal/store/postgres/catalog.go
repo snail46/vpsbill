@@ -201,6 +201,10 @@ type Price struct {
 	// host lease ends inside the cycle, so the buyer pays pro rata.
 	ChargeMinor *int64     `json:"charge_minor,omitempty"`
 	PeriodEnd   *time.Time `json:"period_end,omitempty"`
+	// PurchaseLimit caps how many units are sold at this price (nil =
+	// unlimited); Sold counts paid and still payable units.
+	PurchaseLimit *int `json:"purchase_limit"`
+	Sold          int  `json:"sold"`
 }
 
 type Plan struct {
@@ -230,13 +234,18 @@ type Plan struct {
 	NodeID         string `json:"node_id,omitempty"`
 	// Description, PurchaseLimit (per buyer, 0 = unlimited) and EarlyRefund
 	// are hosted plan terms shown in the market.
-	Description   string    `json:"description"`
-	PurchaseLimit int       `json:"purchase_limit"`
-	EarlyRefund   bool      `json:"early_refund"`
-	Enabled       bool      `json:"enabled"`
-	Version       int       `json:"version"`
-	Prices        []Price   `json:"prices"`
-	CreatedAt     time.Time `json:"created_at"`
+	Description   string `json:"description"`
+	PurchaseLimit int    `json:"purchase_limit"`
+	EarlyRefund   bool   `json:"early_refund"`
+	// StockLimit is how many instances the plan sells in total, live ones
+	// included (nil = only capacity limits it); StockHeld counts live
+	// instances and units in payable orders.
+	StockLimit *int      `json:"stock_limit"`
+	StockHeld  int       `json:"stock_held"`
+	Enabled    bool      `json:"enabled"`
+	Version    int       `json:"version"`
+	Prices     []Price   `json:"prices"`
+	CreatedAt  time.Time `json:"created_at"`
 }
 
 func (s *CatalogStore) ListPlans(ctx context.Context) ([]Plan, error) {
@@ -245,8 +254,9 @@ func (s *CatalogStore) ListPlans(ctx context.Context) ([]Plan, error) {
 		       network_down_mbps, network_up_mbps, snapshot_limit,
 		       assign_nat, port_mapping_count, assign_ipv4, ipv4_count, assign_ipv6, ipv6_count,
 		       default_template_id, allowed_template_ids, enabled, version, created_at,
-		       coalesce(owner_account_id::text,''), coalesce(node_id::text,''), description, purchase_limit, early_refund
-		FROM plans ORDER BY created_at DESC
+		       coalesce(owner_account_id::text,''), coalesce(node_id::text,''), description, purchase_limit, early_refund,
+		       stock_limit, `+planHeldSQL+`
+		FROM plans p ORDER BY created_at DESC
 	`)
 	if err != nil {
 		return nil, err
@@ -257,7 +267,8 @@ func (s *CatalogStore) ListPlans(ctx context.Context) ([]Plan, error) {
 		var plan Plan
 		if err := rows.Scan(&plan.ID, &plan.Code, &plan.Name, &plan.ProviderType, &plan.Virtualization, &plan.VCPU, &plan.RAMMB, &plan.DiskGB, &plan.TrafficGB, &plan.NetworkDownMbps, &plan.NetworkUpMbps, &plan.SnapshotLimit,
 			&plan.AssignNAT, &plan.PortMappingCount, &plan.AssignIPv4, &plan.IPv4Count, &plan.AssignIPv6, &plan.IPv6Count,
-			&plan.DefaultTemplateID, &plan.AllowedTemplateIDs, &plan.Enabled, &plan.Version, &plan.CreatedAt, &plan.OwnerAccountID, &plan.NodeID, &plan.Description, &plan.PurchaseLimit, &plan.EarlyRefund); err != nil {
+			&plan.DefaultTemplateID, &plan.AllowedTemplateIDs, &plan.Enabled, &plan.Version, &plan.CreatedAt, &plan.OwnerAccountID, &plan.NodeID, &plan.Description, &plan.PurchaseLimit, &plan.EarlyRefund,
+			&plan.StockLimit, &plan.StockHeld); err != nil {
 			return nil, err
 		}
 		plan.Prices = []Price{}
@@ -268,7 +279,10 @@ func (s *CatalogStore) ListPlans(ctx context.Context) ([]Plan, error) {
 	}
 	for i := range plans {
 		priceRows, err := s.db.Query(ctx, `
-			SELECT id, currency, billing_cycle, amount_minor, setup_fee_minor, active_from, active_until
+			SELECT id, currency, billing_cycle, amount_minor, setup_fee_minor, active_from, active_until, purchase_limit,
+			       coalesce((SELECT sum(soi.quantity) FROM order_items soi JOIN invoices si ON si.order_id=soi.order_id
+			                 WHERE soi.plan_id=$1 AND soi.configuration->>'billing_cycle'=plan_prices.billing_cycle
+			                   AND (si.status='paid' OR (si.status='open' AND si.due_at>now()))),0)::int
 			FROM plan_prices WHERE plan_id=$1 AND (active_until IS NULL OR active_until > now())
 			ORDER BY currency, billing_cycle
 		`, plans[i].ID)
@@ -277,7 +291,7 @@ func (s *CatalogStore) ListPlans(ctx context.Context) ([]Plan, error) {
 		}
 		for priceRows.Next() {
 			var price Price
-			if err := priceRows.Scan(&price.ID, &price.Currency, &price.BillingCycle, &price.AmountMinor, &price.SetupFeeMinor, &price.ActiveFrom, &price.ActiveUntil); err != nil {
+			if err := priceRows.Scan(&price.ID, &price.Currency, &price.BillingCycle, &price.AmountMinor, &price.SetupFeeMinor, &price.ActiveFrom, &price.ActiveUntil, &price.PurchaseLimit, &price.Sold); err != nil {
 				priceRows.Close()
 				return nil, err
 			}
@@ -299,21 +313,21 @@ func (s *CatalogStore) CreatePlan(ctx context.Context, input Plan) (Plan, error)
 		INSERT INTO plans(code, name, virtualization, vcpu, ram_mb, disk_gb, traffic_gb,
 		                  network_down_mbps, network_up_mbps, snapshot_limit,
 		                  assign_nat, port_mapping_count, assign_ipv4, ipv4_count, assign_ipv6, ipv6_count,
-		                  default_template_id, allowed_template_ids, enabled, provider_type, owner_account_id, node_id, description, purchase_limit, early_refund)
-		VALUES(upper($1), $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, nullif($21,'')::uuid, nullif($22,'')::uuid, $23, $24, $25)
+		                  default_template_id, allowed_template_ids, enabled, provider_type, owner_account_id, node_id, description, purchase_limit, early_refund, stock_limit)
+		VALUES(upper($1), $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, nullif($21,'')::uuid, nullif($22,'')::uuid, $23, $24, $25, $26)
 		RETURNING id, code, version, created_at
 	`, input.Code, input.Name, input.Virtualization, input.VCPU, input.RAMMB, input.DiskGB, input.TrafficGB, input.NetworkDownMbps, input.NetworkUpMbps, input.SnapshotLimit,
 		input.AssignNAT, input.PortMappingCount, input.AssignIPv4, input.IPv4Count, input.AssignIPv6, input.IPv6Count,
-		input.DefaultTemplateID, input.AllowedTemplateIDs, input.Enabled, input.ProviderType, input.OwnerAccountID, input.NodeID, input.Description, input.PurchaseLimit, input.EarlyRefund).Scan(&input.ID, &input.Code, &input.Version, &input.CreatedAt); err != nil {
+		input.DefaultTemplateID, input.AllowedTemplateIDs, input.Enabled, input.ProviderType, input.OwnerAccountID, input.NodeID, input.Description, input.PurchaseLimit, input.EarlyRefund, input.StockLimit).Scan(&input.ID, &input.Code, &input.Version, &input.CreatedAt); err != nil {
 		return Plan{}, fmt.Errorf("create plan: %w", err)
 	}
 	for i := range input.Prices {
 		input.Prices[i].Currency = strings.ToUpper(strings.TrimSpace(input.Prices[i].Currency))
 		if err := tx.QueryRow(ctx, `
-			INSERT INTO plan_prices(plan_id, currency, billing_cycle, amount_minor, setup_fee_minor)
-			VALUES($1, $2, $3, $4, $5)
+			INSERT INTO plan_prices(plan_id, currency, billing_cycle, amount_minor, setup_fee_minor, purchase_limit)
+			VALUES($1, $2, $3, $4, $5, $6)
 			RETURNING id, active_from
-		`, input.ID, input.Prices[i].Currency, input.Prices[i].BillingCycle, input.Prices[i].AmountMinor, input.Prices[i].SetupFeeMinor).Scan(&input.Prices[i].ID, &input.Prices[i].ActiveFrom); err != nil {
+		`, input.ID, input.Prices[i].Currency, input.Prices[i].BillingCycle, input.Prices[i].AmountMinor, input.Prices[i].SetupFeeMinor, input.Prices[i].PurchaseLimit).Scan(&input.Prices[i].ID, &input.Prices[i].ActiveFrom); err != nil {
 			return Plan{}, fmt.Errorf("create plan price: %w", err)
 		}
 	}
@@ -335,13 +349,13 @@ func (s *CatalogStore) UpdatePlan(ctx context.Context, id string, input Plan) (P
 		       traffic_gb=$8, network_down_mbps=$9, network_up_mbps=$10, snapshot_limit=$11,
 		       assign_nat=$12, port_mapping_count=$13, assign_ipv4=$14, ipv4_count=$15,
 		       assign_ipv6=$16, ipv6_count=$17, default_template_id=$18, allowed_template_ids=$19,
-		       enabled=$20, provider_type=$21, description=$22, purchase_limit=$23, early_refund=$24, version=version+1, updated_at=now()
+		       enabled=$20, provider_type=$21, description=$22, purchase_limit=$23, early_refund=$24, stock_limit=$25, version=version+1, updated_at=now()
 		WHERE id=$1
 		RETURNING id, code, version, created_at
 	`, id, input.Code, input.Name, input.Virtualization, input.VCPU, input.RAMMB, input.DiskGB, input.TrafficGB,
 		input.NetworkDownMbps, input.NetworkUpMbps, input.SnapshotLimit, input.AssignNAT, input.PortMappingCount,
 		input.AssignIPv4, input.IPv4Count, input.AssignIPv6, input.IPv6Count, input.DefaultTemplateID,
-		input.AllowedTemplateIDs, input.Enabled, input.ProviderType, input.Description, input.PurchaseLimit, input.EarlyRefund).Scan(&input.ID, &input.Code, &input.Version, &input.CreatedAt); err != nil {
+		input.AllowedTemplateIDs, input.Enabled, input.ProviderType, input.Description, input.PurchaseLimit, input.EarlyRefund, input.StockLimit).Scan(&input.ID, &input.Code, &input.Version, &input.CreatedAt); err != nil {
 		return Plan{}, fmt.Errorf("update plan: %w", err)
 	}
 	now := time.Now().UTC()
@@ -351,11 +365,11 @@ func (s *CatalogStore) UpdatePlan(ctx context.Context, id string, input Plan) (P
 	for i := range input.Prices {
 		input.Prices[i].Currency = strings.ToUpper(strings.TrimSpace(input.Prices[i].Currency))
 		if err := tx.QueryRow(ctx, `
-			INSERT INTO plan_prices(plan_id, currency, billing_cycle, amount_minor, setup_fee_minor, active_from)
-			VALUES($1, $2, $3, $4, $5, $6)
+			INSERT INTO plan_prices(plan_id, currency, billing_cycle, amount_minor, setup_fee_minor, active_from, purchase_limit)
+			VALUES($1, $2, $3, $4, $5, $6, $7)
 			RETURNING id, active_from
 		`, id, input.Prices[i].Currency, input.Prices[i].BillingCycle, input.Prices[i].AmountMinor,
-			input.Prices[i].SetupFeeMinor, now).Scan(&input.Prices[i].ID, &input.Prices[i].ActiveFrom); err != nil {
+			input.Prices[i].SetupFeeMinor, now, input.Prices[i].PurchaseLimit).Scan(&input.Prices[i].ID, &input.Prices[i].ActiveFrom); err != nil {
 			return Plan{}, fmt.Errorf("update plan price: %w", err)
 		}
 	}

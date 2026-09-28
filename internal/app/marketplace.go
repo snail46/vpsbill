@@ -426,6 +426,10 @@ type hostedPlanInput struct {
 	Description   string `json:"description"`
 	PurchaseLimit int    `json:"purchase_limit"`
 	EarlyRefund   bool   `json:"early_refund"`
+	// StockLimit is the plan's total stock (nil = capacity only);
+	// PriceLimits caps how many times each cycle's price is sold.
+	StockLimit  *int           `json:"stock_limit"`
+	PriceLimits map[string]int `json:"price_limits"`
 }
 
 func (in *hostedPlanInput) plan(node postgres.Node) (postgres.Plan, string) {
@@ -483,11 +487,19 @@ func (in *hostedPlanInput) plan(node postgres.Node) (postgres.Plan, string) {
 			return postgres.Plan{}, "价格需在 ¥1 到 ¥100000 之间"
 		}
 		seen[cycle] = true
-		plan.Prices = append(plan.Prices, postgres.Price{Currency: "CNY", BillingCycle: cycle, AmountMinor: amount})
+		price := postgres.Price{Currency: "CNY", BillingCycle: cycle, AmountMinor: amount}
+		if limit, ok := in.PriceLimits[raw]; ok && limit > 0 {
+			price.PurchaseLimit = &limit
+		}
+		plan.Prices = append(plan.Prices, price)
 	}
 	if len(plan.Prices) == 0 {
 		return postgres.Plan{}, "请至少设置一个计费周期的价格"
 	}
+	if message := validatePriceLimits(plan.Prices); message != "" {
+		return postgres.Plan{}, message
+	}
+	plan.NodeID, plan.StockLimit = node.ID, in.StockLimit
 	return plan, ""
 }
 
@@ -513,6 +525,9 @@ func (a *marketplaceAPI) createHostedPlan(w http.ResponseWriter, r *http.Request
 	suffix := make([]byte, 5)
 	if _, err := rand.Read(suffix); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "internal_error"})
+		return
+	}
+	if !a.hostedStockAllowed(w, r, plan, "") {
 		return
 	}
 	plan.Code = "H-" + strings.ToUpper(hex.EncodeToString(suffix))
@@ -569,12 +584,57 @@ func (a *marketplaceAPI) updateHostedPlan(w http.ResponseWriter, r *http.Request
 			plan.Code = existing.Code
 		}
 	}
+	if !a.hostedStockAllowed(w, r, plan, planID) {
+		return
+	}
 	updated, err := a.catalog.UpdatePlan(r.Context(), planID, plan)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "internal_error"})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": updated})
+}
+
+// hostedStockAllowed answers with an error when the plan's stock is above
+// what the host's node can hold.
+func (a *marketplaceAPI) hostedStockAllowed(w http.ResponseWriter, r *http.Request, plan postgres.Plan, existingID string) bool {
+	message, err := checkPlanStock(r.Context(), a.catalog, plan, existingID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "internal_error"})
+		return false
+	}
+	if message != "" {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "stock_exceeded", "message": message})
+		return false
+	}
+	return true
+}
+
+// hostedStockCapacity previews the stock ceiling for a plan draft on the
+// host's node; plan_id names the plan being edited.
+func (a *marketplaceAPI) hostedStockCapacity(w http.ResponseWriter, r *http.Request) {
+	nodeID, ok := a.ownedNode(w, r)
+	if !ok {
+		return
+	}
+	var input struct {
+		PlanID         string `json:"plan_id"`
+		Virtualization string `json:"virtualization"`
+		VCPU           int    `json:"vcpu"`
+		RAMMB          int    `json:"ram_mb"`
+		DiskGB         int    `json:"disk_gb"`
+		TrafficGB      int    `json:"traffic_gb"`
+	}
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	if input.PlanID != "" {
+		if owner, planNode, err := a.store.HostedPlanOwner(r.Context(), input.PlanID); err != nil || owner != customerPrincipalFromContext(r.Context()).AccountID || planNode != nodeID {
+			writeJSON(w, http.StatusNotFound, map[string]any{"error": "plan_not_found"})
+			return
+		}
+	}
+	writeStockCapacity(w, r, a.catalog, postgres.Plan{NodeID: nodeID, Virtualization: input.Virtualization, VCPU: input.VCPU, RAMMB: input.RAMMB, DiskGB: input.DiskGB, TrafficGB: input.TrafficGB}, input.PlanID)
 }
 
 func (a *marketplaceAPI) setHostedPlanEnabled(w http.ResponseWriter, r *http.Request) {

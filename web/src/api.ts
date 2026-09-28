@@ -109,6 +109,9 @@ export type Price = {
   // cycle: what the buyer pays and until when.
   charge_minor?: number
   period_end?: string
+  // purchase_limit caps units sold at this price (null = unlimited).
+  purchase_limit?: number | null
+  sold?: number
 }
 
 export type PlanRecord = {
@@ -140,6 +143,20 @@ export type PlanRecord = {
   description?: string
   purchase_limit?: number
   early_refund?: boolean
+  // stock_limit is the plan's total stock (null = capacity only);
+  // stock_held counts live instances and units in payable orders.
+  stock_limit?: number | null
+  stock_held?: number
+}
+
+export type StockCapacityRecord = {
+  max: number
+  held: number
+  free_vcpu: number
+  free_ram_mb: number
+  free_disk_gb: number
+  free_traffic_gb?: number
+  nodes: number
 }
 
 export type AvailableTemplateRecord = {
