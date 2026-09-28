@@ -138,11 +138,11 @@ func (l *LXD) Create(ctx context.Context, spec RuntimeSpec) error {
 		"name": spec.Name, "type": "container",
 		"source": map[string]string{"type": "image", "alias": spec.Image},
 		"config": map[string]string{
-			"limits.cpu": strconv.Itoa(spec.VCPU), "limits.memory": strconv.Itoa(spec.RAMMB) + "MB",
+			"limits.cpu": strconv.Itoa(spec.VCPU), "limits.memory": strconv.Itoa(spec.RAMMB) + "MiB",
 			"security.nesting": "false", "boot.autostart": "true",
 		},
 		"devices": map[string]any{
-			"root": map[string]string{"type": "disk", "path": "/", "pool": l.config.StoragePool, "size": strconv.Itoa(spec.DiskGB) + "GB"},
+			"root": map[string]string{"type": "disk", "path": "/", "pool": l.config.StoragePool, "size": strconv.Itoa(spec.DiskGB) + "GiB"},
 			"eth0": nic,
 		},
 	}
