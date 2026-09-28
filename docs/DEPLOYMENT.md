@@ -8,7 +8,8 @@
 
 | 用途 | 端口 | 说明 |
 |---|---|---|
-| 计费站（HTTP） | 8088/tcp | 有域名时改为 80、443 |
+| 客户前台（HTTP） | 8088/tcp | 用域名或 Cloudflare Tunnel 时改为只监听本机，见 [访问方式](ACCESS.md) |
+| 管理后台（HTTP） | 8089/tcp | 建议只对自己的 IP 放行 |
 | Hatch 端口映射 | 20000–29999/tcp+udp | 写在 `/etc/hatch/agent.json` |
 | LXDAPI 端口映射 | 40000–49999/tcp+udp | 写在 LXDAPI 的 NAT 配置和节点设置里 |
 | LXDAPI 接口 | 8444/tcp | 只需要计费站能访问；同机部署时可以不对外开放 |
@@ -30,8 +31,9 @@ curl -fsSL -o docker-compose.yml https://raw.githubusercontent.com/snail46/vpsbi
 umask 077
 cat > .env <<EOF
 IMAGE_TAG=latest
-APP_PORT=8088
-DOMAIN=
+ACCESS_MODE=direct
+PORTAL_PORT=8088
+ADMIN_PORT=8089
 POSTGRES_DB=vpsbill
 POSTGRES_USER=vpsbill
 POSTGRES_PASSWORD=$(openssl rand -hex 24)
@@ -46,13 +48,13 @@ curl -fsS http://127.0.0.1:8088/health/ready
 
 ## 3. 图形化安装
 
-浏览器打开 `http://203.0.113.10:8088`，首次访问进入安装页：
+浏览器打开后台地址 `http://203.0.113.10:8089`，首次访问进入安装页：
 
-- 公开 URL 填 `http://203.0.113.10:8088`（有域名时填 `https://域名`）；
+- 公开 URL 填客户前台地址 `http://203.0.113.10:8088`（有域名时填 `https://前台域名`）；
 - 时区选 `Asia/Shanghai`；
 - 填写初始超级管理员的邮箱和密码。
 
-提交后，商家后台在 `/admin`，站点根路径是客户中心。登录后台后建议先在「安全中心」开启 TOTP 二步验证；站点名称、公开地址、时区、续费周期和发信邮箱以后都可以在「站点设置」里修改。
+提交后，商家后台在后台地址的 `/admin`，客户中心在前台地址。安装完成后到「站点设置」填上**后台访问地址** `http://203.0.113.10:8089`。登录后台后建议先在「安全中心」开启 TOTP 二步验证；站点名称、公开地址、时区、续费周期和发信邮箱以后都可以在「站点设置」里修改。
 
 ## 4. 准备母鸡（任选一种或几种）
 
@@ -169,7 +171,7 @@ curl -fsSL http://127.0.0.1:8088/api/v1/agent/download/install.sh | sh -s -- --s
 
 第二条命令用来同步升级 Hatch Agent，已有配置会保留。
 
-改用域名 HTTPS：把域名解析到服务器，`.env` 改为 `APP_PORT=127.0.0.1:8088`、`DOMAIN=billing.example.com`，执行 `docker compose --profile tls up -d`，再到后台「站点设置」把公开访问地址改成 `https://billing.example.com` 并保存，立即生效。
+改用域名 HTTPS、Cloudflare Tunnel 或自己的反向代理：见 [访问方式](ACCESS.md)。改完后到后台「站点设置」更新公开访问地址和后台访问地址。
 
 备份、恢复和主密钥轮换见 [运维手册](OPERATIONS.md)。
 

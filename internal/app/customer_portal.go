@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -62,6 +63,10 @@ func (p *customerPortal) serviceAction(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case errors.Is(err, postgres.ErrServiceNotFound):
 		writeJSON(w, http.StatusNotFound, map[string]any{"error": "service_not_found"})
+	case errors.Is(err, postgres.ErrServiceListed):
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "service_listed", "message": "实例正在交易市场挂售，挂售期间不能使用，下架后才能操作"})
+	case errors.Is(err, postgres.ErrTrafficLocked):
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "traffic_locked", "message": "本月流量（上行加下行）已用尽，实例已停止，下月 1 日自动恢复"})
 	case errors.Is(err, postgres.ErrServiceActionUnavailable):
 		writeJSON(w, http.StatusConflict, map[string]any{"error": "action_unavailable", "message": "当前服务或运行状态不允许该操作"})
 	case errors.Is(err, postgres.ErrActionInProgress):
@@ -73,11 +78,22 @@ func (p *customerPortal) serviceAction(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// serviceDriver opens the node of a customer's usable service for an
+// operation; listed instances are frozen for their seller.
 func (p *customerPortal) serviceDriver(r *http.Request) (postgres.CustomerServiceAccess, provider.Driver, error) {
+	return p.openService(r, false)
+}
+
+// openService is serviceDriver with an option to allow read-only access to
+// a listed instance (monitoring).
+func (p *customerPortal) openService(r *http.Request, readOnly bool) (postgres.CustomerServiceAccess, provider.Driver, error) {
 	identity := customerPrincipalFromContext(r.Context())
 	access, err := p.store.ServiceAccess(r.Context(), identity.AccountID, r.PathValue("id"))
 	if err != nil {
 		return access, nil, err
+	}
+	if access.Listed && !readOnly {
+		return access, nil, postgres.ErrServiceListed
 	}
 	if _, registered := provider.Lookup(access.ProviderType); !postgres.CustomerUsable(access.Status) || !registered {
 		return access, nil, postgres.ErrServiceActionUnavailable
@@ -87,7 +103,7 @@ func (p *customerPortal) serviceDriver(r *http.Request) (postgres.CustomerServic
 }
 
 func (p *customerPortal) serviceRuntime(w http.ResponseWriter, r *http.Request) {
-	access, driver, err := p.serviceDriver(r)
+	access, driver, err := p.openService(r, true)
 	if err != nil {
 		p.writeServiceError(w, err)
 		return
@@ -418,6 +434,12 @@ func (p *customerPortal) consoleProxy(w http.ResponseWriter, r *http.Request) {
 		p.writeServiceError(w, err)
 		return
 	}
+	// A console stays open for hours; close it once the customer no longer
+	// may use the instance (sold, listed, terminated).
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+	r = r.WithContext(ctx)
+	go p.watchAccess(ctx, cancel, customerPrincipalFromContext(ctx).AccountID, access.ServiceID)
 	console, ok := driver.(provider.Console)
 	if terminal, bridged := driver.(provider.Terminal); !ok && bridged && r.PathValue("kind") == "ssh" {
 		p.bridgeTerminal(w, r, access, terminal)
@@ -459,6 +481,8 @@ func (p *customerPortal) writeServiceError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, postgres.ErrServiceNotFound):
 		writeJSON(w, http.StatusNotFound, map[string]any{"error": "service_not_found"})
+	case errors.Is(err, postgres.ErrServiceListed):
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "service_listed", "message": "实例正在交易市场挂售，挂售期间不能使用，下架后才能操作"})
 	case errors.Is(err, postgres.ErrServiceActionUnavailable):
 		writeJSON(w, http.StatusConflict, map[string]any{"error": "action_unavailable", "message": "当前服务状态不允许此操作"})
 	case errors.Is(err, provider.ErrUnsupported):
@@ -568,4 +592,23 @@ func (p *customerPortal) checkout(w http.ResponseWriter, r *http.Request) {
 		intent.Status = "redirected"
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": intent})
+}
+
+// watchAccess cancels a long-lived session when the account loses the use
+// of the service.
+func (p *customerPortal) watchAccess(ctx context.Context, cancel context.CancelFunc, accountID, serviceID string) {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			access, err := p.store.ServiceAccess(ctx, accountID, serviceID)
+			if errors.Is(err, postgres.ErrServiceNotFound) || err == nil && (access.Listed || !postgres.CustomerUsable(access.Status)) {
+				cancel()
+				return
+			}
+		}
+	}
 }

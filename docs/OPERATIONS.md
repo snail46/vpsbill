@@ -11,7 +11,7 @@ chmod +x deploy.sh backup.sh restore.sh rotate-key.sh
 ./deploy.sh
 ```
 
-`--init` 生成 `.env` 及数据库密码、会话密钥和数据加密主密钥，但不启动容器。未配置 `DOMAIN` 时入口为服务器的 `APP_PORT`；配置域名时必须使用回环绑定（例如 `APP_PORT=127.0.0.1:8080`），脚本会启用 Caddy、申请证书并开放 80/443。站点与业务参数在首次 Web 安装页设置。
+`--init` 生成 `.env` 及数据库密码、会话密钥和数据加密主密钥，但不启动容器。访问方式由 `.env` 的 `ACCESS_MODE` 决定（direct / caddy / cloudflare / proxy），客户前台和管理后台分别监听 `PORTAL_PORT`、`ADMIN_PORT`，详见 [访问方式](ACCESS.md)。站点与业务参数在首次 Web 安装页设置。
 
 完整的新服务器与私有仓库步骤见 [全新服务器部署教程](DEPLOYMENT.md)。
 

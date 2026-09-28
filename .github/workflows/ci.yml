@@ -82,11 +82,11 @@ jobs:
         run: |
           test "$(docker image inspect vpsbill-api:test --format '{{.Config.User}}')" = "10001:10001"
           docker run --rm \
-            -e DOMAIN=billing.example.com \
+            -e DOMAIN=billing.example.com -e ADMIN_DOMAIN=admin.example.com \
             -v "$PWD/deploy/Caddyfile:/etc/caddy/Caddyfile:ro" \
             caddy:2.11.4-alpine \
             caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
-          DOMAIN=billing.example.com PUBLIC_URL=https://billing.example.com APP_PORT=127.0.0.1:8080 \
+          DOMAIN=billing.example.com ADMIN_DOMAIN=admin.example.com PUBLIC_URL=https://billing.example.com \
             docker compose --env-file .env.example -f deploy/docker-compose.image.yml --profile tls config --format json \
             | jq -r '.configs.caddyfile.content' > /tmp/Caddyfile.image
           docker run --rm \
@@ -102,15 +102,20 @@ jobs:
           INSTALL_RESPONSE="$(curl --fail --silent --show-error -c /tmp/vpsbill-cookies \
             -H 'Content-Type: application/json' \
             --data '{"app_name":"CI Billing","public_url":"http://localhost:8080","timezone":"UTC","payment_provider_name":"generic","payment_checkout_url":"","payment_webhook_secret":"","notification_webhook_url":"","notification_webhook_secret":"","metrics_token":"","worker_poll_interval":"3s","reconcile_interval":"5m","lifecycle_interval":"1m","renewal_lead_time":"168h","overdue_grace_period":"72h","termination_retention":"168h","admin_display_name":"CI Administrator","admin_email":"admin@example.com","admin_password":"integration-password-123"}' \
-            http://localhost:8080/api/v1/install)"
+            http://localhost:8081/api/v1/install)"
           test "$(printf '%s' "$INSTALL_RESPONSE" | jq -r '.data.user.email')" = "admin@example.com"
           METRICS_TOKEN="$(printf '%s' "$INSTALL_RESPONSE" | jq -r '.data.generated_secrets.metrics_token')"
           test "${#METRICS_TOKEN}" -ge 32
           curl --fail --silent --show-error -H "Authorization: Bearer $METRICS_TOKEN" http://localhost:8080/metrics | grep -q vpsbill_accounts
-          curl --fail --silent --show-error -b /tmp/vpsbill-cookies http://localhost:8080/api/v1/admin/overview | jq -e '.data.nodes == 0'
-          curl --fail --silent --show-error -b /tmp/vpsbill-cookies http://localhost:8080/api/v1/admin/hosts | jq -e '.data | type == "array"'
-          curl --fail --silent --show-error -b /tmp/vpsbill-cookies http://localhost:8080/api/v1/admin/settings/payment | jq -e '.data.gateway.type == "disabled"'
+          curl --fail --silent --show-error -b /tmp/vpsbill-cookies http://localhost:8081/api/v1/admin/overview | jq -e '.data.nodes == 0'
+          curl --fail --silent --show-error -b /tmp/vpsbill-cookies http://localhost:8081/api/v1/admin/hosts | jq -e '.data | type == "array"'
+          curl --fail --silent --show-error -b /tmp/vpsbill-cookies http://localhost:8081/api/v1/admin/settings/payment | jq -e '.data.gateway.type == "disabled"'
           test "$(curl --fail --silent --show-error http://localhost:8080/api/v1/install | jq -r '.data.required')" = "false"
+          # The portal port must not serve the admin console or staff APIs, and
+          # the admin port must not serve customer APIs.
+          test "$(curl --silent --output /dev/null --write-out '%{http_code}' -b /tmp/vpsbill-cookies http://localhost:8080/api/v1/admin/overview)" = "404"
+          test "$(curl --silent --output /dev/null --write-out '%{http_code}' http://localhost:8080/admin)" = "404"
+          test "$(curl --silent --output /dev/null --write-out '%{http_code}' http://localhost:8081/api/v1/customer/auth/me)" = "404"
       - name: Exercise backup, restore, and encryption-key rotation
         run: |
           mkdir -p ci-backups

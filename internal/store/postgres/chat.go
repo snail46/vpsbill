@@ -18,6 +18,8 @@ type ChatMessage struct {
 	Mine       bool      `json:"mine"`
 	Body       string    `json:"body"`
 	CreatedAt  time.Time `json:"created_at"`
+	// AuthorAccountID is only sent to staff, who can mute the author.
+	AuthorAccountID string `json:"author_account_id,omitempty"`
 	// authorAccountID decides Mine per viewer; it is not sent to clients.
 	authorAccountID string
 }
@@ -28,7 +30,68 @@ func (m ChatMessage) ForViewer(accountID, userID string) ChatMessage {
 	if m.AuthorType == "staff" && userID != "" {
 		m.Mine = m.authorAccountID == "staff:"+userID
 	}
+	if accountID == "" && m.AuthorType != "staff" {
+		m.AuthorAccountID = m.authorAccountID
+	}
 	return m
+}
+
+// ChatLimitError explains why a customer cannot post right now.
+type ChatLimitError struct{ Message string }
+
+func (e *ChatLimitError) Error() string { return e.Message }
+
+// Chat flood limits for customers: 5 messages per 30 seconds and 60 per
+// 10 minutes in a room.
+const (
+	chatBurst       = 5
+	chatBurstWindow = 30 * time.Second
+	chatHourly      = 60
+	chatHourlyWin   = 10 * time.Minute
+)
+
+// MuteChat stops an account posting in a room until the given time.
+func (m *MarketplaceStore) MuteChat(ctx context.Context, nodeID, accountID, staffID, reason string, until time.Time) error {
+	_, err := m.db.Exec(ctx, `
+		INSERT INTO node_chat_mutes(node_id,account_id,until,reason,created_by) VALUES($1,$2,$3,$4,nullif($5,'')::uuid)
+		ON CONFLICT(node_id,account_id) DO UPDATE SET until=excluded.until,reason=excluded.reason,created_by=excluded.created_by,created_at=now()
+	`, nodeID, accountID, until, strings.TrimSpace(reason), staffID)
+	if err == nil {
+		_, err = m.db.Exec(ctx, `INSERT INTO audit_logs(actor_type,actor_id,action,target_type,target_id,metadata) VALUES('staff',nullif($1,'')::uuid,'chat.muted','node',$2,jsonb_build_object('account_id',$3::text,'until',$4::timestamptz,'reason',$5::text))`,
+			staffID, nodeID, accountID, until, reason)
+	}
+	return err
+}
+
+// UnmuteChat lifts a mute.
+func (m *MarketplaceStore) UnmuteChat(ctx context.Context, nodeID, accountID string) error {
+	_, err := m.db.Exec(ctx, `DELETE FROM node_chat_mutes WHERE node_id=$1 AND account_id=$2`, nodeID, accountID)
+	return err
+}
+
+// ChatMute is an active mute in a room.
+type ChatMute struct {
+	AccountID   string    `json:"account_id"`
+	AccountName string    `json:"account_name"`
+	Until       time.Time `json:"until"`
+	Reason      string    `json:"reason"`
+}
+
+func (m *MarketplaceStore) ChatMutes(ctx context.Context, nodeID string) ([]ChatMute, error) {
+	rows, err := m.db.Query(ctx, `SELECT c.account_id,a.display_name,c.until,c.reason FROM node_chat_mutes c JOIN accounts a ON a.id=c.account_id WHERE c.node_id=$1 AND c.until>now() ORDER BY c.until`, nodeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]ChatMute, 0)
+	for rows.Next() {
+		var mute ChatMute
+		if err := rows.Scan(&mute.AccountID, &mute.AccountName, &mute.Until, &mute.Reason); err != nil {
+			return nil, err
+		}
+		result = append(result, mute)
+	}
+	return result, rows.Err()
 }
 
 type ChatRoom struct {
@@ -161,6 +224,24 @@ func (m *MarketplaceStore) PostChatMessage(ctx context.Context, nodeID, authorTy
 		return ChatMessage{}, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if authorType != "staff" && accountID != "" {
+		var mutedUntil *time.Time
+		var burst, recent int
+		if err := tx.QueryRow(ctx, `
+			SELECT (SELECT until FROM node_chat_mutes WHERE node_id=$1 AND account_id=$2 AND until>now()),
+			       count(*) FILTER (WHERE created_at > now() - make_interval(secs => $3)),
+			       count(*) FILTER (WHERE created_at > now() - make_interval(secs => $4))
+			FROM node_chat_messages WHERE node_id=$1 AND author_account_id=$2 AND created_at > now() - make_interval(secs => $4)
+		`, nodeID, accountID, chatBurstWindow.Seconds(), chatHourlyWin.Seconds()).Scan(&mutedUntil, &burst, &recent); err != nil {
+			return ChatMessage{}, err
+		}
+		switch {
+		case mutedUntil != nil:
+			return ChatMessage{}, &ChatLimitError{"你已被管理员禁言至 " + mutedUntil.Format("2006-01-02 15:04") + "（UTC）"}
+		case burst >= chatBurst || recent >= chatHourly:
+			return ChatMessage{}, &ChatLimitError{"发言太频繁，请稍后再发"}
+		}
+	}
 	message, err := scanChatMessage(tx.QueryRow(ctx, `
 		INSERT INTO node_chat_messages(node_id,author_type,author_user_id,author_account_id,author_name,body)
 		VALUES($1,$2,nullif($3,'')::uuid,nullif($4,'')::uuid,$5,$6)

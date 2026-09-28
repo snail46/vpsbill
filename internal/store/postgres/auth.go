@@ -49,6 +49,9 @@ type CustomerIdentity struct {
 	Role               string `json:"role"`
 	MFAEnabled         bool   `json:"mfa_enabled"`
 	MFASecretEncrypted []byte `json:"-"`
+	// EmailVerified is false until the customer opens the link mailed at
+	// sign-up; unverified accounts cannot buy or receive notifications.
+	EmailVerified bool `json:"email_verified"`
 }
 
 type CustomerSessionIdentity struct {
@@ -191,7 +194,9 @@ func (s *AuthStore) DeleteSession(ctx context.Context, tokenHash []byte) error {
 	return err
 }
 
-func (s *AuthStore) RegisterCustomer(ctx context.Context, email, displayName, passwordHash string) (CustomerIdentity, error) {
+// RegisterCustomer creates a customer. verified marks the address as
+// confirmed, for sites that cannot send mail.
+func (s *AuthStore) RegisterCustomer(ctx context.Context, email, displayName, passwordHash string, verified bool) (CustomerIdentity, error) {
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		return CustomerIdentity{}, err
@@ -201,9 +206,9 @@ func (s *AuthStore) RegisterCustomer(ctx context.Context, email, displayName, pa
 	displayName = strings.TrimSpace(displayName)
 	var identity CustomerIdentity
 	err = tx.QueryRow(ctx, `
-		INSERT INTO users(email,display_name,password_hash,status)
-		VALUES($1,$2,$3,'active') RETURNING id,email,display_name,status
-	`, email, displayName, passwordHash).Scan(&identity.UserID, &identity.Email, &identity.DisplayName, &identity.Status)
+		INSERT INTO users(email,display_name,password_hash,status,email_verified_at)
+		VALUES($1,$2,$3,'active',CASE WHEN $4::boolean THEN now() END) RETURNING id,email,display_name,status,email_verified_at IS NOT NULL
+	`, email, displayName, passwordHash, verified).Scan(&identity.UserID, &identity.Email, &identity.DisplayName, &identity.Status, &identity.EmailVerified)
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
@@ -232,11 +237,11 @@ func (s *AuthStore) RegisterCustomer(ctx context.Context, email, displayName, pa
 func (s *AuthStore) CustomerByEmail(ctx context.Context, email string) (CustomerIdentity, error) {
 	var identity CustomerIdentity
 	err := s.db.QueryRow(ctx, `
-		SELECT u.id,m.account_id,u.email,u.display_name,u.password_hash,u.status,a.status,a.default_currency,m.role,u.mfa_enabled,u.mfa_secret_encrypted
+		SELECT u.id,m.account_id,u.email,u.display_name,u.password_hash,u.status,a.status,a.default_currency,m.role,u.mfa_enabled,u.mfa_secret_encrypted,u.email_verified_at IS NOT NULL
 		FROM users u JOIN memberships m ON m.user_id=u.id JOIN accounts a ON a.id=m.account_id
 		WHERE lower(u.email)=lower($1)
 		ORDER BY CASE m.role WHEN 'owner' THEN 0 ELSE 1 END,m.created_at LIMIT 1
-	`, strings.TrimSpace(email)).Scan(&identity.UserID, &identity.AccountID, &identity.Email, &identity.DisplayName, &identity.PasswordHash, &identity.Status, &identity.AccountStatus, &identity.DefaultCurrency, &identity.Role, &identity.MFAEnabled, &identity.MFASecretEncrypted)
+	`, strings.TrimSpace(email)).Scan(&identity.UserID, &identity.AccountID, &identity.Email, &identity.DisplayName, &identity.PasswordHash, &identity.Status, &identity.AccountStatus, &identity.DefaultCurrency, &identity.Role, &identity.MFAEnabled, &identity.MFASecretEncrypted, &identity.EmailVerified)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return CustomerIdentity{}, ErrInvalidLogin
 	}
@@ -246,11 +251,11 @@ func (s *AuthStore) CustomerByEmail(ctx context.Context, email string) (Customer
 func (s *AuthStore) CustomerSessionByToken(ctx context.Context, tokenHash []byte) (CustomerSessionIdentity, error) {
 	var identity CustomerSessionIdentity
 	err := s.db.QueryRow(ctx, `
-		SELECT u.id,m.account_id,u.email,u.display_name,u.status,a.status,a.default_currency,m.role,u.mfa_enabled,s.csrf_hash,s.expires_at
+		SELECT u.id,m.account_id,u.email,u.display_name,u.status,a.status,a.default_currency,m.role,u.mfa_enabled,s.csrf_hash,s.expires_at,u.email_verified_at IS NOT NULL
 		FROM login_sessions s JOIN users u ON u.id=s.user_id JOIN memberships m ON m.user_id=u.id JOIN accounts a ON a.id=m.account_id
 		WHERE s.token_hash=$1 AND s.expires_at>now() AND u.status='active' AND a.status='active'
 		ORDER BY CASE m.role WHEN 'owner' THEN 0 ELSE 1 END,m.created_at LIMIT 1
-	`, tokenHash).Scan(&identity.UserID, &identity.AccountID, &identity.Email, &identity.DisplayName, &identity.Status, &identity.AccountStatus, &identity.DefaultCurrency, &identity.Role, &identity.MFAEnabled, &identity.CSRFHash, &identity.ExpiresAt)
+	`, tokenHash).Scan(&identity.UserID, &identity.AccountID, &identity.Email, &identity.DisplayName, &identity.Status, &identity.AccountStatus, &identity.DefaultCurrency, &identity.Role, &identity.MFAEnabled, &identity.CSRFHash, &identity.ExpiresAt, &identity.EmailVerified)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return CustomerSessionIdentity{}, ErrInvalidLogin
 	}
@@ -329,4 +334,49 @@ func (s *AuthStore) ChangePassword(ctx context.Context, userID, passwordHash str
 		return err
 	}
 	return tx.Commit(ctx)
+}
+
+// ConsumeTOTPStep records a used TOTP time step; it fails for a step at or
+// before the last one accepted, so a code cannot be replayed.
+func (s *AuthStore) ConsumeTOTPStep(ctx context.Context, userID string, step int64) (bool, error) {
+	command, err := s.db.Exec(ctx, `UPDATE users SET totp_last_step=$2 WHERE id=$1 AND coalesce(totp_last_step,-1) < $2`, userID, step)
+	if err != nil {
+		return false, err
+	}
+	return command.RowsAffected() == 1, nil
+}
+
+// CreateEmailVerification stores a verification token for a user.
+func (s *AuthStore) CreateEmailVerification(ctx context.Context, userID string, tokenHash []byte, expiresAt time.Time) error {
+	_, err := s.db.Exec(ctx, `INSERT INTO email_verifications(user_id,token_hash,expires_at) VALUES($1,$2,$3)`, userID, tokenHash, expiresAt)
+	return err
+}
+
+// RecentEmailVerifications counts verification mails sent to a user in the
+// last hour.
+func (s *AuthStore) RecentEmailVerifications(ctx context.Context, userID string) (int, error) {
+	var count int
+	err := s.db.QueryRow(ctx, `SELECT count(*) FROM email_verifications WHERE user_id=$1 AND created_at>now()-interval '1 hour'`, userID).Scan(&count)
+	return count, err
+}
+
+// ConfirmEmail uses a verification token and marks the address verified.
+func (s *AuthStore) ConfirmEmail(ctx context.Context, tokenHash []byte) (string, error) {
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	var userID string
+	err = tx.QueryRow(ctx, `UPDATE email_verifications SET used_at=now() WHERE token_hash=$1 AND used_at IS NULL AND expires_at>now() RETURNING user_id`, tokenHash).Scan(&userID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", ErrResetTokenInvalid
+	}
+	if err != nil {
+		return "", err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE users SET email_verified_at=coalesce(email_verified_at,now()),updated_at=now() WHERE id=$1`, userID); err != nil {
+		return "", err
+	}
+	return userID, tx.Commit(ctx)
 }

@@ -56,7 +56,11 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     ports:
-      - "${APP_PORT:-8080}:80"
+      # Portal and admin console. deploy.sh publishes them on all addresses
+      # (direct access) or on loopback behind Caddy, Cloudflare Tunnel or
+      # your own proxy, where the trusted listeners 8080/8081 are used.
+      - "${PORTAL_BIND:-0.0.0.0}:${PORTAL_PORT:-8080}:${PORTAL_TARGET:-80}"
+      - "${ADMIN_BIND:-0.0.0.0}:${ADMIN_PORT:-8081}:${ADMIN_TARGET:-81}"
     depends_on:
       api:
         condition: service_healthy
@@ -67,6 +71,7 @@ services:
     restart: unless-stopped
     environment:
       DOMAIN: ${DOMAIN:-localhost}
+      ADMIN_DOMAIN: ${ADMIN_DOMAIN:-admin.localhost}
     ports:
       - "80:80"
       - "443:443"
@@ -78,8 +83,21 @@ services:
     depends_on:
       web:
         condition: service_started
-      api:
-        condition: service_healthy
+
+  cloudflared:
+    # Cloudflare Tunnel for servers without a public IP. Create a tunnel in
+    # the Cloudflare dashboard, point its public hostnames at
+    # http://web:8080 (portal) and http://web:8081 (admin), and put the
+    # tunnel token in CLOUDFLARE_TUNNEL_TOKEN.
+    image: cloudflare/cloudflared:latest
+    profiles: ["tunnel"]
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
+    depends_on:
+      web:
+        condition: service_started
 
 volumes:
   postgres_data:

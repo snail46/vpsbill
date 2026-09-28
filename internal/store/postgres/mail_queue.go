@@ -2,8 +2,10 @@ package postgres
 
 import (
 	"context"
+	"errors"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -23,9 +25,14 @@ type QueuedMail struct {
 
 // EnqueueMail adds a message unless one with the same dedup key was queued
 // before; an empty key never deduplicates. It reports whether a row was added.
+// EnqueueMail queues a message. Addresses that belong to a user who has not
+// verified them are skipped, so a sign-up with someone else's address
+// cannot make the platform mail them.
 func (s *MailStore) EnqueueMail(ctx context.Context, recipient, subject, body, dedupKey string) (bool, error) {
 	command, err := s.db.Exec(ctx, `
-		INSERT INTO mail_queue(recipient,subject,body,dedup_key) VALUES($1,$2,$3,nullif($4,''))
+		INSERT INTO mail_queue(recipient,subject,body,dedup_key)
+		SELECT $1,$2,$3,nullif($4,'')
+		WHERE NOT EXISTS(SELECT 1 FROM users u WHERE lower(u.email)=lower($1) AND u.email_verified_at IS NULL)
 		ON CONFLICT (dedup_key) DO NOTHING
 	`, recipient, subject, body, dedupKey)
 	if err != nil {
@@ -146,12 +153,15 @@ type TrafficTarget struct {
 	TrafficGB    int
 	Email        string
 	CustomerName string
+	// LockedMonth is the UTC month (YYYY-MM) the instance was stopped for
+	// using up its allowance, or empty.
+	LockedMonth string
 	NodeEndpoint
 }
 
 func (s *MailStore) TrafficTargets(ctx context.Context) ([]TrafficTarget, error) {
 	rows, err := s.db.Query(ctx, `
-		SELECT DISTINCT ON (s.id) s.id,s.instance_name,p.name,p.traffic_gb,u.email,u.display_name,
+		SELECT DISTINCT ON (s.id) s.id,s.instance_name,p.name,p.traffic_gb,u.email,u.display_name,coalesce(s.traffic_locked_month,''),
 		       n.provider_type,n.base_url,n.api_key_ciphertext,n.provider_options
 		FROM services s
 		JOIN plans p ON p.id=s.plan_id
@@ -168,7 +178,7 @@ func (s *MailStore) TrafficTargets(ctx context.Context) ([]TrafficTarget, error)
 	result := make([]TrafficTarget, 0)
 	for rows.Next() {
 		var row TrafficTarget
-		if err := rows.Scan(&row.ServiceID, &row.InstanceName, &row.PlanName, &row.TrafficGB, &row.Email, &row.CustomerName,
+		if err := rows.Scan(&row.ServiceID, &row.InstanceName, &row.PlanName, &row.TrafficGB, &row.Email, &row.CustomerName, &row.LockedMonth,
 			&row.ProviderType, &row.BaseURL, &row.APIKeyCiphertext, &row.ProviderOptions); err != nil {
 			return nil, err
 		}
@@ -177,9 +187,55 @@ func (s *MailStore) TrafficTargets(ctx context.Context) ([]TrafficTarget, error)
 	return result, rows.Err()
 }
 
-func (s *MailStore) RecordServiceTraffic(ctx context.Context, serviceID string, usedBytes int64) error {
-	_, err := s.db.Exec(ctx, `UPDATE services SET traffic_used_bytes=$2,traffic_measured_at=now() WHERE id=$1`, serviceID, usedBytes)
+// RecordServiceTraffic stores this month's two-way traffic; rx and tx are
+// nil when the backend reports only a total.
+func (s *MailStore) RecordServiceTraffic(ctx context.Context, serviceID string, totalBytes int64, rx, tx *int64) error {
+	_, err := s.db.Exec(ctx, `UPDATE services SET traffic_used_bytes=$2,traffic_rx_bytes=$3,traffic_tx_bytes=$4,traffic_measured_at=now() WHERE id=$1`, serviceID, totalBytes, rx, tx)
 	return err
+}
+
+// LockForTraffic stops an instance that used up its monthly allowance and
+// blocks starting it until the month changes. It reports whether the lock
+// is new.
+func (s *MailStore) LockForTraffic(ctx context.Context, serviceID, month string) (bool, error) {
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	command, err := tx.Exec(ctx, `UPDATE services SET traffic_locked_month=$2,desired_runtime_status='stopped',updated_at=now() WHERE id=$1 AND status IN ('active','overdue') AND coalesce(traffic_locked_month,'')<>$2`, serviceID, month)
+	if err != nil || command.RowsAffected() == 0 {
+		return false, err
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO provisioning_jobs(service_id,action,deduplication_key,payload) VALUES($1,'stop',$2,jsonb_build_object('source','traffic_limit')) ON CONFLICT(deduplication_key) DO NOTHING`, serviceID, serviceID+":traffic-stop:"+month); err != nil {
+		return false, err
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO audit_logs(actor_type,action,target_type,target_id,metadata) VALUES('system','service.traffic_locked','service',$1,jsonb_build_object('month',$2::text))`, serviceID, month); err != nil {
+		return false, err
+	}
+	return true, tx.Commit(ctx)
+}
+
+// UnlockTraffic lifts a lock from an earlier month and starts the instance
+// again.
+func (s *MailStore) UnlockTraffic(ctx context.Context, serviceID, month string) error {
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	var locked string
+	err = tx.QueryRow(ctx, `UPDATE services SET traffic_locked_month=NULL,desired_runtime_status='running',updated_at=now() WHERE id=$1 AND traffic_locked_month IS NOT NULL AND traffic_locked_month<>$2 AND status='active' RETURNING $2::text`, serviceID, month).Scan(&locked)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO provisioning_jobs(service_id,action,deduplication_key,payload) VALUES($1,'start',$2,jsonb_build_object('source','traffic_reset')) ON CONFLICT(deduplication_key) DO NOTHING`, serviceID, serviceID+":traffic-start:"+month); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 // NodeWatch is a node with a rental expiry or a transfer allowance, plus the

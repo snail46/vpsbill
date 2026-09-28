@@ -349,7 +349,7 @@ func TestBillingLifecycleIntegration(t *testing.T) {
 	if _, err = db.Exec(ctx, `UPDATE services SET node_id=$2 WHERE id=$1`, serviceID, nodeID); err != nil {
 		t.Fatal(err)
 	}
-	if err = mailStore.RecordServiceTraffic(ctx, serviceID, 5<<30); err != nil {
+	if err = mailStore.RecordServiceTraffic(ctx, serviceID, 5<<30, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	watches, err := mailStore.NodeWatches(ctx)

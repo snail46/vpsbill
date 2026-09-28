@@ -33,19 +33,28 @@ func TOTPUri(issuer, email, secret string) string {
 }
 
 func VerifyTOTP(secret, code string, now time.Time) bool {
+	_, ok := MatchTOTP(secret, code, now)
+	return ok
+}
+
+// MatchTOTP checks a code against the current 30-second step and its
+// neighbours and returns the step it matched, so callers can refuse a code
+// that was already used.
+func MatchTOTP(secret, code string, now time.Time) (int64, bool) {
 	code = strings.TrimSpace(code)
 	if len(code) != 6 {
-		return false
+		return 0, false
 	}
 	if _, err := strconv.Atoi(code); err != nil {
-		return false
+		return 0, false
 	}
 	for offset := -1; offset <= 1; offset++ {
-		if totpCode(secret, now.Add(time.Duration(offset)*30*time.Second)) == code {
-			return true
+		at := now.Add(time.Duration(offset) * 30 * time.Second)
+		if totpCode(secret, at) == code {
+			return at.Unix() / 30, true
 		}
 	}
-	return false
+	return 0, false
 }
 
 func totpCode(secret string, now time.Time) string {

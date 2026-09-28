@@ -17,7 +17,8 @@ import {
 } from './api'
 import ChatRoom from './ChatRoom'
 import { CouponField, CouponManager } from './Coupons'
-import { TicketConversation, ticketStatusLabel } from './App'
+import { ReportDialog } from './Reports'
+import { TicketConversation, ticketStatusLabel } from './shared/ui'
 import { ticketRequestBody, useAttachmentLimit } from './TicketAttachments'
 import { walletMoney } from './Wallet'
 
@@ -109,6 +110,7 @@ function PlanTerms({ plan }: { plan: PlanRecord }) {
 function Market({ customer }: { customer: CustomerIdentity }) {
   const [market, setMarket] = useState<MarketRecord | null>(null)
   const [buying, setBuying] = useState<{ node: HostedNodeRecord; plan: PlanRecord } | null>(null)
+  const [reporting, setReporting] = useState<HostedNodeRecord | null>(null)
   const [error, setError] = useState('')
 
   const load = () =>
@@ -157,9 +159,14 @@ function Market({ customer }: { customer: CustomerIdentity }) {
               </div>
               <div>
                 <dt>剩余可售</dt>
-                <dd>{node.free_vcpu} 核 · {node.free_ram_mb} MB · {node.free_disk_gb} GB</dd>
+                <dd>{node.free_vcpu} 核 · {node.free_ram_mb} MB · {node.free_disk_gb} GB（机主 Agent 上报）</dd>
               </div>
             </dl>
+            {!node.mine && (
+              <button className="text-button report-link" onClick={() => setReporting(node)}>
+                举报资源不符或超售
+              </button>
+            )}
             <div className="market-plans">
               {node.plans.map(plan => (
                 <div key={plan.id} className="market-plan">
@@ -187,6 +194,7 @@ function Market({ customer }: { customer: CustomerIdentity }) {
         ))}
         {market && !market.nodes.length && <div className="empty-card">托管市场暂时没有在售母机。</div>}
       </div>
+      {reporting && <ReportDialog nodeID={reporting.id} nodeName={reporting.name} onClose={() => setReporting(null)} />}
       {buying && <BuyDialog customer={customer} node={buying.node} plan={buying.plan} onClose={() => setBuying(null)} onDone={() => void load()} />}
     </>
   )

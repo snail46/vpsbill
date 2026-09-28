@@ -2,9 +2,7 @@ package notify
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -95,13 +93,33 @@ func (n *Notifier) collectTraffic(ctx context.Context) {
 		requestCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 		value, err := metrics.InstanceTraffic(requestCtx, target.InstanceName)
 		cancel()
-		used, found := TrafficUsedBytes(value)
+		traffic, found := provider.ParseTraffic(value)
 		if err != nil || !found {
 			continue
 		}
-		if err := n.store.RecordServiceTraffic(ctx, target.ServiceID, used); err != nil {
+		used := traffic.TotalBytes
+		var rx, tx *int64
+		if traffic.Split {
+			rx, tx = &traffic.RXBytes, &traffic.TXBytes
+		}
+		if err := n.store.RecordServiceTraffic(ctx, target.ServiceID, used, rx, tx); err != nil {
 			n.logger.Error("record service traffic", "service_id", target.ServiceID, "error", err)
 			continue
+		}
+		// Traffic counts both directions. An instance over its allowance is
+		// stopped until the month (UTC, as the counters reset) changes.
+		lockMonth := n.now().UTC().Format("2006-01")
+		if target.LockedMonth != "" && target.LockedMonth != lockMonth {
+			if err := n.store.UnlockTraffic(ctx, target.ServiceID, lockMonth); err != nil {
+				n.logger.Error("lift traffic lock", "service_id", target.ServiceID, "error", err)
+			}
+		}
+		if target.TrafficGB > 0 && used > int64(target.TrafficGB)<<30 {
+			if locked, err := n.store.LockForTraffic(ctx, target.ServiceID, lockMonth); err != nil {
+				n.logger.Error("stop over-limit instance", "service_id", target.ServiceID, "error", err)
+			} else if locked {
+				n.logger.Warn("instance stopped for exceeding its traffic", "service_id", target.ServiceID, "used_bytes", used)
+			}
 		}
 		if target.TrafficGB <= 0 || !preferences.CustomerTraffic || !n.enabled() {
 			continue
@@ -111,13 +129,17 @@ func (n *Notifier) collectTraffic(ctx context.Context) {
 			continue
 		}
 		subject := fmt.Sprintf("[%s] 实例 %s 本月流量已用 %d%%", n.siteName(), target.InstanceName, threshold)
-		advice := "请留意用量，超出后可能会被限速或暂停网络。"
+		advice := "流量按上行加下行双向计算，超出后实例会被停止，下月 1 日自动恢复。"
 		if threshold >= 100 {
 			subject = fmt.Sprintf("[%s] 实例 %s 本月流量已用尽", n.siteName(), target.InstanceName)
-			advice = "本月流量已用尽，网络可能已被限速或暂停，下月 1 日自动重置。如需帮助请提交工单。"
+			advice = "本月流量（上行加下行）已用尽，实例已停止，下月 1 日自动重置并开机。如需帮助请提交工单。"
 		}
-		body := fmt.Sprintf("您好，%s：\n\n您的实例 %s（%s）本月已使用 %s，套餐月流量 %d GB。\n%s\n\n查看实例：%s\n",
-			target.CustomerName, target.InstanceName, target.PlanName, formatBytes(used), target.TrafficGB, advice, n.link("/portal/services"))
+		detail := ""
+		if traffic.Split {
+			detail = fmt.Sprintf("（下行 %s，上行 %s）", formatBytes(traffic.RXBytes), formatBytes(traffic.TXBytes))
+		}
+		body := fmt.Sprintf("您好，%s：\n\n您的实例 %s（%s）本月已使用 %s%s，套餐月流量 %d GB。\n%s\n\n查看实例：%s\n",
+			target.CustomerName, target.InstanceName, target.PlanName, formatBytes(used), detail, target.TrafficGB, advice, n.link("/portal/services"))
 		n.enqueue(ctx, target.Email, subject, body, fmt.Sprintf("service-traffic:%s:%s:%d", target.ServiceID, month, threshold))
 	}
 }
@@ -140,7 +162,7 @@ func (n *Notifier) remindNodes(ctx context.Context) {
 	var admins []string
 	for _, node := range nodes {
 		// Hosted nodes remind their host; platform nodes the merchant staff.
-		recipients, manage := admins, n.link("/admin/nodes")
+		recipients, manage := admins, n.adminLink("/admin/nodes")
 		if node.OwnerEmail != "" {
 			recipients, manage = []string{node.OwnerEmail}, n.link("/portal/hosting")
 		} else if admins == nil {
@@ -200,30 +222,10 @@ func crossedThreshold(used, limit int64, alertPercent int) (int, bool) {
 	}
 }
 
-// TrafficUsedBytes reads total_used_bytes from a provider traffic document.
+// TrafficUsedBytes is the two-way total of a provider traffic document.
 func TrafficUsedBytes(value any) (int64, bool) {
-	if value == nil {
-		return 0, false
-	}
-	data, err := json.Marshal(value)
-	if err != nil {
-		return 0, false
-	}
-	var document struct {
-		TotalUsedBytes *json.Number `json:"total_used_bytes"`
-	}
-	decoder := json.NewDecoder(strings.NewReader(string(data)))
-	decoder.UseNumber()
-	if err := decoder.Decode(&document); err != nil || document.TotalUsedBytes == nil {
-		return 0, false
-	}
-	if whole, err := document.TotalUsedBytes.Int64(); err == nil {
-		return whole, true
-	}
-	if float, err := strconv.ParseFloat(document.TotalUsedBytes.String(), 64); err == nil {
-		return int64(float), true
-	}
-	return 0, false
+	traffic, ok := provider.ParseTraffic(value)
+	return traffic.TotalBytes, ok
 }
 
 func formatBytes(value int64) string {

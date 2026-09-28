@@ -15,7 +15,7 @@ chmod +x deploy.sh
 ./deploy.sh
 ```
 
-脚本首次运行会从 `.env.example` 生成 `.env`，只随机生成数据库密码、会话密钥和数据加密主密钥，然后构建并启动 PostgreSQL、API 和 Web 容器。默认入口为 `http://服务器IP:8080`；填写 `DOMAIN` 后自动启用 Caddy HTTPS。
+脚本首次运行会从 `.env.example` 生成 `.env`，只随机生成数据库密码、会话密钥和数据加密主密钥，然后构建并启动 PostgreSQL、API 和 Web 容器。客户前台和管理后台分开监听（默认 8080 和 8081），可以选择直接 IP 访问、Caddy 自动 HTTPS、Cloudflare Tunnel（无公网 IP）或自己的反向代理，见 [访问方式](docs/ACCESS.md)。
 
 首次打开页面时会进入一次性安装向导，图形化设置站点、通知、Metrics、自动化周期和唯一的初始超级管理员。支付网关在登录后的「支付网关」菜单配置。节点 API Key 与支付密钥等敏感参数均使用 AES-256-GCM 主密钥加密保存。
 
@@ -27,7 +27,7 @@ chmod +x deploy.sh
 
 后台「站点设置」可随时修改站点名称、公开访问地址、时区、续费与自动化周期、通知 Webhook、发信邮箱（SMTP）和工单附件大小。配置 SMTP 后：客户可在登录页通过邮件自助找回密码，并收到实例即将到期、流量告警和工单回复邮件；管理员收到母鸡即将到期、母鸡流量告警和新工单邮件，各类通知可单独开关。未配置 SMTP 时，管理员可在「客户管理」为客户生成一次性重置链接。工单支持图片附件（PNG/JPEG/GIF/WebP，每条最多 5 张，单张大小可设）。
 
-客户有**账户余额**：可充值，可直接支付新购和续费账单；余额和托管收益只能在平台内消费，不能提现。**托管中心**让用户把自己的服务器（Hatch Agent，LXC / Podman）接入平台，自定套餐和价格出售给其他用户：平台托管资金、按天把收益结算给机主并收取手续费（默认 20%），母鸡离线满 24 小时或机主下架时按实例剩余价值 2 倍清退；托管套餐可设置描述、每人限购和早期全额退款（购买 1 小时内且流量未超 1GB），买家可随时申请退款，其余情况按剩余天数比例退到余额；托管实例的工单由机主优先处理，每台托管母机有实时聊天室，管理员可以查看和介入。**交易市场**让用户转让持有满 31 天的运行中实例，用余额成交，交易不退款。**优惠码**分平台（管理员，平台套餐）和机主（自己的托管套餐）两条线，可设最大使用次数、到期日期和续费同价。详见 [账户余额与托管中心](docs/HOSTING.md)。
+客户有**账户余额**：可充值，可直接支付新购和续费账单；余额和托管收益只能在平台内消费，不能提现。**托管中心**让用户把自己的服务器（Hatch Agent，LXC / Podman）接入平台，自定套餐和价格出售给其他用户：平台托管资金、按天把收益结算给机主并收取手续费（默认 20%），母鸡离线满 24 小时或机主下架时按实例剩余价值 2 倍清退；托管套餐可设置描述、每人限购和早期全额退款（购买 1 小时内且流量未超 1GB），买家可随时申请退款，其余情况按剩余天数比例退到余额；托管实例的工单由机主优先处理，每台托管母机有实时聊天室，管理员可以查看和介入。**交易市场**让用户转让持有满 31 天的运行中实例，用余额成交，平台收 20% 手续费，挂售期间实例停机冻结，交易不退款。全平台流量按上下行双向合计计算。**优惠码**分平台（管理员，平台套餐）和机主（自己的托管套餐）两条线，可设最大使用次数、到期日期和续费同价。详见 [账户余额与托管中心](docs/HOSTING.md)。
 
 「节点对接」支持三种母鸡后端：CLICD、LXDAPI（xkatld/lxdapi-web-server）和自研的 Hatch Agent（LXD / Podman，Agent 主动连入，母鸡无需开放管理端口）。新增节点表单按对接方式动态生成，客户中心按节点能力显示可用操作。「宿主机探针」一级页展示在线状态与调度容量；CLICD 详情页把 dashboard、host-info、host-history、host-report 四个接口完整转换为资源摘要、历史曲线、硬件/网络表格和结构化字段。「运营概览」展示 30 天实收、待收账款、客户、VPS、工单、自动化任务和宿主机健康数据。
 
@@ -65,8 +65,12 @@ docker-compose.yml   # 使用 deploy/docker-compose.image.yml 的内容
 
 ```dotenv
 IMAGE_TAG=latest
-APP_PORT=127.0.0.1:8080
+PORTAL_BIND=127.0.0.1
+ADMIN_BIND=127.0.0.1
+PORTAL_TARGET=8080
+ADMIN_TARGET=8081
 DOMAIN=billing.example.com
+ADMIN_DOMAIN=admin.example.com
 POSTGRES_DB=vpsbill
 POSTGRES_USER=vpsbill
 POSTGRES_PASSWORD=随机长密码
@@ -80,8 +84,12 @@ ENCRYPTION_KEY=64位十六进制随机值
 umask 077
 cat >.env <<EOF
 IMAGE_TAG=latest
-APP_PORT=127.0.0.1:8080
+PORTAL_BIND=127.0.0.1
+ADMIN_BIND=127.0.0.1
+PORTAL_TARGET=8080
+ADMIN_TARGET=8081
 DOMAIN=billing.example.com
+ADMIN_DOMAIN=admin.example.com
 POSTGRES_DB=vpsbill
 POSTGRES_USER=vpsbill
 POSTGRES_PASSWORD=$(openssl rand -hex 24)
@@ -96,14 +104,14 @@ EOF
 docker compose --env-file .env -f docker-compose.yml --profile tls up -d --pull always
 ```
 
-该命令会拉取新镜像、创建 PostgreSQL/API/Web/Caddy 容器、等待数据库和 API 健康后启动入口。首次打开域名会进入图形化安装页，其余参数无需写入 `.env`。验证：
+该命令会拉取新镜像、创建 PostgreSQL/API/Web/Caddy 容器、等待数据库和 API 健康后启动入口。首次打开后台域名会进入图形化安装页，其余参数无需写入 `.env`。验证：
 
 ```sh
 docker compose --env-file .env -f docker-compose.yml ps
 curl --fail https://billing.example.com/health/ready
 ```
 
-不使用域名的临时 HTTP 模式将 `DOMAIN` 留空、配置 `APP_PORT=8080`，然后去掉 `--profile tls`。HTTP 模式不适合正式业务。容器启动后访问页面完成图形化安装。
+不使用域名的临时 HTTP 模式去掉上面四个 `*_BIND` / `*_TARGET` 变量和 `--profile tls`，前台在 8080、后台在 8081。Cloudflare Tunnel 和自己的反向代理见 [访问方式](docs/ACCESS.md)。HTTP 模式不适合正式业务。容器启动后访问页面完成图形化安装。
 
 更新 `latest` 镜像仍使用同一条 `up -d --pull always` 命令。固定 SHA 标签时，应先完成数据库备份，再把 `IMAGE_TAG` 修改为新的 Actions 提交标签。数据库卷不会因容器更新而删除；不要运行 `down -v`。
 

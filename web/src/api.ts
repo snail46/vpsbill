@@ -16,6 +16,7 @@ export type CustomerIdentity = {
   default_currency: string
   role: string
   mfa_enabled: boolean
+  email_verified: boolean
 }
 
 export type NodeRecord = {
@@ -240,6 +241,10 @@ export type CustomerServiceRecord = {
   acquired_at?: string
   listing_id?: string
   listing_price_minor?: number
+  traffic_locked_month?: string
+  traffic_rx_bytes?: number | null
+  traffic_tx_bytes?: number | null
+  traffic_used_bytes?: number | null
 }
 
 // Overdue services keep running through the grace period, so customers can
@@ -346,10 +351,13 @@ export type AuditLogRecord = { id: number; actor_type: string; actor_id?: string
 
 type Envelope<T> = { data: T; message?: string; error?: string }
 
-function csrfToken() {
+// Staff and customer sessions use separate cookies; staff APIs live under
+// /api/v1/admin and /api/v1/auth.
+function csrfToken(path: string) {
+  const name = /^\/api\/v1\/(admin|auth)\//.test(path) ? 'cb_admin_csrf=' : 'cb_csrf='
   const row = document.cookie
     .split('; ')
-    .find((item) => item.startsWith('cb_csrf='))
+    .find((item) => item.startsWith(name))
   return row ? decodeURIComponent(row.split('=').slice(1).join('=')) : ''
 }
 
@@ -358,7 +366,7 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   headers.set('Accept', 'application/json')
   if (typeof init.body === 'string') headers.set('Content-Type', 'application/json')
   if (init.method && !['GET', 'HEAD'].includes(init.method.toUpperCase())) {
-    headers.set('X-CSRF-Token', csrfToken())
+    headers.set('X-CSRF-Token', csrfToken(path))
   }
   const response = await fetch(path, { ...init, headers, credentials: 'same-origin' })
   if (response.status === 204) return undefined as T
@@ -423,6 +431,9 @@ export type HostedNodeRecord = {
   capacity_vcpu: number
   capacity_ram_mb: number
   capacity_disk_gb: number
+  capacity_cap_vcpu?: number | null
+  capacity_cap_ram_mb?: number | null
+  capacity_cap_disk_gb?: number | null
   free_vcpu: number
   free_ram_mb: number
   free_disk_gb: number
@@ -446,6 +457,7 @@ export type HostingRecord = {
   enabled: boolean
   fee_percent: number
   offline_hours: number
+  trade_fee_percent: number
   rules: string[]
   nodes: HostedNodeRecord[]
   regions: RegionRecord[]
@@ -474,6 +486,7 @@ export type ChatMessageRecord = {
   mine: boolean
   body: string
   created_at: string
+  author_account_id?: string
 }
 export type ChatRoomRecord = {
   node_id: string
@@ -546,6 +559,11 @@ export type TradeListingRecord = {
   region_name: string
   host_name?: string
   node_online: boolean
+  traffic_bytes: number
+  traffic_rx_bytes: number | null
+  traffic_tx_bytes: number | null
+  fee_minor?: number
+  seller_proceeds_minor?: number
   billing_cycle: string
   expires_at: string | null
   renewal_minor: number | null
@@ -554,4 +572,34 @@ export type TradeListingRecord = {
   sold_at?: string
 }
 
-export type TradeRecord = { listings: TradeListingRecord[]; mine: TradeListingRecord[]; hold_days: number }
+export type TradeRecord = { listings: TradeListingRecord[]; mine: TradeListingRecord[]; hold_days: number; fee_percent: number; min_remaining_days: number }
+
+export type ReportRecord = {
+  id: string
+  target_type: 'node' | 'chat_message'
+  node_id: string
+  node_name: string
+  host_name: string
+  message_id?: number
+  message_body?: string
+  message_author?: string
+  message_author_account_id?: string
+  reason: string
+  detail: string
+  reporter_name: string
+  status: 'open' | 'resolved' | 'dismissed'
+  resolution?: string
+  created_at: string
+  resolved_at?: string
+}
+
+export type ChatMuteRecord = { account_id: string; account_name: string; until: string; reason: string }
+
+export const reportReasons: Record<string, string> = {
+  resources: '实际资源与宣传不符',
+  oversell: '疑似超售',
+  false_info: '位置、线路等信息不实',
+  abuse: '辱骂或骚扰',
+  spam: '广告或刷屏',
+  other: '其他',
+}

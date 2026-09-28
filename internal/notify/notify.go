@@ -66,6 +66,15 @@ func (n *Notifier) link(path string) string {
 	return strings.TrimRight(n.settings.Current().PublicURL, "/") + path
 }
 
+// adminLink points into the admin console, which may have its own address.
+func (n *Notifier) adminLink(path string) string {
+	current := n.settings.Current()
+	if current.AdminURL != "" {
+		return strings.TrimRight(current.AdminURL, "/") + path
+	}
+	return strings.TrimRight(current.PublicURL, "/") + path
+}
+
 func (n *Notifier) location() *time.Location {
 	if location, err := time.LoadLocation(n.settings.Current().Timezone); err == nil {
 		return location

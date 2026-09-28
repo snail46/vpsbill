@@ -649,6 +649,9 @@ func (a *marketplaceAPI) adminSetListing(w http.ResponseWriter, r *http.Request)
 type chatViewer struct {
 	accountID, userID, authorType, name string
 	canPost                             bool
+	// stillMember is re-checked while a stream is open, so a buyer who
+	// sold or lost their instance drops out of the room; nil for staff.
+	stillMember func(context.Context) bool
 }
 
 func (a *marketplaceAPI) customerChatViewer(w http.ResponseWriter, r *http.Request) (chatViewer, bool) {
@@ -668,7 +671,11 @@ func (a *marketplaceAPI) customerChatViewer(w http.ResponseWriter, r *http.Reque
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "internal_error"})
 		return chatViewer{}, false
 	}
-	return chatViewer{accountID: identity.AccountID, userID: identity.UserID, authorType: role, name: name, canPost: !retired}, true
+	stillMember := func(ctx context.Context) bool {
+		role, _, err := a.store.ChatRole(ctx, nodeID, identity.AccountID)
+		return err == nil && role != ""
+	}
+	return chatViewer{accountID: identity.AccountID, userID: identity.UserID, authorType: role, name: name, canPost: !retired, stillMember: stillMember}, true
 }
 
 func (a *marketplaceAPI) staffChatViewer(w http.ResponseWriter, r *http.Request) (chatViewer, bool) {
@@ -757,6 +764,11 @@ func (a *marketplaceAPI) postChat(w http.ResponseWriter, r *http.Request, viewer
 		return
 	}
 	message, err := a.store.PostChatMessage(r.Context(), r.PathValue("node"), viewer.authorType, viewer.userID, viewer.accountID, viewer.name, input.Body)
+	var limited *postgres.ChatLimitError
+	if errors.As(err, &limited) {
+		writeJSON(w, http.StatusTooManyRequests, map[string]any{"error": "chat_limited", "message": limited.Message})
+		return
+	}
 	if err != nil {
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "invalid_message", "message": "消息不能为空，最多 2000 字"})
 		return
@@ -802,6 +814,10 @@ func (a *marketplaceAPI) chatStream(w http.ResponseWriter, r *http.Request, view
 		case <-ctx.Done():
 			return
 		case <-ping.C:
+			if viewer.stillMember != nil && !viewer.stillMember(ctx) {
+				_ = conn.Close(websocket.StatusPolicyViolation, "no longer a member of this room")
+				return
+			}
 			pingCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 			err := conn.Ping(pingCtx)
 			cancel()

@@ -27,23 +27,26 @@ var (
 type Runtime struct {
 	Installed                    bool
 	AppName, PublicURL, Timezone string
-	PaymentProviderName          string
-	PaymentCheckoutURL           string
-	PaymentWebhookSecret         string
-	NotificationWebhookURL       string
-	NotificationWebhookSecret    string
-	MetricsToken                 string
-	WorkerPollInterval           time.Duration
-	ReconcileInterval            time.Duration
-	LifecycleInterval            time.Duration
-	RenewalLeadTime              time.Duration
-	OverdueGracePeriod           time.Duration
-	TerminationRetention         time.Duration
-	PaymentGateway               PaymentGatewayConfig
-	SMTP                         mail.Config
-	MailNotifications            MailNotifications
-	TicketAttachmentMaxMB        int
-	Marketplace                  MarketplaceSettings
+	// AdminURL is where staff reach the admin console when it is served on
+	// its own address; empty means PublicURL.
+	AdminURL                  string
+	PaymentProviderName       string
+	PaymentCheckoutURL        string
+	PaymentWebhookSecret      string
+	NotificationWebhookURL    string
+	NotificationWebhookSecret string
+	MetricsToken              string
+	WorkerPollInterval        time.Duration
+	ReconcileInterval         time.Duration
+	LifecycleInterval         time.Duration
+	RenewalLeadTime           time.Duration
+	OverdueGracePeriod        time.Duration
+	TerminationRetention      time.Duration
+	PaymentGateway            PaymentGatewayConfig
+	SMTP                      mail.Config
+	MailNotifications         MailNotifications
+	TicketAttachmentMaxMB     int
+	Marketplace               MarketplaceSettings
 }
 
 // MarketplaceSettings controls the hosting center: whether customers can
@@ -53,10 +56,12 @@ type MarketplaceSettings struct {
 	Enabled      bool    `json:"enabled"`
 	FeePercent   float64 `json:"fee_percent"`
 	OfflineHours int     `json:"offline_hours"`
+	// TradeFeePercent is taken from each trading market sale.
+	TradeFeePercent float64 `json:"trade_fee_percent"`
 }
 
 func DefaultMarketplaceSettings() MarketplaceSettings {
-	return MarketplaceSettings{Enabled: true, FeePercent: 20, OfflineHours: 24}
+	return MarketplaceSettings{Enabled: true, FeePercent: 20, OfflineHours: 24, TradeFeePercent: 20}
 }
 
 type PaymentGatewayConfig struct {
@@ -254,12 +259,12 @@ func (m *Manager) reload(ctx context.Context) error {
 		payment_gateway_type,payment_gateway_config_encrypted,
 		smtp_host,smtp_port,smtp_username,smtp_password_encrypted,smtp_from,smtp_security,
 		mail_notifications,ticket_attachment_max_mb,
-		marketplace_enabled,marketplace_fee_percent::float8,marketplace_offline_hours
+		marketplace_enabled,marketplace_fee_percent::float8,marketplace_offline_hours,trade_fee_percent::float8,admin_url
 		FROM system_settings WHERE singleton=true`).Scan(&v.AppName, &v.PublicURL, &v.Timezone, &v.PaymentProviderName, &v.PaymentCheckoutURL,
 		&payment, &v.NotificationWebhookURL, &notification, &metrics, &poll, &reconcile, &lifecycle, &lead, &grace, &retention, &gatewayType, &gatewayConfig,
 		&v.SMTP.Host, &v.SMTP.Port, &v.SMTP.Username, &smtpPassword, &v.SMTP.From, &v.SMTP.Security,
 		&mailNotifications, &v.TicketAttachmentMaxMB,
-		&v.Marketplace.Enabled, &v.Marketplace.FeePercent, &v.Marketplace.OfflineHours)
+		&v.Marketplace.Enabled, &v.Marketplace.FeePercent, &v.Marketplace.OfflineHours, &v.Marketplace.TradeFeePercent, &v.AdminURL)
 	if err != nil {
 		return err
 	}

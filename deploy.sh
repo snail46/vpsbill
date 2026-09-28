@@ -47,18 +47,63 @@ if [ "$MODE" = "--init" ]; then
   exit 0
 fi
 
-DOMAIN=$(sed -n 's/^DOMAIN=//p' "$ENV_FILE")
-if [ -n "$DOMAIN" ]; then
-  APP_PORT=$(sed -n 's/^APP_PORT=//p' "$ENV_FILE")
-  case "$APP_PORT" in
-    127.0.0.1:*|\[::1\]:*) ;;
-    *)
-      echo "When DOMAIN is set, APP_PORT must bind to loopback, for example 127.0.0.1:8080"
-      exit 1
-      ;;
-  esac
-  docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" --profile tls up -d --build
-else
-  docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d --build
+setting() { sed -n "s/^$1=//p" "$ENV_FILE" | tail -n 1; }
+
+ACCESS_MODE=$(setting ACCESS_MODE)
+DOMAIN=$(setting DOMAIN)
+ADMIN_DOMAIN=$(setting ADMIN_DOMAIN)
+PORTAL_PORT=$(setting PORTAL_PORT)
+ADMIN_PORT=$(setting ADMIN_PORT)
+# Older .env files used APP_PORT (optionally with a bind address) and
+# enabled Caddy whenever DOMAIN was set.
+if [ -z "$PORTAL_PORT" ]; then
+  PORTAL_PORT=$(setting APP_PORT | sed 's/.*://')
 fi
-echo "VPSBill is starting. Open the server address and complete the Web installer."
+PORTAL_PORT=${PORTAL_PORT:-8080}
+ADMIN_PORT=${ADMIN_PORT:-8081}
+if [ -z "$ACCESS_MODE" ]; then
+  if [ -n "$DOMAIN" ]; then ACCESS_MODE=caddy; else ACCESS_MODE=direct; fi
+fi
+
+PROFILES=""
+case "$ACCESS_MODE" in
+  direct)
+    PORTAL_BIND=0.0.0.0; ADMIN_BIND=0.0.0.0; PORTAL_TARGET=80; ADMIN_TARGET=81
+    ;;
+  caddy)
+    if [ -z "$DOMAIN" ] || [ -z "$ADMIN_DOMAIN" ]; then
+      echo "ACCESS_MODE=caddy needs DOMAIN (portal) and ADMIN_DOMAIN (admin console) in .env"
+      exit 1
+    fi
+    PORTAL_BIND=127.0.0.1; ADMIN_BIND=127.0.0.1; PORTAL_TARGET=8080; ADMIN_TARGET=8081
+    PROFILES="--profile tls"
+    ;;
+  cloudflare)
+    if [ -z "$(setting CLOUDFLARE_TUNNEL_TOKEN)" ]; then
+      echo "ACCESS_MODE=cloudflare needs CLOUDFLARE_TUNNEL_TOKEN in .env"
+      exit 1
+    fi
+    PORTAL_BIND=127.0.0.1; ADMIN_BIND=127.0.0.1; PORTAL_TARGET=8080; ADMIN_TARGET=8081
+    PROFILES="--profile tunnel"
+    ;;
+  proxy)
+    PORTAL_BIND=127.0.0.1; ADMIN_BIND=127.0.0.1; PORTAL_TARGET=8080; ADMIN_TARGET=8081
+    ;;
+  *)
+    echo "ACCESS_MODE must be direct, caddy, cloudflare or proxy"
+    exit 1
+    ;;
+esac
+export PORTAL_BIND ADMIN_BIND PORTAL_TARGET ADMIN_TARGET PORTAL_PORT ADMIN_PORT
+
+# shellcheck disable=SC2086
+docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" $PROFILES up -d --build
+
+echo "VPSBill is starting ($ACCESS_MODE)."
+case "$ACCESS_MODE" in
+  direct) echo "Customer portal: http://<server-ip>:$PORTAL_PORT   Admin console: http://<server-ip>:$ADMIN_PORT/admin" ;;
+  caddy) echo "Customer portal: https://$DOMAIN   Admin console: https://$ADMIN_DOMAIN/admin" ;;
+  cloudflare) echo "Point your tunnel hostnames at http://web:8080 (portal) and http://web:8081 (admin)." ;;
+  proxy) echo "Proxy your portal domain to http://127.0.0.1:$PORTAL_PORT and your admin domain to http://127.0.0.1:$ADMIN_PORT." ;;
+esac
+echo "Finish the Web installer on the admin console, then set the public and admin addresses in 站点设置."

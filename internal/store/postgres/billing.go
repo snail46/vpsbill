@@ -729,8 +729,9 @@ func (s *BillingStore) processPayment(ctx context.Context, tx pgx.Tx, event Paym
 		}
 		rows, err := tx.Query(ctx, `
 		SELECT oi.id, oi.plan_id, oi.region_id, oi.quantity, oi.configuration,
-		       CASE WHEN oi.discount_unit_minor>0 THEN o.coupon_id::text END, oi.renewal_discount_type, oi.renewal_discount_value
-		FROM order_items oi JOIN orders o ON o.id=oi.order_id WHERE oi.order_id=$1 ORDER BY oi.created_at
+		       CASE WHEN oi.discount_unit_minor>0 THEN o.coupon_id::text END, oi.renewal_discount_type, oi.renewal_discount_value,
+		       CASE WHEN p.owner_account_id IS NOT NULL THEN oi.unit_amount_minor END
+		FROM order_items oi JOIN orders o ON o.id=oi.order_id JOIN plans p ON p.id=oi.plan_id WHERE oi.order_id=$1 ORDER BY oi.created_at
 	`, result.OrderID)
 		if err != nil {
 			return PaymentResult{}, err
@@ -742,11 +743,13 @@ func (s *BillingStore) processPayment(ctx context.Context, tx pgx.Tx, event Paym
 			couponID             *string
 			renewalType          *string
 			renewalValue         *int64
+			// renewalPrice caps hosted renewals at the price paid.
+			renewalPrice *int64
 		}
 		items := make([]itemRow, 0)
 		for rows.Next() {
 			var item itemRow
-			if err := rows.Scan(&item.id, &item.planID, &item.regionID, &item.quantity, &item.configuration, &item.couponID, &item.renewalType, &item.renewalValue); err != nil {
+			if err := rows.Scan(&item.id, &item.planID, &item.regionID, &item.quantity, &item.configuration, &item.couponID, &item.renewalType, &item.renewalValue, &item.renewalPrice); err != nil {
 				rows.Close()
 				return PaymentResult{}, err
 			}
@@ -773,9 +776,9 @@ func (s *BillingStore) processPayment(ctx context.Context, tx pgx.Tx, event Paym
 				nextDue := addBillingCycle(time.Now().UTC(), cycle)
 				if _, err := tx.Exec(ctx, `
 				INSERT INTO services(id, account_id, order_item_id, plan_id, region_id, status, instance_name, billing_cycle, next_due_at, expires_at,
-				                     coupon_id, renewal_discount_type, renewal_discount_value)
-				VALUES($1, $2, $3, $4, $5, 'provisioning', $6, $7, $8, $8, $9::uuid, $10, $11)
-			`, serviceID, accountID, item.id, item.planID, item.regionID, instanceName, cycle, nextDue, item.couponID, item.renewalType, item.renewalValue); err != nil {
+				                     coupon_id, renewal_discount_type, renewal_discount_value, renewal_price_minor)
+				VALUES($1, $2, $3, $4, $5, 'provisioning', $6, $7, $8, $8, $9::uuid, $10, $11, $12)
+			`, serviceID, accountID, item.id, item.planID, item.regionID, instanceName, cycle, nextDue, item.couponID, item.renewalType, item.renewalValue, item.renewalPrice); err != nil {
 					return PaymentResult{}, fmt.Errorf("create service: %w", err)
 				}
 				deduplicationKey := serviceID + ":provision:v1"

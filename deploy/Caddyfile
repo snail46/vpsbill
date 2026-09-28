@@ -1,23 +1,14 @@
+# Automatic HTTPS for the customer portal and the admin console. Caddy
+# forwards to the web container's trusted listeners (8080 portal, 8081
+# admin), which take the client address from Caddy's X-Forwarded-For.
 {$DOMAIN} {
 	encode zstd gzip
+	reverse_proxy web:8080
+	header Strict-Transport-Security "max-age=31536000; includeSubDomains"
+}
 
-	@backend path /api/* /health/* /metrics
-	handle @backend {
-		reverse_proxy api:8080 {
-			header_up X-Real-IP {http.request.remote.host}
-		}
-	}
-
-	handle {
-		reverse_proxy web:80 {
-			header_up X-Real-IP {http.request.remote.host}
-		}
-	}
-
-	header {
-		Strict-Transport-Security "max-age=31536000; includeSubDomains"
-		X-Content-Type-Options "nosniff"
-		X-Frame-Options "DENY"
-		Referrer-Policy "strict-origin-when-cross-origin"
-	}
+{$ADMIN_DOMAIN} {
+	encode zstd gzip
+	reverse_proxy web:8081
+	header Strict-Transport-Security "max-age=31536000; includeSubDomains"
 }

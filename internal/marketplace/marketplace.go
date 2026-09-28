@@ -75,20 +75,37 @@ func (s *Service) deleteInstances(result postgres.ClearanceResult) {
 
 // measureTraffic reads the instance's traffic from its node, falling back to
 // the last scanner measurement; nil means unknown.
+// ReadTraffic asks an instance's node for its current two-way traffic.
+func (s *Service) ReadTraffic(ctx context.Context, nodeID, instance string) (provider.Traffic, bool) {
+	if nodeID == "" {
+		return provider.Traffic{}, false
+	}
+	node, err := s.catalog.NodeSecret(ctx, nodeID)
+	if err != nil {
+		return provider.Traffic{}, false
+	}
+	driver, err := provider.OpenSealed(s.box, node.Sealed(), 15*time.Second)
+	if err != nil {
+		return provider.Traffic{}, false
+	}
+	metrics, ok := driver.(provider.Metrics)
+	if !ok {
+		return provider.Traffic{}, false
+	}
+	requestCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	value, err := metrics.InstanceTraffic(requestCtx, instance)
+	if err != nil {
+		return provider.Traffic{}, false
+	}
+	return provider.ParseTraffic(value)
+}
+
+// measureTraffic reads the instance's traffic from its node, falling back to
+// the last scanner measurement; nil means unknown.
 func (s *Service) measureTraffic(ctx context.Context, target postgres.RefundTarget) *int64 {
-	if target.NodeID != "" {
-		if node, err := s.catalog.NodeSecret(ctx, target.NodeID); err == nil {
-			if driver, err := provider.OpenSealed(s.box, node.Sealed(), 15*time.Second); err == nil {
-				if metrics, ok := driver.(provider.Metrics); ok {
-					requestCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-					value, err := metrics.InstanceTraffic(requestCtx, target.InstanceName)
-					cancel()
-					if used, found := notify.TrafficUsedBytes(value); err == nil && found {
-						return &used
-					}
-				}
-			}
-		}
+	if traffic, ok := s.ReadTraffic(ctx, target.NodeID, target.InstanceName); ok {
+		return &traffic.TotalBytes
 	}
 	return target.StoredTrafficBytes
 }

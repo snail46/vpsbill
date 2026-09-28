@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"errors"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/mail"
@@ -16,10 +17,17 @@ import (
 	"vpsbill/internal/store/postgres"
 )
 
+// Staff and customers use different cookies: browsers share cookies across
+// ports of a host, and one browser may be signed in to both.
+type cookieNames struct{ session, csrf string }
+
+var (
+	customerCookies = cookieNames{session: "cb_session", csrf: "cb_csrf"}
+	staffCookies    = cookieNames{session: "cb_admin_session", csrf: "cb_admin_csrf"}
+)
+
 const (
-	sessionCookieName = "cb_session"
-	csrfCookieName    = "cb_csrf"
-	sessionDuration   = 12 * time.Hour
+	sessionDuration = 12 * time.Hour
 )
 
 type principalContextKey struct{}
@@ -100,7 +108,7 @@ func (a *authenticator) login(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "invalid_credentials", "message": "邮箱或密码错误"})
 		return
 	}
-	if identity.MFAEnabled && !a.verifyEncryptedTOTP(identity.MFASecretEncrypted, input.TOTPCode) {
+	if identity.MFAEnabled && !a.verifyEncryptedTOTP(r.Context(), identity.UserID, identity.MFASecretEncrypted, input.TOTPCode) {
 		_ = a.store.RecordLoginAttempt(r.Context(), input.Email, remoteIP(r), false)
 		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "mfa_required", "message": "需要有效的二步验证码"})
 		return
@@ -110,10 +118,10 @@ func (a *authenticator) login(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *authenticator) startSession(w http.ResponseWriter, r *http.Request, identity postgres.StaffIdentity) {
-	a.issueSession(w, r, identity.UserID, identity)
+	a.issueSession(w, r, staffCookies, identity.UserID, identity)
 }
 
-func (a *authenticator) issueSession(w http.ResponseWriter, r *http.Request, userID string, response any) {
+func (a *authenticator) issueSession(w http.ResponseWriter, r *http.Request, names cookieNames, userID string, response any) {
 	sessionToken, sessionHash, err := security.NewToken()
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "internal_error"})
@@ -129,8 +137,8 @@ func (a *authenticator) issueSession(w http.ResponseWriter, r *http.Request, use
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "internal_error"})
 		return
 	}
-	a.setCookie(w, sessionCookieName, sessionToken, expiresAt, true)
-	a.setCookie(w, csrfCookieName, csrfToken, expiresAt, false)
+	a.setCookie(w, names.session, sessionToken, expiresAt, true)
+	a.setCookie(w, names.csrf, csrfToken, expiresAt, false)
 	writeJSON(w, http.StatusOK, map[string]any{"data": response})
 }
 
@@ -160,7 +168,9 @@ func (a *authenticator) customerRegister(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	_ = a.store.RecordLoginAttempt(r.Context(), registerKey, "", false)
-	identity, err := a.store.RegisterCustomer(r.Context(), input.Email, input.DisplayName, passwordHash)
+	// Without mail the address cannot be checked, so it is taken as given.
+	mailReady := a.settings.Current().SMTP.Configured()
+	identity, err := a.store.RegisterCustomer(r.Context(), input.Email, input.DisplayName, passwordHash, !mailReady)
 	if errors.Is(err, postgres.ErrEmailExists) {
 		writeJSON(w, http.StatusConflict, map[string]any{"error": "email_exists", "message": "该邮箱已被注册"})
 		return
@@ -169,7 +179,12 @@ func (a *authenticator) customerRegister(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "internal_error"})
 		return
 	}
-	a.issueSession(w, r, identity.UserID, identity)
+	if mailReady {
+		if err := a.sendVerification(r.Context(), identity.UserID, identity.Email); err != nil {
+			slog.Default().Warn("queue verification mail", "error", err)
+		}
+	}
+	a.issueSession(w, r, customerCookies, identity.UserID, identity)
 }
 
 func (a *authenticator) customerLogin(w http.ResponseWriter, r *http.Request) {
@@ -197,18 +212,28 @@ func (a *authenticator) customerLogin(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "invalid_credentials", "message": "邮箱或密码错误"})
 		return
 	}
-	if identity.MFAEnabled && !a.verifyEncryptedTOTP(identity.MFASecretEncrypted, input.TOTPCode) {
+	if identity.MFAEnabled && !a.verifyEncryptedTOTP(r.Context(), identity.UserID, identity.MFASecretEncrypted, input.TOTPCode) {
 		_ = a.store.RecordLoginAttempt(r.Context(), input.Email, remoteIP(r), false)
 		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "mfa_required", "message": "需要有效的二步验证码"})
 		return
 	}
 	_ = a.store.RecordLoginAttempt(r.Context(), input.Email, remoteIP(r), true)
-	a.issueSession(w, r, identity.UserID, identity)
+	a.issueSession(w, r, customerCookies, identity.UserID, identity)
 }
 
-func (a *authenticator) verifyEncryptedTOTP(encrypted []byte, code string) bool {
+// verifyEncryptedTOTP checks a code and uses it up: each 30-second code is
+// accepted once per user.
+func (a *authenticator) verifyEncryptedTOTP(ctx context.Context, userID string, encrypted []byte, code string) bool {
 	secret, err := a.box.Open(encrypted)
-	return err == nil && security.VerifyTOTP(secret, code, time.Now().UTC())
+	if err != nil {
+		return false
+	}
+	step, ok := security.MatchTOTP(secret, code, time.Now().UTC())
+	if !ok {
+		return false
+	}
+	fresh, err := a.store.ConsumeTOTPStep(ctx, userID, step)
+	return err == nil && fresh
 }
 
 func (a *authenticator) mfaSetup(w http.ResponseWriter, r *http.Request, userID, email, actorType string) {
@@ -237,7 +262,7 @@ func (a *authenticator) mfaConfirm(w http.ResponseWriter, r *http.Request, userI
 		return
 	}
 	encrypted, err := a.store.PendingMFA(r.Context(), userID)
-	if err != nil || !a.verifyEncryptedTOTP(encrypted, input.Code) {
+	if err != nil || !a.verifyEncryptedTOTP(r.Context(), userID, encrypted, input.Code) {
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "invalid_totp", "message": "验证码无效"})
 		return
 	}
@@ -256,7 +281,7 @@ func (a *authenticator) mfaDisable(w http.ResponseWriter, r *http.Request, userI
 		return
 	}
 	encrypted, err := a.store.MFASecret(r.Context(), userID)
-	if err != nil || !a.verifyEncryptedTOTP(encrypted, input.Code) {
+	if err != nil || !a.verifyEncryptedTOTP(r.Context(), userID, encrypted, input.Code) {
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "invalid_totp", "message": "验证码无效"})
 		return
 	}
@@ -303,18 +328,26 @@ func (a *authenticator) me(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *authenticator) logout(w http.ResponseWriter, r *http.Request) {
-	cookie, _ := r.Cookie(sessionCookieName)
+	a.endSession(w, r, staffCookies)
+}
+
+func (a *authenticator) customerLogout(w http.ResponseWriter, r *http.Request) {
+	a.endSession(w, r, customerCookies)
+}
+
+func (a *authenticator) endSession(w http.ResponseWriter, r *http.Request, names cookieNames) {
+	cookie, _ := r.Cookie(names.session)
 	if cookie != nil {
 		_ = a.store.DeleteSession(r.Context(), security.HashToken(cookie.Value))
 	}
-	a.clearCookie(w, sessionCookieName, true)
-	a.clearCookie(w, csrfCookieName, false)
+	a.clearCookie(w, names.session, true)
+	a.clearCookie(w, names.csrf, false)
 	w.WriteHeader(http.StatusNoContent)
 }
 
 func (a *authenticator) require(permission string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		cookie, err := r.Cookie(sessionCookieName)
+		cookie, err := r.Cookie(staffCookies.session)
 		if err != nil || cookie.Value == "" {
 			writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "authentication_required"})
 			return
@@ -329,7 +362,7 @@ func (a *authenticator) require(permission string, next http.Handler) http.Handl
 			return
 		}
 		if r.Method != http.MethodGet && r.Method != http.MethodHead && r.Method != http.MethodOptions {
-			csrfCookie, cookieErr := r.Cookie(csrfCookieName)
+			csrfCookie, cookieErr := r.Cookie(staffCookies.csrf)
 			header := r.Header.Get("X-CSRF-Token")
 			if cookieErr != nil || header == "" || subtle.ConstantTimeCompare([]byte(header), []byte(csrfCookie.Value)) != 1 || subtle.ConstantTimeCompare(security.HashToken(header), identity.CSRFHash) != 1 {
 				writeJSON(w, http.StatusForbidden, map[string]any{"error": "csrf_validation_failed"})
@@ -343,7 +376,7 @@ func (a *authenticator) require(permission string, next http.Handler) http.Handl
 
 func (a *authenticator) requireCustomer(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		cookie, err := r.Cookie(sessionCookieName)
+		cookie, err := r.Cookie(customerCookies.session)
 		if err != nil || cookie.Value == "" {
 			writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "authentication_required"})
 			return
@@ -354,7 +387,7 @@ func (a *authenticator) requireCustomer(next http.Handler) http.Handler {
 			return
 		}
 		if r.Method != http.MethodGet && r.Method != http.MethodHead && r.Method != http.MethodOptions {
-			csrfCookie, cookieErr := r.Cookie(csrfCookieName)
+			csrfCookie, cookieErr := r.Cookie(customerCookies.csrf)
 			header := r.Header.Get("X-CSRF-Token")
 			if cookieErr != nil || header == "" || subtle.ConstantTimeCompare([]byte(header), []byte(csrfCookie.Value)) != 1 || subtle.ConstantTimeCompare(security.HashToken(header), identity.CSRFHash) != 1 {
 				writeJSON(w, http.StatusForbidden, map[string]any{"error": "csrf_validation_failed"})
@@ -429,6 +462,10 @@ func remoteIP(r *http.Request) string {
 // changePassword checks the current password, stores the new one and signs
 // out the user's other sessions.
 func (a *authenticator) changePassword(w http.ResponseWriter, r *http.Request, userID, actorType string) {
+	names := customerCookies
+	if actorType == "staff" {
+		names = staffCookies
+	}
 	var input struct {
 		CurrentPassword string `json:"current_password"`
 		NewPassword     string `json:"new_password"`
@@ -450,7 +487,7 @@ func (a *authenticator) changePassword(w http.ResponseWriter, r *http.Request, u
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "validation_error", "message": err.Error()})
 		return
 	}
-	cookie, _ := r.Cookie(sessionCookieName)
+	cookie, _ := r.Cookie(names.session)
 	var keep []byte
 	if cookie != nil {
 		keep = security.HashToken(cookie.Value)

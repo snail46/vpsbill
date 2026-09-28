@@ -15,7 +15,7 @@ type LifecycleStore struct{ db *pgxpool.Pool }
 func NewLifecycleStore(db *pgxpool.Pool) *LifecycleStore { return &LifecycleStore{db: db} }
 
 type LifecycleResult struct {
-	RenewalInvoices, PricingReview, Overdue, Suspended, TerminationQueued, ExpiredOrders int
+	RenewalInvoices, PricingReview, Overdue, Suspended, TerminationQueued, ExpiredOrders, ClosedListings int
 }
 
 func (s *LifecycleStore) Run(ctx context.Context, lead, grace, retention time.Duration) (LifecycleResult, error) {
@@ -48,7 +48,26 @@ func (s *LifecycleStore) Run(ctx context.Context, lead, grace, retention time.Du
 		return result, err
 	}
 	result.ExpiredOrders, err = s.expireUnpaidOrders(ctx)
+	if err != nil {
+		return result, err
+	}
+	result.ClosedListings, err = s.closeExpiringListings(ctx)
 	return result, err
+}
+
+// closeExpiringListings withdraws trading market listings whose instance
+// has less than TradeMinRemainingDays of paid time left. Listed time keeps
+// counting down, so parking an instance in the market saves nothing.
+func (s *LifecycleStore) closeExpiringListings(ctx context.Context) (int, error) {
+	command, err := s.db.Exec(ctx, `
+		UPDATE service_listings l SET status='cancelled',cancel_reason=$1,updated_at=now()
+		FROM services s WHERE s.id=l.service_id AND l.status='listed'
+		  AND (s.next_due_at IS NULL OR s.next_due_at < now() + make_interval(days => $2))
+	`, fmt.Sprintf("距到期不足 %d 天，已自动下架", TradeMinRemainingDays), TradeMinRemainingDays)
+	if err != nil {
+		return 0, err
+	}
+	return int(command.RowsAffected()), nil
 }
 
 // expireUnpaidOrders voids new-order invoices an hour past their due date
@@ -109,12 +128,12 @@ func (s *LifecycleStore) createRenewal(ctx context.Context, lead time.Duration) 
 	var nextDue time.Time
 	var amount int64
 	var discountType, couponCode *string
-	var discountValue *int64
-	err = tx.QueryRow(ctx, `SELECT s.id,s.account_id,s.plan_id,s.billing_cycle,a.default_currency,p.name,s.next_due_at,pp.amount_minor,s.renewal_discount_type,s.renewal_discount_value,c.code
+	var discountValue, lockedPrice *int64
+	err = tx.QueryRow(ctx, `SELECT s.id,s.account_id,s.plan_id,s.billing_cycle,a.default_currency,p.name,s.next_due_at,pp.amount_minor,s.renewal_discount_type,s.renewal_discount_value,c.code,s.renewal_price_minor
 		FROM services s JOIN accounts a ON a.id=s.account_id JOIN plans p ON p.id=s.plan_id LEFT JOIN coupons c ON c.id=s.coupon_id JOIN LATERAL (SELECT amount_minor FROM plan_prices WHERE plan_id=s.plan_id AND currency=a.default_currency AND billing_cycle=s.billing_cycle AND active_from<=now() AND (active_until IS NULL OR active_until>now()) ORDER BY active_from DESC LIMIT 1) pp ON true
 		WHERE s.status='active' AND s.next_due_at IS NOT NULL AND s.next_due_at<=now()+make_interval(secs=>$1)
 		AND NOT EXISTS(SELECT 1 FROM invoices i WHERE i.service_id=s.id AND i.period_start=s.next_due_at AND i.status IN ('draft','open','paid'))
-		ORDER BY s.next_due_at FOR UPDATE OF s SKIP LOCKED LIMIT 1`, int(lead.Seconds())).Scan(&serviceID, &accountID, &planID, &cycle, &currency, &planName, &nextDue, &amount, &discountType, &discountValue, &couponCode)
+		ORDER BY s.next_due_at FOR UPDATE OF s SKIP LOCKED LIMIT 1`, int(lead.Seconds())).Scan(&serviceID, &accountID, &planID, &cycle, &currency, &planName, &nextDue, &amount, &discountType, &discountValue, &couponCode, &lockedPrice)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}
@@ -122,6 +141,11 @@ func (s *LifecycleStore) createRenewal(ctx context.Context, lead time.Duration) 
 		return false, err
 	}
 	periodEnd := addBillingCycle(nextDue, cycle)
+	// Hosted instances renew at the price they were bought at when the host
+	// has raised it since; a lower current price applies as it is.
+	if lockedPrice != nil && *lockedPrice > 0 && *lockedPrice < amount {
+		amount = *lockedPrice
+	}
 	// Instances bought with a recurring coupon renew with the same discount
 	// off the current price.
 	var discount int64

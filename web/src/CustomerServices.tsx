@@ -101,7 +101,10 @@ function ServiceCard({ service, onReload }: { service: CustomerServiceRecord; on
       })
       .catch(err => setRuntimeError(err.message))
 
-  const usable = serviceUsable(service.status)
+  // A listed instance is stopped and frozen for its seller.
+  const listed = !!service.listing_id
+  const usable = serviceUsable(service.status) && !listed
+  const trafficLocked = service.traffic_locked_month === new Date().toISOString().slice(0, 7)
 
   useEffect(() => {
     if (!usable) return
@@ -153,7 +156,10 @@ function ServiceCard({ service, onReload }: { service: CustomerServiceRecord; on
   const memoryUsed = Number(usage.memory_usage_bytes) || 0
   const diskTotal = service.disk_gb * 1024 ** 3
   const diskUsed = Number(usage.disk_usage_bytes) || 0
-  const trafficUsed = Number(traffic.total_used_bytes) || 0
+  // Traffic counts both directions.
+  const rxBytes = traffic.rx_bytes == null ? null : Number(traffic.rx_bytes)
+  const txBytes = traffic.tx_bytes == null ? null : Number(traffic.tx_bytes)
+  const trafficUsed = rxBytes != null && txBytes != null ? rxBytes + txBytes : Number(traffic.total_used_bytes) || 0
   const trafficLimit = (Number(traffic.limit_gb) || service.traffic_gb) * 1024 ** 3
   // Prefer the live node status; the list's copy only refreshes on reload.
   const liveStatus = (runtime?.container.status || service.runtime_status).toLowerCase()
@@ -182,7 +188,13 @@ function ServiceCard({ service, onReload }: { service: CustomerServiceRecord; on
         </div>
       )}
       {service.status === 'active' && <TradeAction service={service} onDone={onReload} />}
-      {service.host_name && ['active', 'overdue', 'suspended', 'error'].includes(service.status) && <RefundPanel service={service} onDone={onReload} />}
+      {listed && (
+        <div className="service-notice warning">该实例正在交易市场挂售，已停机，挂售期间不能开机、登录或修改；到期时间照常计算。下架后可以重新开机。</div>
+      )}
+      {trafficLocked && (
+        <div className="service-notice danger">本月流量（上行加下行双向合计）已用尽，实例已停机，下月 1 日（UTC）自动恢复并开机。</div>
+      )}
+      {((service.host_name && ['active', 'overdue', 'suspended'].includes(service.status)) || service.status === 'error') && !listed && <RefundPanel service={service} onDone={onReload} />}
 
       {service.status === 'overdue' && (
         <div className="service-notice warning">
@@ -235,6 +247,11 @@ function ServiceCard({ service, onReload }: { service: CustomerServiceRecord; on
         />
       </div>
 
+      {rxBytes != null && txBytes != null && (
+        <div className="traffic-split">
+          本月流量按双向合计：下行 {bytes(rxBytes)} + 上行 {bytes(txBytes)} = {bytes(trafficUsed)}
+        </div>
+      )}
       <div className="live-io">
         <span title="网络接收速率">↓ {rate(Number(usage.network_rx_bps) || 0)}</span>
         <span title="网络发送速率">↑ {rate(Number(usage.network_tx_bps) || 0)}</span>

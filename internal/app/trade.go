@@ -5,15 +5,19 @@ import (
 	"errors"
 	"net/http"
 
+	"vpsbill/internal/marketplace"
 	"vpsbill/internal/notify"
+	"vpsbill/internal/settings"
 	"vpsbill/internal/store/postgres"
 )
 
 // tradeAPI serves the trading market, where customers resell running
 // instances to each other for balance.
 type tradeAPI struct {
+	settings *settings.Manager
 	store    *postgres.TradeStore
 	notifier *notify.Notifier
+	hosting  *marketplace.Service
 }
 
 func writeTradeError(w http.ResponseWriter, err error) {
@@ -46,7 +50,8 @@ func (t *tradeAPI) market(w http.ResponseWriter, r *http.Request) {
 		writeTradeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": map[string]any{"listings": market, "mine": mine, "hold_days": postgres.TradeHoldDays}})
+	writeJSON(w, http.StatusOK, map[string]any{"data": map[string]any{"listings": market, "mine": mine, "hold_days": postgres.TradeHoldDays,
+		"fee_percent": t.settings.Current().Marketplace.TradeFeePercent, "min_remaining_days": postgres.TradeMinRemainingDays}})
 }
 
 func (t *tradeAPI) createListing(w http.ResponseWriter, r *http.Request) {
@@ -63,7 +68,21 @@ func (t *tradeAPI) createListing(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	identity := customerPrincipalFromContext(r.Context())
-	id, err := t.store.CreateListing(r.Context(), identity.AccountID, identity.UserID, input.ServiceID, input.PriceMinor, input.Note)
+	nodeID, instance, err := t.store.TradeTarget(r.Context(), identity.AccountID, input.ServiceID)
+	if err != nil {
+		writeTradeError(w, err)
+		return
+	}
+	// Buyers see the traffic the seller used, read right before the
+	// instance is stopped for the listing.
+	var snapshot *postgres.ListingTraffic
+	if traffic, ok := t.hosting.ReadTraffic(r.Context(), nodeID, instance); ok {
+		snapshot = &postgres.ListingTraffic{TotalBytes: traffic.TotalBytes}
+		if traffic.Split {
+			snapshot.RXBytes, snapshot.TXBytes = &traffic.RXBytes, &traffic.TXBytes
+		}
+	}
+	id, err := t.store.CreateListing(r.Context(), identity.AccountID, identity.UserID, input.ServiceID, input.PriceMinor, input.Note, snapshot)
 	if err != nil {
 		writeTradeError(w, err)
 		return

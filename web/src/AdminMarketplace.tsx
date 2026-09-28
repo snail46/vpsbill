@@ -1,7 +1,8 @@
 import { Fragment, useEffect, useState } from 'react'
-import { MessagesSquare, RefreshCw, Server } from 'lucide-react'
+import { Flag, MessagesSquare, RefreshCw, Server, X } from 'lucide-react'
 import { api, type ChatRoomRecord, type ClearanceRecord, type HostedNodeRecord } from './api'
 import ChatRoom from './ChatRoom'
+import { AdminReports } from './Reports'
 import { walletMoney } from './Wallet'
 
 function offlineFor(node: HostedNodeRecord) {
@@ -11,7 +12,7 @@ function offlineFor(node: HostedNodeRecord) {
 }
 
 export default function AdminMarketplace() {
-  const [tab, setTab] = useState<'nodes' | 'chat'>('nodes')
+  const [tab, setTab] = useState<'nodes' | 'chat' | 'reports'>('nodes')
   return (
     <section className="workspace-panel">
       <div className="page-actions">
@@ -28,8 +29,13 @@ export default function AdminMarketplace() {
         <button role="tab" aria-selected={tab === 'chat'} className={tab === 'chat' ? 'active' : ''} onClick={() => setTab('chat')}>
           <MessagesSquare size={15} />聊天室
         </button>
+        <button role="tab" aria-selected={tab === 'reports'} className={tab === 'reports' ? 'active' : ''} onClick={() => setTab('reports')}>
+          <Flag size={15} />用户举报
+        </button>
       </div>
-      {tab === 'nodes' ? <HostedNodes /> : <AdminChat />}
+      {tab === 'nodes' && <HostedNodes />}
+      {tab === 'chat' && <AdminChat />}
+      {tab === 'reports' && <AdminReports />}
     </section>
   )
 }
@@ -38,6 +44,7 @@ function HostedNodes() {
   const [nodes, setNodes] = useState<HostedNodeRecord[]>([])
   const [expanded, setExpanded] = useState('')
   const [clearing, setClearing] = useState<HostedNodeRecord | null>(null)
+  const [capping, setCapping] = useState<HostedNodeRecord | null>(null)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
 
@@ -119,6 +126,10 @@ function HostedNodes() {
                         <strong>{node.name}</strong>
                       </button>
                       <small className="block">{node.region_name} · {node.location} · 到期 {node.expires_at}</small>
+                      <small className="block">
+                        可售 {node.capacity_vcpu} 核 / {node.capacity_ram_mb} MB / {node.capacity_disk_gb} GB
+                        {node.capacity_cap_vcpu || node.capacity_cap_ram_mb || node.capacity_cap_disk_gb ? '（已核定上限）' : '（Agent 上报）'}
+                      </small>
                     </td>
                     <td>
                       {node.owner_name}
@@ -147,6 +158,7 @@ function HostedNodes() {
                             {node.listing_status === 'listed' ? '暂停销售' : '恢复销售'}
                           </button>
                           <button className="secondary-button compact" onClick={() => hold(node)}>暂缓清退</button>
+                          <button className="secondary-button compact" onClick={() => setCapping(node)}>核定资源</button>
                           <button className="danger-button compact" onClick={() => setClearing(node)}>清退</button>
                         </>
                       )}
@@ -198,6 +210,17 @@ function HostedNodes() {
           </table>
         </div>
       </div>
+      {capping && (
+        <CapDialog
+          node={capping}
+          onClose={() => setCapping(null)}
+          onSaved={() => {
+            setCapping(null)
+            setNotice(`已更新 ${capping.name} 的核定资源`)
+            void load()
+          }}
+        />
+      )}
       {clearing && (
         <ClearDialog
           node={clearing}
@@ -300,11 +323,62 @@ function AdminChat() {
           {!rooms.length && <div className="empty-state">暂无聊天室</div>}
         </div>
         {room ? (
-          <ChatRoom base="/api/v1/admin/chat/rooms" nodeID={room.node_id} title={`${room.node_name} 聊天室（机主 ${room.host_name}）`} />
+          <ChatRoom staff base="/api/v1/admin/chat/rooms" nodeID={room.node_id} title={`${room.node_name} 聊天室（机主 ${room.host_name}）`} />
         ) : (
           <div className="panel support-placeholder">暂无聊天室</div>
         )}
       </div>
     </>
+  )
+}
+
+// CapDialog sets the resources a hosted node may sell, whatever its agent
+// reports. Empty fields lift the cap.
+function CapDialog({ node, onClose, onSaved }: { node: HostedNodeRecord; onClose: () => void; onSaved: () => void }) {
+  const [vcpu, setVCPU] = useState(node.capacity_cap_vcpu ? String(node.capacity_cap_vcpu) : '')
+  const [ram, setRAM] = useState(node.capacity_cap_ram_mb ? String(node.capacity_cap_ram_mb) : '')
+  const [disk, setDisk] = useState(node.capacity_cap_disk_gb ? String(node.capacity_cap_disk_gb) : '')
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
+  const value = (text: string) => (text.trim() ? Number(text) : null)
+
+  async function save() {
+    setBusy(true)
+    setError('')
+    try {
+      await api(`/api/v1/admin/marketplace/nodes/${node.id}/capacity-cap`, { method: 'PUT', body: JSON.stringify({ vcpu: value(vcpu), ram_mb: value(ram), disk_gb: value(disk) }) })
+      onSaved()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '保存失败')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="modal-backdrop" role="dialog" aria-modal="true">
+      <div className="modal panel">
+        <div className="panel-heading">
+          <h3>核定资源：{node.name}</h3>
+          <button className="icon-button" aria-label="关闭" onClick={onClose}>
+            <X size={16} />
+          </button>
+        </div>
+        <p className="muted-text">
+          母机资源由机主的 Agent 上报，平台无法直接核实。收到超售或资源不符的举报并核实后，可以在这里设置可售上限；之后 Agent 上报更高的数值也不会超过上限。留空表示不限制。
+          当前可售 {node.capacity_vcpu} 核 / {node.capacity_ram_mb} MB / {node.capacity_disk_gb} GB。
+        </p>
+        {error && <div className="form-error">{error}</div>}
+        <div className="form-grid">
+          <label><span>vCPU 上限</span><input type="number" min={1} value={vcpu} onChange={event => setVCPU(event.target.value)} /></label>
+          <label><span>内存上限（MB）</span><input type="number" min={128} value={ram} onChange={event => setRAM(event.target.value)} /></label>
+          <label><span>磁盘上限（GB）</span><input type="number" min={1} value={disk} onChange={event => setDisk(event.target.value)} /></label>
+        </div>
+        <div className="form-actions">
+          <button className="secondary-button" onClick={onClose}>取消</button>
+          <button className="primary-button compact" disabled={busy} onClick={() => void save()}>{busy ? '保存中…' : '保存'}</button>
+        </div>
+      </div>
+    </div>
   )
 }

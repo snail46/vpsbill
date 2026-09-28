@@ -68,5 +68,5 @@ func (i *installer) install(w http.ResponseWriter, r *http.Request) {
 	if result.GeneratedMetricsToken {
 		generated["metrics_token"] = runtime.MetricsToken
 	}
-	i.auth.issueSession(w, r, result.Identity.UserID, map[string]any{"user": result.Identity, "generated_secrets": generated})
+	i.auth.issueSession(w, r, staffCookies, result.Identity.UserID, map[string]any{"user": result.Identity, "generated_secrets": generated})
 }

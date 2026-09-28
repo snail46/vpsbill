@@ -16,6 +16,8 @@ import (
 var (
 	ErrServiceNotFound          = errors.New("service not found")
 	ErrServiceActionUnavailable = errors.New("service action unavailable")
+	ErrServiceListed            = errors.New("service is listed in the trading market")
+	ErrTrafficLocked            = errors.New("service used up its monthly traffic")
 	ErrActionInProgress         = errors.New("same service action is already in progress")
 )
 
@@ -52,6 +54,12 @@ type CustomerService struct {
 	AcquiredAt        time.Time `json:"acquired_at"`
 	ListingID         string    `json:"listing_id,omitempty"`
 	ListingPriceMinor int64     `json:"listing_price_minor,omitempty"`
+	// This month's two-way traffic as last measured, and the month the
+	// instance was stopped for using it up.
+	TrafficUsedBytes   *int64 `json:"traffic_used_bytes"`
+	TrafficRXBytes     *int64 `json:"traffic_rx_bytes"`
+	TrafficTXBytes     *int64 `json:"traffic_tx_bytes"`
+	TrafficLockedMonth string `json:"traffic_locked_month,omitempty"`
 }
 
 type CustomerServiceAccess struct {
@@ -64,20 +72,24 @@ type CustomerServiceAccess struct {
 	RootPasswordCiphertext []byte
 	AllowedTemplateIDs     []string
 	PortMappingCount       int
+	// Listed is set while the instance is for sale in the trading market;
+	// the seller can then only look at it.
+	Listed bool
 }
 
 func (s *PortalStore) ServiceAccess(ctx context.Context, accountID, serviceID string) (CustomerServiceAccess, error) {
 	var result CustomerServiceAccess
 	err := s.db.QueryRow(ctx, `
 		SELECT s.id,s.status,s.runtime_status,s.instance_name,p.virtualization,n.provider_type,n.base_url,
-		       n.api_key_ciphertext,n.provider_options,s.root_password_ciphertext,p.allowed_template_ids,p.port_mapping_count
+		       n.api_key_ciphertext,n.provider_options,s.root_password_ciphertext,p.allowed_template_ids,p.port_mapping_count,
+		       EXISTS(SELECT 1 FROM service_listings l WHERE l.service_id=s.id AND l.status='listed')
 		FROM services s
 		JOIN plans p ON p.id=s.plan_id
 		JOIN nodes n ON n.id=s.node_id
 		WHERE s.id=$1 AND s.account_id=$2
 	`, serviceID, accountID).Scan(&result.ServiceID, &result.Status, &result.RuntimeStatus, &result.InstanceName,
 		&result.Virtualization, &result.ProviderType, &result.BaseURL, &result.APIKeyCiphertext, &result.ProviderOptions,
-		&result.RootPasswordCiphertext, &result.AllowedTemplateIDs, &result.PortMappingCount)
+		&result.RootPasswordCiphertext, &result.AllowedTemplateIDs, &result.PortMappingCount, &result.Listed)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return CustomerServiceAccess{}, ErrServiceNotFound
 	}
@@ -154,7 +166,8 @@ func (s *PortalStore) ListServices(ctx context.Context, accountID string) ([]Cus
 		       p.virtualization,p.vcpu,p.ram_mb,p.disk_gb,p.traffic_gb,coalesce(host(s.primary_ipv4),''),coalesce(host(s.primary_ipv6),''),
 		       s.next_due_at,s.grace_until,s.termination_scheduled_at,s.last_reconciled_at,coalesce(s.last_reconcile_error,''),
 		       coalesce(h.display_name,''),coalesce(s.termination_reason,''),
-		       s.acquired_at,coalesce(l.id::text,''),coalesce(l.price_minor,0)
+		       s.acquired_at,coalesce(l.id::text,''),coalesce(l.price_minor,0),
+		       s.traffic_used_bytes,s.traffic_rx_bytes,s.traffic_tx_bytes,coalesce(s.traffic_locked_month,'')
 		FROM services s JOIN plans p ON p.id=s.plan_id JOIN regions r ON r.id=s.region_id LEFT JOIN accounts h ON h.id=p.owner_account_id
 		LEFT JOIN service_listings l ON l.service_id=s.id AND l.status='listed'
 		WHERE s.account_id=$1 ORDER BY s.created_at DESC
@@ -166,7 +179,8 @@ func (s *PortalStore) ListServices(ctx context.Context, accountID string) ([]Cus
 	result := make([]CustomerService, 0)
 	for rows.Next() {
 		var row CustomerService
-		if err := rows.Scan(&row.ID, &row.PlanName, &row.RegionName, &row.Status, &row.RuntimeStatus, &row.DesiredRuntimeStatus, &row.InstanceName, &row.Virtualization, &row.VCPU, &row.RAMMB, &row.DiskGB, &row.TrafficGB, &row.PrimaryIPv4, &row.PrimaryIPv6, &row.NextDueAt, &row.GraceUntil, &row.TerminationAt, &row.LastReconciledAt, &row.LastReconcileError, &row.HostName, &row.TerminationReason, &row.AcquiredAt, &row.ListingID, &row.ListingPriceMinor); err != nil {
+		if err := rows.Scan(&row.ID, &row.PlanName, &row.RegionName, &row.Status, &row.RuntimeStatus, &row.DesiredRuntimeStatus, &row.InstanceName, &row.Virtualization, &row.VCPU, &row.RAMMB, &row.DiskGB, &row.TrafficGB, &row.PrimaryIPv4, &row.PrimaryIPv6, &row.NextDueAt, &row.GraceUntil, &row.TerminationAt, &row.LastReconciledAt, &row.LastReconcileError, &row.HostName, &row.TerminationReason, &row.AcquiredAt, &row.ListingID, &row.ListingPriceMinor,
+			&row.TrafficUsedBytes, &row.TrafficRXBytes, &row.TrafficTXBytes, &row.TrafficLockedMonth); err != nil {
 			return nil, err
 		}
 		result = append(result, row)
@@ -220,9 +234,12 @@ func (s *PortalStore) QueueServiceAction(ctx context.Context, accountID, userID,
 		return "", err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	var status, runtimeStatus, desiredRuntimeStatus, instanceName string
+	var status, runtimeStatus, desiredRuntimeStatus, instanceName, lockedMonth string
 	var nodeID *string
-	err = tx.QueryRow(ctx, `SELECT status,runtime_status,coalesce(desired_runtime_status,''),instance_name,node_id FROM services WHERE id=$1 AND account_id=$2 FOR UPDATE`, serviceID, accountID).Scan(&status, &runtimeStatus, &desiredRuntimeStatus, &instanceName, &nodeID)
+	var listed bool
+	err = tx.QueryRow(ctx, `SELECT status,runtime_status,coalesce(desired_runtime_status,''),instance_name,node_id,coalesce(traffic_locked_month,''),
+		EXISTS(SELECT 1 FROM service_listings l WHERE l.service_id=services.id AND l.status='listed')
+		FROM services WHERE id=$1 AND account_id=$2 FOR UPDATE`, serviceID, accountID).Scan(&status, &runtimeStatus, &desiredRuntimeStatus, &instanceName, &nodeID, &lockedMonth, &listed)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", ErrServiceNotFound
 	}
@@ -231,6 +248,12 @@ func (s *PortalStore) QueueServiceAction(ctx context.Context, accountID, userID,
 	}
 	if !CustomerUsable(status) || nodeID == nil || desiredRuntimeStatus != "" {
 		return "", ErrServiceActionUnavailable
+	}
+	if listed {
+		return "", ErrServiceListed
+	}
+	if action != "stop" && lockedMonth == time.Now().UTC().Format("2006-01") {
+		return "", ErrTrafficLocked
 	}
 	if action == "start" && runtimeStatus == "running" {
 		return "", ErrServiceActionUnavailable

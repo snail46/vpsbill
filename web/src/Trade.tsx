@@ -8,6 +8,19 @@ const statusNames: Record<TradeListingRecord['status'], string> = { listed: '挂
 
 export const TRADE_HOLD_DAYS = 31
 
+export function formatBytes(value = 0) {
+  if (value >= 1024 ** 4) return `${(value / 1024 ** 4).toFixed(2)} TB`
+  if (value >= 1024 ** 3) return `${(value / 1024 ** 3).toFixed(2)} GB`
+  if (value >= 1024 ** 2) return `${(value / 1024 ** 2).toFixed(1)} MB`
+  if (value >= 1024) return `${(value / 1024).toFixed(1)} KB`
+  return `${value} B`
+}
+
+// trafficText shows a two-way total with its split when known.
+export function trafficText(total: number, rx?: number | null, tx?: number | null) {
+  return rx != null && tx != null ? `${formatBytes(total)}（下行 ${formatBytes(rx)} / 上行 ${formatBytes(tx)}）` : formatBytes(total)
+}
+
 function daysLeft(value: string | null) {
   if (!value) return '—'
   const days = Math.floor((new Date(value).getTime() - Date.now()) / 86400000)
@@ -62,6 +75,10 @@ function ListingSpecs({ listing }: { listing: TradeListingRecord }) {
           </dd>
         </div>
         <div>
+          <dt>本月流量</dt>
+          <dd>{trafficText(listing.traffic_bytes, listing.traffic_rx_bytes, listing.traffic_tx_bytes)}，上架时读取，挂售期间实例已停机</dd>
+        </div>
+        <div>
           <dt>开通于</dt>
           <dd>{new Date(listing.service_created_at).toLocaleDateString()}</dd>
         </div>
@@ -103,7 +120,10 @@ export default function TradeMarket() {
         <div>
           <p className="eyebrow">TRADING MARKET</p>
           <h2>交易市场</h2>
-          <p>用户之间转让正在运行的实例，用账户余额成交，成交额进入卖家余额。持有满 {data?.hold_days ?? TRADE_HOLD_DAYS} 天的实例可以在「我的 VPS」挂售。</p>
+          <p>
+            用户之间转让实例，用账户余额成交。持有满 {data?.hold_days ?? TRADE_HOLD_DAYS} 天的实例可以在「我的 VPS」挂售；挂售期间实例停机、卖家不能使用，到期时间照常计算，
+            距到期不足 {data?.min_remaining_days ?? 3} 天自动下架。平台收取成交价 {data?.fee_percent ?? 20}% 的手续费，由卖家承担。
+          </p>
         </div>
         <button className="secondary-button" onClick={() => void load()}>
           <RefreshCw size={15} />刷新
@@ -161,7 +181,12 @@ export default function TradeMarket() {
                       <strong>{listing.instance_name}</strong>
                       <small className="block">{listing.plan_name} · {listing.region_name}</small>
                     </td>
-                    <td>{walletMoney(listing.price_minor, listing.currency)}</td>
+                    <td>
+                      {walletMoney(listing.price_minor, listing.currency)}
+                      {listing.seller_proceeds_minor != null && (
+                        <small className="block">到账 {walletMoney(listing.seller_proceeds_minor, listing.currency)}（手续费 {walletMoney(listing.fee_minor || 0, listing.currency)}）</small>
+                      )}
+                    </td>
                     <td>
                       <span className={listing.status === 'sold' ? 'tag success' : 'tag'}>{statusNames[listing.status]}</span>
                       {listing.status === 'listed' && !listing.available && <small className="block">实例不是正常运行状态，买家看不到</small>}
@@ -243,7 +268,7 @@ function BuyListing({ listing, onClose, onDone }: { listing: TradeListingRecord;
         {error && <div className="form-error">{error}</div>}
         <ul className="trade-terms">
           <li>用账户余额支付 <strong>{walletMoney(listing.price_minor, listing.currency)}</strong>，当前余额 {walletMoney(wallet?.balance_minor || 0, wallet?.currency)}。</li>
-          <li>成交后实例连同剩余时长转入你的账户，之后按上面的续费价格续费。</li>
+          <li>成交后实例连同剩余时长转入你的账户并自动开机，之后按上面的续费价格续费。</li>
           <li>原主人知道这台机器的密码，也可能留下了其他登录方式：请立即重置 root 密码，必要时重装系统。</li>
           <li>交易不退款；托管母机上的实例仍受托管清退规则保障。</li>
         </ul>
@@ -267,6 +292,10 @@ function BuyListing({ listing, onClose, onDone }: { listing: TradeListingRecord;
 export function ListServiceDialog({ service, onClose, onDone }: { service: CustomerServiceRecord; onClose: () => void; onDone: () => void }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [feePercent, setFeePercent] = useState<number | null>(null)
+  useEffect(() => {
+    api<TradeRecord>('/api/v1/customer/trade').then(value => setFeePercent(value.fee_percent)).catch(() => undefined)
+  }, [])
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -310,7 +339,8 @@ export function ListServiceDialog({ service, onClose, onDone }: { service: Custo
             <textarea name="note" maxLength={500} rows={3} placeholder="例如出售原因、用途限制" />
           </label>
           <p className="muted-text wide">
-            买家看得到套餐配置、地域、到期时间和续费价格，看不到 IP 和密码。成交后实例立即转给买家，成交额存入你的余额（不可提现）。挂售期间你仍可正常使用，也可以随时下架。
+            挂售后实例会立即停机，挂售期间你不能开机、登录、重装或修改；到期时间照常计算，不会因为挂售而延长，距到期不足 3 天会自动下架。
+            买家看得到套餐配置、地域、到期时间、续费价格和上架时的本月流量，看不到 IP 和密码。成交后扣除 {feePercent ?? 20}% 平台手续费，余下的存入你的余额（不可提现）。可以随时下架，下架后自行开机。
           </p>
           <div className="form-actions wide">
             <button type="button" className="secondary-button" onClick={onClose}>取消</button>

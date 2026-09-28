@@ -39,7 +39,7 @@ func (m *MarketplaceStore) RefundTarget(ctx context.Context, accountID, serviceI
 	err := m.db.QueryRow(ctx, `
 		SELECT s.id,s.instance_name,s.node_id::text,CASE WHEN s.traffic_measured_at>=s.created_at THEN s.traffic_used_bytes END
 		FROM services s JOIN plans p ON p.id=s.plan_id
-		WHERE s.id=$1 AND s.account_id=$2 AND p.owner_account_id IS NOT NULL
+		WHERE s.id=$1 AND s.account_id=$2 AND (p.owner_account_id IS NOT NULL OR s.status='error')
 	`, serviceID, accountID).Scan(&target.ServiceID, &target.InstanceName, &nodeID, &target.StoredTrafficBytes)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return RefundTarget{}, ErrServiceNotFound
@@ -101,9 +101,13 @@ func (e *refundEscrow) settle(now time.Time, full bool) {
 
 type refundPlan struct {
 	RefundQuote
-	accountID, hostID, status, planName string
-	nodeID                              *string
-	escrows                             []refundEscrow
+	accountID, status, planName string
+	hostID                      *string
+	nodeID                      *string
+	// platformPaid is what was paid for a platform service that failed to
+	// provision; platform services have no escrow.
+	platformPaid int64
+	escrows      []refundEscrow
 }
 
 func (m *MarketplaceStore) planRefund(ctx context.Context, tx pgx.Tx, accountID, serviceID string, now time.Time, traffic *int64) (refundPlan, error) {
@@ -111,7 +115,7 @@ func (m *MarketplaceStore) planRefund(ctx context.Context, tx pgx.Tx, accountID,
 	err := tx.QueryRow(ctx, `
 		SELECT s.id,s.instance_name,s.account_id,s.status,s.node_id,s.created_at,p.early_refund,p.owner_account_id,p.name,a.default_currency
 		FROM services s JOIN plans p ON p.id=s.plan_id JOIN accounts a ON a.id=s.account_id
-		WHERE s.id=$1 AND s.account_id=$2 AND p.owner_account_id IS NOT NULL FOR UPDATE OF s
+		WHERE s.id=$1 AND s.account_id=$2 FOR UPDATE OF s
 	`, serviceID, accountID).Scan(&plan.ServiceID, &plan.InstanceName, &plan.accountID, &plan.status, &plan.nodeID, &plan.PurchasedAt,
 		&plan.EarlyRefund, &plan.hostID, &plan.planName, &plan.Currency)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -121,6 +125,27 @@ func (m *MarketplaceStore) planRefund(ctx context.Context, tx pgx.Tx, accountID,
 		return plan, err
 	}
 	plan.TrafficBytes = traffic
+	if plan.hostID == nil {
+		// Platform services are refunded only when provisioning failed for
+		// good: the whole unit price paid comes back.
+		if plan.status != "error" || plan.nodeID != nil {
+			return plan, ErrServiceNotFound
+		}
+		err := tx.QueryRow(ctx, `
+			SELECT coalesce(sum(l.total_minor),0)::bigint / greatest(max(oi.quantity),1)
+			FROM services s JOIN order_items oi ON oi.id=s.order_item_id
+			JOIN invoices i ON i.order_id=oi.order_id AND i.status='paid'
+			JOIN invoice_lines l ON l.invoice_id=i.id AND l.order_item_id=oi.id
+			WHERE s.id=$1
+		`, serviceID).Scan(&plan.platformPaid)
+		if err != nil {
+			return plan, err
+		}
+		plan.Full, plan.Available = true, true
+		plan.Message = "实例开通失败，全额退款"
+		plan.PaidMinor, plan.RefundMinor = plan.platformPaid, plan.platformPaid
+		return plan, nil
+	}
 	switch plan.status {
 	case "active", "overdue", "suspended":
 	case "error":
@@ -224,7 +249,7 @@ func (m *MarketplaceStore) RefundService(ctx context.Context, accountID, service
 	for _, e := range plan.escrows {
 		if delta := e.hostTarget - e.releasedHost; delta > 0 {
 			if _, err := applyWalletChange(ctx, tx, walletChange{
-				AccountID: plan.hostID, Kind: "earning", AmountMinor: delta,
+				AccountID: *plan.hostID, Kind: "earning", AmountMinor: delta,
 				Description:   fmt.Sprintf("托管收益：%s 已使用部分（买家退款）", plan.InstanceName),
 				ReferenceType: "escrow", ReferenceID: e.id, DedupKey: "escrow:" + e.id + ":refund-settle",
 			}); err != nil {
@@ -283,7 +308,7 @@ func (m *MarketplaceStore) RefundService(ctx context.Context, accountID, service
 		userID, serviceID, plan.RefundMinor, plan.Full, traffic, result.HostMinor); err != nil {
 		return RefundResult{}, err
 	}
-	if err := tx.QueryRow(ctx, `SELECT b.display_name,b.billing_email,h.display_name,h.billing_email FROM accounts b, accounts h WHERE b.id=$1 AND h.id=$2`, accountID, plan.hostID).
+	if err := tx.QueryRow(ctx, `SELECT b.display_name,b.billing_email,coalesce(h.display_name,''),coalesce(h.billing_email,'') FROM accounts b LEFT JOIN accounts h ON h.id=$2 WHERE b.id=$1`, accountID, plan.hostID).
 		Scan(&result.BuyerName, &result.BuyerEmail, &result.HostName, &result.HostEmail); err != nil {
 		return RefundResult{}, err
 	}

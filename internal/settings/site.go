@@ -16,6 +16,7 @@ import (
 type SiteView struct {
 	AppName                  string              `json:"app_name"`
 	PublicURL                string              `json:"public_url"`
+	AdminURL                 string              `json:"admin_url"`
 	Timezone                 string              `json:"timezone"`
 	WorkerPollInterval       string              `json:"worker_poll_interval"`
 	ReconcileInterval        string              `json:"reconcile_interval"`
@@ -42,6 +43,7 @@ type SiteView struct {
 type SiteInput struct {
 	AppName                   string              `json:"app_name"`
 	PublicURL                 string              `json:"public_url"`
+	AdminURL                  string              `json:"admin_url"`
 	Timezone                  string              `json:"timezone"`
 	WorkerPollInterval        string              `json:"worker_poll_interval"`
 	ReconcileInterval         string              `json:"reconcile_interval"`
@@ -66,7 +68,7 @@ type SiteInput struct {
 func (m *Manager) SiteView() SiteView {
 	c := m.Current()
 	return SiteView{
-		AppName: c.AppName, PublicURL: c.PublicURL, Timezone: c.Timezone,
+		AppName: c.AppName, PublicURL: c.PublicURL, AdminURL: c.AdminURL, Timezone: c.Timezone,
 		WorkerPollInterval: compactDuration(c.WorkerPollInterval), ReconcileInterval: compactDuration(c.ReconcileInterval),
 		LifecycleInterval: compactDuration(c.LifecycleInterval), RenewalLeadTime: compactDuration(c.RenewalLeadTime),
 		OverdueGracePeriod: compactDuration(c.OverdueGracePeriod), TerminationRetention: compactDuration(c.TerminationRetention),
@@ -94,6 +96,10 @@ func (m *Manager) UpdateSite(ctx context.Context, in SiteInput, actorID string) 
 	}
 	if absoluteURL(publicURL, true) != nil {
 		return invalid("公开访问地址必须是完整的 HTTP(S) URL")
+	}
+	adminURL := strings.TrimRight(strings.TrimSpace(in.AdminURL), "/")
+	if adminURL != "" && absoluteURL(adminURL, true) != nil {
+		return invalid("后台访问地址必须是完整的 HTTP(S) URL，或者留空")
 	}
 	if _, err := time.LoadLocation(timezone); timezone == "" || err != nil {
 		return invalid("时区无效，请使用 Asia/Shanghai 这类 IANA 名称")
@@ -169,6 +175,9 @@ func (m *Manager) UpdateSite(ctx context.Context, in SiteInput, actorID string) 
 	if in.Marketplace.OfflineHours < 1 || in.Marketplace.OfflineHours > 720 {
 		return invalid("托管母机离线清退时限必须在 1–720 小时之间")
 	}
+	if in.Marketplace.TradeFeePercent < 0 || in.Marketplace.TradeFeePercent > 90 {
+		return invalid("交易市场手续费比例必须在 0–90% 之间")
+	}
 	notificationsJSON, err := json.Marshal(notifications)
 	if err != nil {
 		return SiteView{}, err
@@ -196,13 +205,13 @@ func (m *Manager) UpdateSite(ctx context.Context, in SiteInput, actorID string) 
 		    notification_webhook_url=$10,notification_webhook_secret_encrypted=$11,
 		    smtp_host=$12,smtp_port=$13,smtp_username=$14,smtp_password_encrypted=$15,smtp_from=$16,smtp_security=$17,
 		    mail_notifications=$18,ticket_attachment_max_mb=$19,
-		    marketplace_enabled=$20,marketplace_fee_percent=$21,marketplace_offline_hours=$22,updated_at=now()
+		    marketplace_enabled=$20,marketplace_fee_percent=$21,marketplace_offline_hours=$22,trade_fee_percent=$23,admin_url=$24,updated_at=now()
 		WHERE singleton=true
 	`, appName, publicURL, timezone,
 		seconds(*durations[0].target), seconds(*durations[1].target), seconds(*durations[2].target),
 		seconds(*durations[3].target), seconds(*durations[4].target), seconds(*durations[5].target),
 		notificationURL, notificationEnc, smtp.Host, smtp.Port, smtp.Username, smtpPasswordEnc, smtp.From, smtp.Security, notificationsJSON, in.TicketAttachmentMaxMB,
-		in.Marketplace.Enabled, in.Marketplace.FeePercent, in.Marketplace.OfflineHours)
+		in.Marketplace.Enabled, in.Marketplace.FeePercent, in.Marketplace.OfflineHours, in.Marketplace.TradeFeePercent, adminURL)
 	if err != nil {
 		return SiteView{}, err
 	}

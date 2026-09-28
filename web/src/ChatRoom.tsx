@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useRef, useState } from 'react'
-import { Send } from 'lucide-react'
-import { api, type ChatHistoryRecord, type ChatMessageRecord } from './api'
+import { Flag, Send, VolumeX } from 'lucide-react'
+import { api, type ChatHistoryRecord, type ChatMessageRecord, type ChatMuteRecord } from './api'
+import { ReportDialog } from './Reports'
 
 const roleLabels: Record<string, string> = { host: '机主', buyer: '用户', staff: '平台', system: '系统' }
 
@@ -12,7 +13,32 @@ function websocketURL(path: string) {
 // ChatRoom shows one hosted node's room. History loads over HTTP; new
 // messages arrive over a WebSocket and are also fetched after a reconnect,
 // so nothing is lost while the socket is down.
-export default function ChatRoom({ base, nodeID, title }: { base: string; nodeID: string; title: string }) {
+// Staff can mute customers in the room; customers can report messages.
+export default function ChatRoom({ base, nodeID, title, staff = false }: { base: string; nodeID: string; title: string; staff?: boolean }) {
+  const [mutes, setMutes] = useState<ChatMuteRecord[]>([])
+  const [reporting, setReporting] = useState<ChatMessageRecord | null>(null)
+  const loadMutes = () => {
+    if (staff) api<ChatMuteRecord[]>(`${base}/${nodeID}/mutes`).then(setMutes).catch(() => undefined)
+  }
+  useEffect(loadMutes, [staff, base, nodeID])
+  async function mute(message: ChatMessageRecord) {
+    const hours = Number(window.prompt(`禁言 ${message.author_name} 多少小时？`, '24'))
+    if (!hours || !message.author_account_id) return
+    try {
+      await api(`${base}/${nodeID}/mutes`, { method: 'POST', body: JSON.stringify({ account_id: message.author_account_id, hours, reason: '聊天室违规' }) })
+      loadMutes()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '禁言失败')
+    }
+  }
+  async function unmute(accountID: string) {
+    try {
+      await api(`${base}/${nodeID}/mutes/${accountID}`, { method: 'DELETE' })
+      loadMutes()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '操作失败')
+    }
+  }
   const [messages, setMessages] = useState<ChatMessageRecord[]>([])
   const [canPost, setCanPost] = useState(true)
   const [body, setBody] = useState('')
@@ -115,12 +141,34 @@ export default function ChatRoom({ base, nodeID, title }: { base: string; nodeID
               <strong>{message.author_name}</strong>
               <span className={`chat-role ${message.author_type}`}>{roleLabels[message.author_type] || message.author_type}</span>
               <time>{new Date(message.created_at).toLocaleString()}</time>
+              {staff && message.author_account_id && (
+                <button type="button" className="text-button chat-action" onClick={() => void mute(message)} title="禁言">
+                  <VolumeX size={13} />禁言
+                </button>
+              )}
+              {!staff && !message.mine && message.author_type !== 'staff' && (
+                <button type="button" className="text-button chat-action" onClick={() => setReporting(message)} title="举报">
+                  <Flag size={13} />举报
+                </button>
+              )}
             </div>
             <p>{message.body}</p>
           </div>
         ))}
         {!messages.length && <div className="empty-state">还没有消息，打个招呼吧。</div>}
       </div>
+      {staff && mutes.length > 0 && (
+        <div className="chat-mutes">
+          禁言中：
+          {mutes.map(item => (
+            <span key={item.account_id} className="tag">
+              {item.account_name} 至 {new Date(item.until).toLocaleString()}
+              <button type="button" className="text-button" onClick={() => void unmute(item.account_id)}>解除</button>
+            </span>
+          ))}
+        </div>
+      )}
+      {reporting && <ReportDialog nodeID={nodeID} nodeName={title} messageID={reporting.id} onClose={() => setReporting(null)} />}
       {error && <div className="form-error">{error}</div>}
       {canPost ? (
         <form className="chat-compose" onSubmit={send}>

@@ -146,39 +146,43 @@ type HostedService struct {
 }
 
 type HostedNode struct {
-	ID                  string          `json:"id"`
-	Name                string          `json:"name"`
-	OwnerAccountID      string          `json:"owner_account_id"`
-	OwnerName           string          `json:"owner_name"`
-	OwnerEmail          string          `json:"owner_email,omitempty"`
-	OwnerBalanceMinor   int64           `json:"owner_balance_minor"`
-	RegionID            string          `json:"region_id"`
-	RegionName          string          `json:"region_name"`
-	Location            string          `json:"location"`
-	LineDescription     string          `json:"line_description"`
-	Status              string          `json:"status"`
-	ListingStatus       string          `json:"listing_status"`
-	VirtualizationTypes []string        `json:"virtualization_types"`
-	ExpiresAt           string          `json:"expires_at"`
-	TrafficQuotaGB      int             `json:"traffic_quota_gb"`
-	CapacityVCPU        int64           `json:"capacity_vcpu"`
-	CapacityRAMMB       int64           `json:"capacity_ram_mb"`
-	CapacityDiskGB      int64           `json:"capacity_disk_gb"`
-	FreeVCPU            int64           `json:"free_vcpu"`
-	FreeRAMMB           int64           `json:"free_ram_mb"`
-	FreeDiskGB          int64           `json:"free_disk_gb"`
-	LastSeenAt          *time.Time      `json:"last_seen_at"`
-	ClearanceHoldUntil  *time.Time      `json:"clearance_hold_until"`
-	RetiredAt           *time.Time      `json:"retired_at"`
-	RetiredReason       string          `json:"retired_reason,omitempty"`
-	ActiveServices      int             `json:"active_services"`
-	EscrowHoldingMinor  int64           `json:"escrow_holding_minor"`
-	HostPendingMinor    int64           `json:"host_pending_minor"`
-	HostReleasedMinor   int64           `json:"host_released_minor"`
-	FeeMinor            int64           `json:"fee_minor"`
-	CreatedAt           time.Time       `json:"created_at"`
-	Plans               []Plan          `json:"plans"`
-	Services            []HostedService `json:"services,omitempty"`
+	ID                  string   `json:"id"`
+	Name                string   `json:"name"`
+	OwnerAccountID      string   `json:"owner_account_id"`
+	OwnerName           string   `json:"owner_name"`
+	OwnerEmail          string   `json:"owner_email,omitempty"`
+	OwnerBalanceMinor   int64    `json:"owner_balance_minor"`
+	RegionID            string   `json:"region_id"`
+	RegionName          string   `json:"region_name"`
+	Location            string   `json:"location"`
+	LineDescription     string   `json:"line_description"`
+	Status              string   `json:"status"`
+	ListingStatus       string   `json:"listing_status"`
+	VirtualizationTypes []string `json:"virtualization_types"`
+	ExpiresAt           string   `json:"expires_at"`
+	TrafficQuotaGB      int      `json:"traffic_quota_gb"`
+	CapacityVCPU        int64    `json:"capacity_vcpu"`
+	CapacityRAMMB       int64    `json:"capacity_ram_mb"`
+	CapacityDiskGB      int64    `json:"capacity_disk_gb"`
+	// Capacity caps set by staff; nil means the agent report is used.
+	CapVCPU            *int            `json:"capacity_cap_vcpu"`
+	CapRAMMB           *int64          `json:"capacity_cap_ram_mb"`
+	CapDiskGB          *int64          `json:"capacity_cap_disk_gb"`
+	FreeVCPU           int64           `json:"free_vcpu"`
+	FreeRAMMB          int64           `json:"free_ram_mb"`
+	FreeDiskGB         int64           `json:"free_disk_gb"`
+	LastSeenAt         *time.Time      `json:"last_seen_at"`
+	ClearanceHoldUntil *time.Time      `json:"clearance_hold_until"`
+	RetiredAt          *time.Time      `json:"retired_at"`
+	RetiredReason      string          `json:"retired_reason,omitempty"`
+	ActiveServices     int             `json:"active_services"`
+	EscrowHoldingMinor int64           `json:"escrow_holding_minor"`
+	HostPendingMinor   int64           `json:"host_pending_minor"`
+	HostReleasedMinor  int64           `json:"host_released_minor"`
+	FeeMinor           int64           `json:"fee_minor"`
+	CreatedAt          time.Time       `json:"created_at"`
+	Plans              []Plan          `json:"plans"`
+	Services           []HostedService `json:"services,omitempty"`
 }
 
 type HostedNodeInput struct {
@@ -327,7 +331,7 @@ func (m *MarketplaceStore) HostedNodes(ctx context.Context, ownerID string, mark
 	rows, err := m.db.Query(ctx, `
 		SELECT n.id,n.name,n.owner_account_id,a.display_name,a.billing_email,a.balance_minor,n.region_id,r.name,n.location,n.line_description,
 		       n.status,n.listing_status,n.virtualization_types,coalesce(to_char(n.expires_at,'YYYY-MM-DD'),''),n.traffic_quota_gb,
-		       n.capacity_vcpu,n.capacity_ram_mb,n.capacity_disk_gb,
+		       n.capacity_vcpu,n.capacity_ram_mb,n.capacity_disk_gb,n.capacity_cap_vcpu,n.capacity_cap_ram_mb,n.capacity_cap_disk_gb,
 		       coalesce(res.vcpu,0),coalesce(res.ram_mb,0),coalesce(res.disk_gb,0),
 		       n.last_seen_at,n.clearance_hold_until,n.retired_at,coalesce(n.retired_reason,''),
 		       (SELECT count(*) FROM services s JOIN plans p ON p.id=s.plan_id WHERE p.node_id=n.id AND s.status IN ('provisioning','active','overdue','suspended'))::int,
@@ -352,7 +356,7 @@ func (m *MarketplaceStore) HostedNodes(ctx context.Context, ownerID string, mark
 		var reservedVCPU, reservedRAM, reservedDisk int64
 		if err := rows.Scan(&node.ID, &node.Name, &node.OwnerAccountID, &node.OwnerName, &node.OwnerEmail, &node.OwnerBalanceMinor, &node.RegionID, &node.RegionName, &node.Location, &node.LineDescription,
 			&node.Status, &node.ListingStatus, &node.VirtualizationTypes, &node.ExpiresAt, &node.TrafficQuotaGB,
-			&node.CapacityVCPU, &node.CapacityRAMMB, &node.CapacityDiskGB, &reservedVCPU, &reservedRAM, &reservedDisk,
+			&node.CapacityVCPU, &node.CapacityRAMMB, &node.CapacityDiskGB, &node.CapVCPU, &node.CapRAMMB, &node.CapDiskGB, &reservedVCPU, &reservedRAM, &reservedDisk,
 			&node.LastSeenAt, &node.ClearanceHoldUntil, &node.RetiredAt, &node.RetiredReason, &node.ActiveServices,
 			&node.EscrowHoldingMinor, &node.HostPendingMinor, &node.HostReleasedMinor, &node.FeeMinor, &node.CreatedAt); err != nil {
 			return nil, err

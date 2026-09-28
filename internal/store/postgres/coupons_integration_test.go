@@ -197,6 +197,8 @@ func hostedTermsAndCoupons(t *testing.T, ctx context.Context, db *pgxpool.Pool, 
 func tradeMarket(t *testing.T, ctx context.Context, db *pgxpool.Pool, serviceID, hostID, sellerID, sellerUser, buyerID string) {
 	t.Helper()
 	trade := NewTradeStore(db)
+	rx, tx := int64(3000), int64(1000)
+	snapshot := &ListingTraffic{TotalBytes: 4000, RXBytes: &rx, TXBytes: &tx}
 	billing := NewBillingStore(db)
 	balanceOf := func(accountID string) int64 {
 		wallet, err := billing.Wallet(ctx, accountID, 1)
@@ -206,26 +208,26 @@ func tradeMarket(t *testing.T, ctx context.Context, db *pgxpool.Pool, serviceID,
 		return wallet.BalanceMinor
 	}
 	var rule *TradeError
-	if _, err := trade.CreateListing(ctx, sellerID, sellerUser, serviceID, 5000, ""); !errors.As(err, &rule) {
+	if _, err := trade.CreateListing(ctx, sellerID, sellerUser, serviceID, 5000, "", snapshot); !errors.As(err, &rule) {
 		t.Fatalf("listed a provisioning instance: %v", err)
 	}
 	if _, err := db.Exec(ctx, `UPDATE services SET status='active',root_password_ciphertext='\x01',node_id=(SELECT node_id FROM plans WHERE id=services.plan_id) WHERE id=$1`, serviceID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := trade.CreateListing(ctx, sellerID, sellerUser, serviceID, 5000, ""); !errors.As(err, &rule) {
+	if _, err := trade.CreateListing(ctx, sellerID, sellerUser, serviceID, 5000, "", snapshot); !errors.As(err, &rule) {
 		t.Fatalf("listed an instance held for less than 31 days: %v", err)
 	}
 	if _, err := db.Exec(ctx, `UPDATE services SET acquired_at=now()-interval '32 days' WHERE id=$1`, serviceID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := trade.CreateListing(ctx, buyerID, sellerUser, serviceID, 5000, ""); !errors.Is(err, ErrServiceNotFound) {
+	if _, err := trade.CreateListing(ctx, buyerID, sellerUser, serviceID, 5000, "", snapshot); !errors.Is(err, ErrServiceNotFound) {
 		t.Fatalf("listed someone else's instance: %v", err)
 	}
-	listingID, err := trade.CreateListing(ctx, sellerID, sellerUser, serviceID, 5000, "急出")
+	listingID, err := trade.CreateListing(ctx, sellerID, sellerUser, serviceID, 5000, "急出", snapshot)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := trade.CreateListing(ctx, sellerID, sellerUser, serviceID, 6000, ""); !errors.As(err, &rule) {
+	if _, err := trade.CreateListing(ctx, sellerID, sellerUser, serviceID, 6000, "", snapshot); !errors.As(err, &rule) {
 		t.Fatalf("listed twice: %v", err)
 	}
 	market, err := trade.Market(ctx, buyerID)
@@ -255,7 +257,7 @@ func tradeMarket(t *testing.T, ctx context.Context, db *pgxpool.Pool, serviceID,
 	if err != nil || result.ServiceID != serviceID {
 		t.Fatalf("buy: %+v err=%v", result, err)
 	}
-	if balanceOf(sellerID) != sellerBefore+5000 || balanceOf(buyerID) != buyerBefore-5000 {
+	if balanceOf(sellerID) != sellerBefore+4000 || balanceOf(buyerID) != buyerBefore-5000 {
 		t.Fatalf("trade balances seller %d->%d buyer %d->%d", sellerBefore, balanceOf(sellerID), buyerBefore, balanceOf(buyerID))
 	}
 	var owner, escrowBuyer string
@@ -270,7 +272,7 @@ func tradeMarket(t *testing.T, ctx context.Context, db *pgxpool.Pool, serviceID,
 		t.Fatalf("sold twice: %v", err)
 	}
 	// The new owner starts a fresh holding period.
-	if _, err := trade.CreateListing(ctx, buyerID, sellerUser, serviceID, 5000, ""); !errors.As(err, &rule) {
+	if _, err := trade.CreateListing(ctx, buyerID, sellerUser, serviceID, 5000, "", snapshot); !errors.As(err, &rule) {
 		t.Fatalf("relisted right after buying: %v", err)
 	}
 	if mine, _ := trade.SellerListings(ctx, sellerID); len(mine) != 1 || mine[0].Status != "sold" || mine[0].Available {

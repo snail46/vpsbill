@@ -30,7 +30,7 @@ func (n *Notifier) TicketCreated(ctx context.Context, ticketID, messageID, body 
 	}
 	subject := fmt.Sprintf("[%s] 新工单 %s：%s", n.siteName(), ticket.Number, ticket.Subject)
 	text := fmt.Sprintf("客户 %s 提交了新工单。\n\n编号：%s\n主题：%s\n优先级：%s\n\n%s\n\n处理工单：%s\n",
-		ticket.CustomerName, ticket.Number, ticket.Subject, priorityNames[ticket.Priority], excerpt(body, 800), n.link("/admin/support"))
+		ticket.CustomerName, ticket.Number, ticket.Subject, priorityNames[ticket.Priority], excerpt(body, 800), n.adminLink("/admin/support"))
 	for _, to := range n.adminRecipients(ctx) {
 		n.enqueue(ctx, to, subject, text, "ticket-message:"+messageID+":"+to)
 	}
@@ -82,7 +82,7 @@ func (n *Notifier) TicketReplied(ctx context.Context, ticketID, messageID, autho
 		}
 		subject := fmt.Sprintf("[%s] 工单 %s 客户回复：%s", n.siteName(), ticket.Number, ticket.Subject)
 		text := fmt.Sprintf("客户 %s 回复了工单 %s。\n\n%s\n\n处理工单：%s\n",
-			ticket.CustomerName, ticket.Number, excerpt(body, 800), n.link("/admin/support"))
+			ticket.CustomerName, ticket.Number, excerpt(body, 800), n.adminLink("/admin/support"))
 		for _, to := range n.adminRecipients(ctx) {
 			n.enqueue(ctx, to, subject, text, "ticket-message:"+messageID+":"+to)
 		}

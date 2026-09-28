@@ -175,9 +175,9 @@ func (s *CatalogStore) UpdateNodeHealth(ctx context.Context, id, status string, 
 	}
 	_, err := s.db.Exec(ctx, `
 		UPDATE nodes SET status=$2, capacity=$3,
-		    capacity_vcpu=CASE WHEN $2='online' THEN $4 ELSE capacity_vcpu END,
-		    capacity_ram_mb=CASE WHEN $2='online' THEN $5 ELSE capacity_ram_mb END,
-		    capacity_disk_gb=CASE WHEN $2='online' THEN $6 ELSE capacity_disk_gb END,
+		    capacity_vcpu=CASE WHEN $2='online' THEN least($4,coalesce(capacity_cap_vcpu,$4)) ELSE capacity_vcpu END,
+		    capacity_ram_mb=CASE WHEN $2='online' THEN least($5,coalesce(capacity_cap_ram_mb,$5)) ELSE capacity_ram_mb END,
+		    capacity_disk_gb=CASE WHEN $2='online' THEN least($6,coalesce(capacity_cap_disk_gb,$6)) ELSE capacity_disk_gb END,
 		    last_seen_at=CASE WHEN $2='online' THEN now() ELSE last_seen_at END, updated_at=now()
 		WHERE id=$1
 	`, id, status, body, vcpu, ramMB, diskGB)

@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"vpsbill/internal/chat"
@@ -71,7 +72,7 @@ func NewHandler(deps Dependencies) (http.Handler, error) {
 	}
 	market := &marketplaceAPI{store: marketStore, catalog: catalogStore, billing: billingStore, settings: deps.Settings, box: secretBox, service: marketService, hub: deps.ChatHub}
 	coupons := &couponAPI{coupons: postgres.NewCouponStore(deps.DB), settings: deps.Settings, market: market}
-	trade := &tradeAPI{store: postgres.NewTradeStore(deps.DB), notifier: notifier}
+	trade := &tradeAPI{store: postgres.NewTradeStore(deps.DB), notifier: notifier, hosting: marketService, settings: deps.Settings}
 	install := &installer{settings: deps.Settings, auth: auth, logger: deps.Logger}
 
 	mux := http.NewServeMux()
@@ -87,9 +88,12 @@ func NewHandler(deps Dependencies) (http.Handler, error) {
 		writeJSON(w, http.StatusOK, map[string]any{"status": "ready"})
 	})
 	mux.HandleFunc("GET /metrics", metrics.serve)
-	mux.HandleFunc("GET /api/v1/meta", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("GET /api/v1/meta", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"data": map[string]any{
+				"surface":                  r.Header.Get("X-VPSBill-Surface"),
+				"admin_url":                deps.Settings.Current().AdminURL,
+				"public_url":               deps.Settings.Current().PublicURL,
 				"name":                     deps.Settings.Current().AppName,
 				"environment":              deps.Config.Environment,
 				"installed":                deps.Settings.Current().Installed,
@@ -114,9 +118,11 @@ func NewHandler(deps Dependencies) (http.Handler, error) {
 	mux.HandleFunc("POST /api/v1/customer/auth/register", auth.customerRegister)
 	mux.HandleFunc("POST /api/v1/customer/auth/login", auth.customerLogin)
 	mux.HandleFunc("POST /api/v1/customer/auth/password-reset", auth.customerRequestPasswordReset)
+	mux.HandleFunc("POST /api/v1/customer/auth/verify-email", auth.customerConfirmEmail)
+	mux.Handle("POST /api/v1/customer/auth/verify-email/resend", auth.requireCustomer(http.HandlerFunc(auth.customerResendVerification)))
 	mux.HandleFunc("POST /api/v1/customer/auth/password-reset/confirm", auth.customerResetPassword)
 	mux.Handle("GET /api/v1/customer/auth/me", auth.requireCustomer(http.HandlerFunc(auth.customerMe)))
-	mux.Handle("POST /api/v1/customer/auth/logout", auth.requireCustomer(http.HandlerFunc(auth.logout)))
+	mux.Handle("POST /api/v1/customer/auth/logout", auth.requireCustomer(http.HandlerFunc(auth.customerLogout)))
 	mux.Handle("POST /api/v1/customer/auth/mfa/setup", auth.requireCustomer(http.HandlerFunc(auth.customerMFASetup)))
 	mux.Handle("POST /api/v1/customer/auth/mfa/confirm", auth.requireCustomer(http.HandlerFunc(auth.customerMFAConfirm)))
 	mux.Handle("POST /api/v1/customer/auth/mfa/disable", auth.requireCustomer(http.HandlerFunc(auth.customerMFADisable)))
@@ -136,19 +142,19 @@ func NewHandler(deps Dependencies) (http.Handler, error) {
 	mux.Handle("GET /api/v1/customer/transactions", auth.requireCustomer(http.HandlerFunc(portal.listTransactions)))
 	mux.Handle("GET /api/v1/customer/catalog", auth.requireCustomer(http.HandlerFunc(portal.catalogData)))
 	mux.Handle("GET /api/v1/customer/orders", auth.requireCustomer(http.HandlerFunc(portal.listOrders)))
-	mux.Handle("POST /api/v1/customer/orders", auth.requireCustomer(http.HandlerFunc(portal.createOrder)))
-	mux.Handle("POST /api/v1/customer/invoices/{id}/checkout", auth.requireCustomer(http.HandlerFunc(portal.checkout)))
+	mux.Handle("POST /api/v1/customer/orders", auth.requireVerifiedCustomer(http.HandlerFunc(portal.createOrder)))
+	mux.Handle("POST /api/v1/customer/invoices/{id}/checkout", auth.requireVerifiedCustomer(http.HandlerFunc(portal.checkout)))
 	mux.Handle("GET /api/v1/customer/tickets", auth.requireCustomer(http.HandlerFunc(operations.customerListTickets)))
 	mux.Handle("POST /api/v1/customer/tickets", auth.requireCustomer(http.HandlerFunc(operations.customerCreateTicket)))
 	mux.Handle("GET /api/v1/customer/tickets/{id}", auth.requireCustomer(http.HandlerFunc(operations.customerTicketDetail)))
 	mux.Handle("POST /api/v1/customer/tickets/{id}/messages", auth.requireCustomer(http.HandlerFunc(operations.customerReplyTicket)))
 	mux.Handle("GET /api/v1/customer/tickets/{id}/attachments/{attachment}", auth.requireCustomer(http.HandlerFunc(operations.customerAttachment)))
 	mux.Handle("GET /api/v1/customer/wallet", auth.requireCustomer(http.HandlerFunc(market.customerWallet)))
-	mux.Handle("POST /api/v1/customer/wallet/topup", auth.requireCustomer(http.HandlerFunc(market.customerTopup)))
-	mux.Handle("POST /api/v1/customer/invoices/{id}/pay-balance", auth.requireCustomer(http.HandlerFunc(market.customerPayWithBalance)))
+	mux.Handle("POST /api/v1/customer/wallet/topup", auth.requireVerifiedCustomer(http.HandlerFunc(market.customerTopup)))
+	mux.Handle("POST /api/v1/customer/invoices/{id}/pay-balance", auth.requireVerifiedCustomer(http.HandlerFunc(market.customerPayWithBalance)))
 	mux.Handle("GET /api/v1/customer/market", auth.requireCustomer(http.HandlerFunc(market.market)))
 	mux.Handle("GET /api/v1/customer/hosting", auth.requireCustomer(http.HandlerFunc(market.hosting)))
-	mux.Handle("POST /api/v1/customer/hosting/nodes", auth.requireCustomer(http.HandlerFunc(market.publishNode)))
+	mux.Handle("POST /api/v1/customer/hosting/nodes", auth.requireVerifiedCustomer(http.HandlerFunc(market.publishNode)))
 	mux.Handle("PUT /api/v1/customer/hosting/nodes/{id}", auth.requireCustomer(http.HandlerFunc(market.updateHostedNode)))
 	mux.Handle("POST /api/v1/customer/hosting/nodes/{id}/listing", auth.requireCustomer(http.HandlerFunc(market.setHostedListing)))
 	mux.Handle("POST /api/v1/customer/hosting/nodes/{id}/retire", auth.requireCustomer(http.HandlerFunc(market.retireHostedNode)))
@@ -161,18 +167,19 @@ func NewHandler(deps Dependencies) (http.Handler, error) {
 	mux.Handle("POST /api/v1/customer/hosting/tickets/{id}/messages", auth.requireCustomer(http.HandlerFunc(operations.hostReplyTicket)))
 	mux.Handle("GET /api/v1/customer/hosting/tickets/{id}/attachments/{attachment}", auth.requireCustomer(http.HandlerFunc(operations.hostAttachment)))
 	mux.Handle("GET /api/v1/customer/hosting/coupons", auth.requireCustomer(http.HandlerFunc(coupons.hostList)))
-	mux.Handle("POST /api/v1/customer/hosting/coupons", auth.requireCustomer(http.HandlerFunc(coupons.hostCreate)))
+	mux.Handle("POST /api/v1/customer/hosting/coupons", auth.requireVerifiedCustomer(http.HandlerFunc(coupons.hostCreate)))
 	mux.Handle("PUT /api/v1/customer/hosting/coupons/{id}", auth.requireCustomer(http.HandlerFunc(coupons.hostUpdate)))
 	mux.Handle("POST /api/v1/customer/coupons/quote", auth.requireCustomer(http.HandlerFunc(coupons.quote)))
 	mux.Handle("GET /api/v1/customer/services/{id}/refund", auth.requireCustomer(http.HandlerFunc(coupons.refundQuote)))
 	mux.Handle("POST /api/v1/customer/services/{id}/refund", auth.requireCustomer(http.HandlerFunc(coupons.refund)))
 	mux.Handle("GET /api/v1/customer/trade", auth.requireCustomer(http.HandlerFunc(trade.market)))
-	mux.Handle("POST /api/v1/customer/trade/listings", auth.requireCustomer(http.HandlerFunc(trade.createListing)))
+	mux.Handle("POST /api/v1/customer/trade/listings", auth.requireVerifiedCustomer(http.HandlerFunc(trade.createListing)))
 	mux.Handle("POST /api/v1/customer/trade/listings/{id}/cancel", auth.requireCustomer(http.HandlerFunc(trade.cancelListing)))
-	mux.Handle("POST /api/v1/customer/trade/listings/{id}/buy", auth.requireCustomer(http.HandlerFunc(trade.buy)))
+	mux.Handle("POST /api/v1/customer/trade/listings/{id}/buy", auth.requireVerifiedCustomer(http.HandlerFunc(trade.buy)))
+	mux.Handle("POST /api/v1/customer/reports", auth.requireVerifiedCustomer(http.HandlerFunc(market.createReport)))
 	mux.Handle("GET /api/v1/customer/chat/rooms", auth.requireCustomer(http.HandlerFunc(market.customerChatRooms)))
 	mux.Handle("GET /api/v1/customer/chat/rooms/{node}/messages", auth.requireCustomer(http.HandlerFunc(market.customerChatMessages)))
-	mux.Handle("POST /api/v1/customer/chat/rooms/{node}/messages", auth.requireCustomer(http.HandlerFunc(market.customerPostChat)))
+	mux.Handle("POST /api/v1/customer/chat/rooms/{node}/messages", auth.requireVerifiedCustomer(http.HandlerFunc(market.customerPostChat)))
 	mux.Handle("GET /api/v1/customer/chat/rooms/{node}/stream", auth.requireCustomer(http.HandlerFunc(market.customerChatStream)))
 	// Public on purpose: nodes fetch the agent before they hold any credential.
 	mux.HandleFunc("GET /api/v1/agent/download/{file}", agentDownloads(deps.Config.AgentDownloadDir))
@@ -232,6 +239,12 @@ func NewHandler(deps Dependencies) (http.Handler, error) {
 	mux.Handle("GET /api/v1/admin/coupons", auth.require("plans:read", http.HandlerFunc(coupons.adminList)))
 	mux.Handle("POST /api/v1/admin/coupons", auth.require("plans:write", http.HandlerFunc(coupons.adminCreate)))
 	mux.Handle("PUT /api/v1/admin/coupons/{id}", auth.require("plans:write", http.HandlerFunc(coupons.adminUpdate)))
+	mux.Handle("GET /api/v1/admin/reports", auth.require("tickets:read", http.HandlerFunc(market.adminReports)))
+	mux.Handle("POST /api/v1/admin/reports/{id}/resolve", auth.require("tickets:write", http.HandlerFunc(market.adminResolveReport)))
+	mux.Handle("PUT /api/v1/admin/marketplace/nodes/{id}/capacity-cap", auth.require("nodes:write", http.HandlerFunc(market.adminCapacityCap)))
+	mux.Handle("GET /api/v1/admin/chat/rooms/{node}/mutes", auth.require("tickets:read", http.HandlerFunc(market.adminChatMutes)))
+	mux.Handle("POST /api/v1/admin/chat/rooms/{node}/mutes", auth.require("tickets:write", http.HandlerFunc(market.adminMuteChat)))
+	mux.Handle("DELETE /api/v1/admin/chat/rooms/{node}/mutes/{account}", auth.require("tickets:write", http.HandlerFunc(market.adminUnmuteChat)))
 	mux.Handle("GET /api/v1/admin/chat/rooms", auth.require("tickets:read", http.HandlerFunc(market.adminChatRooms)))
 	mux.Handle("GET /api/v1/admin/chat/rooms/{node}/messages", auth.require("tickets:read", http.HandlerFunc(market.adminChatMessages)))
 	mux.Handle("POST /api/v1/admin/chat/rooms/{node}/messages", auth.require("tickets:write", http.HandlerFunc(market.adminPostChat)))
@@ -244,7 +257,7 @@ func NewHandler(deps Dependencies) (http.Handler, error) {
 	mux.HandleFunc("POST /api/v1/webhooks/payments/epay", billing.epayWebhook)
 	mux.HandleFunc("POST /api/v1/webhooks/payments/alipay", billing.alipayWebhook)
 
-	return requestLog(deps.Logger, securityHeaders(installationGate(deps.Settings, mux))), nil
+	return requestLog(deps.Logger, securityHeaders(surfaceGate(installationGate(deps.Settings, mux)))), nil
 }
 
 func installationGate(runtime *settings.Manager, next http.Handler) http.Handler {
@@ -312,4 +325,36 @@ func requestLog(logger *slog.Logger, next http.Handler) http.Handler {
 			"duration_ms", time.Since(started).Milliseconds(),
 		)
 	})
+}
+
+// surfaceGate keeps the customer portal and the admin console apart when
+// the web proxy says which one a request came through (X-VPSBill-Surface):
+// the portal cannot reach staff APIs or run the installer, and the admin
+// address does not serve customer APIs. Requests without the header, from
+// inside the network, are not restricted.
+func surfaceGate(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !surfaceAllows(r.Header.Get("X-VPSBill-Surface"), r.Method, r.URL.Path) {
+			writeJSON(w, http.StatusNotFound, map[string]any{"error": "not_found"})
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func surfaceAllows(surface, method, path string) bool {
+	switch surface {
+	case "portal":
+		switch {
+		case strings.HasPrefix(path, "/api/v1/admin/"), strings.HasPrefix(path, "/api/v1/auth/"):
+			return false
+		case path == "/api/v1/install" && method != http.MethodGet:
+			return false
+		}
+	case "admin":
+		if strings.HasPrefix(path, "/api/v1/customer/") {
+			return false
+		}
+	}
+	return true
 }
