@@ -118,11 +118,12 @@ export function NodesView() {
                 </td>
                 <td>{node.virtualization_types.join(' / ').toUpperCase()}</td>
                 <td>
-                  <strong>{node.capacity_vcpu} vCPU</strong>
+                  <strong className="capacity-cell">{node.capacity_vcpu} vCPU</strong>
                   <small>
                     {node.capacity_ram_mb.toLocaleString()} MB / {node.capacity_disk_gb.toLocaleString()} GB
                   </small>
-                  <small>检测 {node.reported_vcpu} 核 / {node.reported_ram_mb} MB / {node.reported_disk_gb} GB · {overcommitText(node.overcommit)}</small>
+                  <small>检测 {node.reported_vcpu} 核 / {node.reported_ram_mb} MB / {node.reported_disk_gb} GB</small>
+                  <small>{overcommitText(node.overcommit, true)}</small>
                   {node.health_hold_reason && <small className="danger-text">暂停销售：{node.health_hold_reason}</small>}
                   {node.shared_machine && <small className="warn-text">与 {node.shared_machine_with?.join('、')} 同机，资源合并计算</small>}
                 </td>

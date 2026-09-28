@@ -5,10 +5,12 @@ import { formatTime } from './shared/time'
 
 const ratio = (value: number) => `${Number(value.toFixed(2))}×`
 
-// OvercommitText summarises a node's oversell ratios for buyers and hosts.
-export function overcommitText(overcommit: Overcommit) {
+// overcommitText summarises a node's oversell ratios for buyers and hosts;
+// compact suits table cells.
+export function overcommitText(overcommit: Overcommit, compact = false) {
   const { cpu, ram, disk, traffic } = overcommit
   if (cpu <= 1 && ram <= 1 && disk <= 1 && traffic <= 1) return '不超售'
+  if (compact) return `超售 CPU${ratio(cpu)} 内存${ratio(ram)} 硬盘${ratio(disk)} 流量${ratio(traffic)}`
   return `超售 CPU ${ratio(cpu)} · 内存 ${ratio(ram)} · 硬盘 ${ratio(disk)} · 流量 ${ratio(traffic)}`
 }
 

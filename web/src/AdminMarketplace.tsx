@@ -132,7 +132,7 @@ function HostedNodes() {
                         可售 {node.capacity_vcpu} 核 / {node.capacity_ram_mb} MB / {node.capacity_disk_gb} GB
                         {node.capacity_cap_vcpu || node.capacity_cap_ram_mb || node.capacity_cap_disk_gb ? '（已核定上限）' : ''}
                       </small>
-                      <small className="block">检测 {node.reported_vcpu} 核 / {node.reported_ram_mb} MB / {node.reported_disk_gb} GB · {overcommitText(node.overcommit)}</small>
+                      <small className="block">检测 {node.reported_vcpu} 核 / {node.reported_ram_mb} MB / {node.reported_disk_gb} GB · {overcommitText(node.overcommit, true)}</small>
                       {node.health_hold_reason && <small className="block danger-text">负载暂停销售：{node.health_hold_reason}</small>}
                       {node.shared_machine && <small className="block warn-text">与 {node.shared_machine_with?.join('、')} 同机</small>}
                     </td>

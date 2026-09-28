@@ -3395,3 +3395,4 @@ td small.danger-text, .danger-text { color: var(--danger-text); }
 td small.warn-text, .warn-text { color: var(--warning-text); }
 .supply-details { display: grid; gap: 6px; margin: 4px 0 10px; }
 .supply-details .service-notice { margin: 0; }
+.capacity-cell { display: inline-block; min-width: 220px; }
