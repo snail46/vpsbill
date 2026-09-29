@@ -40,10 +40,23 @@ type natRule struct {
 	TargetPort int
 }
 
+// connLimit is how many tracked connections one instance may hold in each
+// direction: 64 per MB of memory, between 2048 and 65536, and never more
+// than a quarter of the host's table, so one instance (P2P, a proxy) cannot
+// fill it and cut every other instance and the host itself off.
+func connLimit(ramMB int, hostMax int) int {
+	limit := min(max(ramMB*64, 2048), 65536)
+	if hostMax > 0 {
+		limit = min(limit, max(hostMax/4, 1024))
+	}
+	return limit
+}
+
 // renderRuleset builds the agent's "ip <table>" table. Port forwards match packets
 // addressed to any local address (fib daddr type local), which works both on
-// hosts that own their public IP and behind 1:1 cloud NAT.
-func renderRuleset(table string, records []InstanceRecord) string {
+// hosts that own their public IP and behind 1:1 cloud NAT. hostMax is the
+// host's conntrack table size (0 when unknown).
+func renderRuleset(table string, records []InstanceRecord, hostMax int) string {
 	if table == "" {
 		table = "hatch"
 	}
@@ -71,7 +84,26 @@ func renderRuleset(table string, records []InstanceRecord) string {
 		fmt.Fprintf(&builder, "    fib daddr type local %s dport %d dnat to %s:%d\n", rule.Protocol, rule.PublicPort, rule.Target, rule.TargetPort)
 	}
 	builder.WriteString("  }\n")
-	builder.WriteString("  chain forward {\n    type filter hook forward priority filter - 1; policy accept;\n    ct status dnat accept\n  }\n")
+	// Connection limits run after conntrack has seen the packet: outgoing
+	// ones in prerouting (to the internet or the host), incoming ones in
+	// forward after the port forward rewrote the destination.
+	limited := make([]InstanceRecord, 0, len(records))
+	for _, record := range records {
+		if record.PrivateIPv4 != "" {
+			limited = append(limited, record)
+		}
+	}
+	sort.Slice(limited, func(i, j int) bool { return limited[i].PrivateIPv4 < limited[j].PrivateIPv4 })
+	builder.WriteString("  chain limits {\n    type filter hook prerouting priority mangle; policy accept;\n")
+	for _, record := range limited {
+		fmt.Fprintf(&builder, "    ip saddr %s ct state new ct count over %d counter drop\n", record.PrivateIPv4, connLimit(record.RAMMB, hostMax))
+	}
+	builder.WriteString("  }\n")
+	builder.WriteString("  chain forward {\n    type filter hook forward priority filter - 1; policy accept;\n")
+	for _, record := range limited {
+		fmt.Fprintf(&builder, "    ip daddr %s ct state new ct count over %d counter drop\n", record.PrivateIPv4, connLimit(record.RAMMB, hostMax))
+	}
+	builder.WriteString("    ct status dnat accept\n  }\n")
 	builder.WriteString("}\n")
 	return builder.String()
 }

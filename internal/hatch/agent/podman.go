@@ -223,6 +223,7 @@ func (p *Podman) Create(ctx context.Context, spec RuntimeSpec) error {
 	if mounts := p.lxcfsMounts(); len(mounts) > 0 {
 		body["mounts"] = mounts
 	}
+	body["sysctl"] = instanceSysctls()
 	if err := p.request(ctx, http.MethodPost, "/containers/create", body, nil); err != nil {
 		return err
 	}

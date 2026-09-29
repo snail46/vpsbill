@@ -20,6 +20,8 @@
 #   --podman-images MODE    build (default) the Debian 12 and Alpine images
 #                           that run in 64 MB, or skip
 #   --no-zram               do not set up compressed swap in RAM
+#   --no-tune               leave kernel network, conntrack, disk scheduler and
+#                           OOM settings as they are (see "Host tuning")
 #   --download-from URL     fetch the agent from another billing address than
 #                           --server (e.g. the public one while the agent uses
 #                           a loopback URL)
@@ -42,6 +44,7 @@ PODMAN_NETWORK="podman"
 PODMAN_DISK="auto"
 PODMAN_IMAGES="build"
 ZRAM=1
+TUNE=1
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -55,6 +58,7 @@ while [ $# -gt 0 ]; do
     --podman-disk) PODMAN_DISK="$2"; shift 2 ;;
     --podman-images) PODMAN_IMAGES="$2"; shift 2 ;;
     --no-zram) ZRAM=0; shift ;;
+    --no-tune) TUNE=0; shift ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
@@ -109,6 +113,149 @@ setup_zram() {
   # Starting the swap unit waits until the device is set up and swapped on.
   systemctl start dev-zram0.swap 2>/dev/null || true
   grep -q '^/dev/zram' /proc/swaps && echo "zram swap enabled" || echo "warning: zram swap did not start" >&2
+}
+
+# ---- Host tuning -----------------------------------------------------------
+# Sized from the host's memory. Values an admin already set higher are kept,
+# the previous values are saved in /etc/hatch/tune-before.conf, and removing
+# /etc/sysctl.d/90-hatch-tune.conf (plus the files named below) and
+# rebooting undoes it. --no-tune skips all of it.
+TUNE_CONF=/etc/sysctl.d/90-hatch-tune.conf
+TUNE_KEYS="net.core.default_qdisc net.ipv4.tcp_congestion_control net.ipv4.tcp_mtu_probing net.netfilter.nf_conntrack_max net.netfilter.nf_conntrack_tcp_timeout_established net.netfilter.nf_conntrack_tcp_timeout_time_wait net.core.somaxconn net.core.netdev_max_backlog net.core.rmem_max net.core.wmem_max net.ipv4.tcp_rmem net.ipv4.tcp_wmem vm.min_free_kbytes"
+
+# at_least KEY VALUE prints VALUE, or the current value when that is higher.
+at_least() {
+  CURRENT=$(sysctl -n "$1" 2>/dev/null | awk '{ print $NF }')
+  case "$CURRENT" in
+    ''|*[!0-9]*) echo "$2" ;;
+    *) if [ "$CURRENT" -gt "$2" ]; then echo "$CURRENT"; else echo "$2"; fi ;;
+  esac
+}
+
+# at_most KEY VALUE prints VALUE, or the current value when that is lower.
+at_most() {
+  CURRENT=$(sysctl -n "$1" 2>/dev/null || true)
+  case "$CURRENT" in
+    ''|*[!0-9]*) echo "$2" ;;
+    *) if [ "$CURRENT" -lt "$2" ]; then echo "$CURRENT"; else echo "$2"; fi ;;
+  esac
+}
+
+tune_host() {
+  RAM_MB=$(awk '/^MemTotal:/ { print int($2 / 1024) }' /proc/meminfo)
+  CONTAINER=0
+  if systemd-detect-virt --container >/dev/null 2>&1; then CONTAINER=1; fi
+  modprobe tcp_bbr 2>/dev/null || true
+  modprobe nf_conntrack 2>/dev/null || true
+  printf 'tcp_bbr\nnf_conntrack\n' > /etc/modules-load.d/hatch.conf
+
+  # Each tracked connection costs about 300 bytes; 64 per MB of memory
+  # keeps the table well under 2% of it. A small host's kernel default
+  # (about 4096 entries on 256 MB) is filled by a single busy instance.
+  CT_MAX=$((RAM_MB * 64))
+  [ "$CT_MAX" -ge 16384 ] || CT_MAX=16384
+  [ "$CT_MAX" -le 1048576 ] || CT_MAX=1048576
+  if [ "$RAM_MB" -le 1024 ]; then BUF=4194304; BACKLOG=4096
+  elif [ "$RAM_MB" -le 4096 ]; then BUF=16777216; BACKLOG=16384
+  else BUF=33554432; BACKLOG=32768; fi
+  # Keep 1/64 of memory (at most 64 MB) free for the kernel, so bursts do
+  # not stall the host while it reclaims.
+  MIN_FREE=$((RAM_MB * 16))
+  [ "$MIN_FREE" -le 65536 ] || MIN_FREE=65536
+  CC=cubic
+  grep -qw bbr /proc/sys/net/ipv4/tcp_available_congestion_control 2>/dev/null && CC=bbr
+
+  mkdir -p /etc/hatch
+  if [ ! -f /etc/hatch/tune-before.conf ]; then
+    for key in $TUNE_KEYS; do
+      printf '%s = %s\n' "$key" "$(sysctl -n "$key" 2>/dev/null)"
+    done > /etc/hatch/tune-before.conf
+  fi
+  cat > "$TUNE_CONF" <<EOF
+# Written by the Hatch installer for a ${RAM_MB} MB host; see docs/HATCH-AGENT.md.
+# Previous values: /etc/hatch/tune-before.conf
+net.core.default_qdisc = fq
+net.ipv4.tcp_congestion_control = $CC
+net.ipv4.tcp_mtu_probing = 1
+net.netfilter.nf_conntrack_max = $(at_least net.netfilter.nf_conntrack_max "$CT_MAX")
+net.netfilter.nf_conntrack_tcp_timeout_established = $(at_most net.netfilter.nf_conntrack_tcp_timeout_established 7200)
+net.netfilter.nf_conntrack_tcp_timeout_time_wait = $(at_most net.netfilter.nf_conntrack_tcp_timeout_time_wait 30)
+net.core.somaxconn = $(at_least net.core.somaxconn 4096)
+net.core.netdev_max_backlog = $(at_least net.core.netdev_max_backlog "$BACKLOG")
+net.core.rmem_max = $(at_least net.core.rmem_max "$BUF")
+net.core.wmem_max = $(at_least net.core.wmem_max "$BUF")
+net.ipv4.tcp_rmem = 4096 131072 $(at_least net.ipv4.tcp_rmem "$BUF")
+net.ipv4.tcp_wmem = 4096 65536 $(at_least net.ipv4.tcp_wmem "$BUF")
+vm.min_free_kbytes = $(at_least vm.min_free_kbytes "$MIN_FREE")
+EOF
+  FAILED=$(sysctl -p "$TUNE_CONF" 2>&1 >/dev/null | grep -c . || true)
+  if [ "$FAILED" -gt 0 ]; then
+    WHY=""
+    [ "$CONTAINER" = 0 ] || WHY=" (the host is a container)"
+    echo "note: $FAILED kernel settings could not be changed here$WHY; the rest apply" >&2
+  fi
+
+  # A bigger hash table keeps lookups fast at the higher limit.
+  if [ -w /sys/module/nf_conntrack/parameters/hashsize ]; then
+    echo $((CT_MAX / 4)) > /sys/module/nf_conntrack/parameters/hashsize 2>/dev/null || true
+    echo "options nf_conntrack hashsize=$((CT_MAX / 4))" > /etc/modprobe.d/hatch-conntrack.conf
+  fi
+
+  # fq on the uplink shares it fairly between connections and paces BBR.
+  # Default queueing is reset so it picks fq up; a custom one is left alone.
+  UPLINK=$(ip -4 route show default 2>/dev/null | awk '{ for (i = 1; i < NF; i++) if ($i == "dev") { print $(i + 1); exit } }')
+  if [ -n "$UPLINK" ]; then
+    ROOT=$(tc qdisc show dev "$UPLINK" root 2>/dev/null | awk 'NR == 1 { print $2 }')
+    case "$ROOT" in
+      mq|fq_codel|pfifo_fast|pfifo) tc qdisc del dev "$UPLINK" root 2>/dev/null || true ;;
+      fq|noqueue|'') ;;
+      *) echo "note: $UPLINK uses $ROOT queueing; leaving it as it is" ;;
+    esac
+  fi
+
+  # BFQ shares the disk fairly between instances: one of them writing flat
+  # out no longer stalls every other one (and the host's own services).
+  DISK_SOURCE=$(findmnt -no SOURCE -T /var/lib 2>/dev/null || true)
+  DISK=$(lsblk -no PKNAME "$DISK_SOURCE" 2>/dev/null | head -n 1)
+  [ -n "$DISK" ] || DISK=$(basename "${DISK_SOURCE:-none}" 2>/dev/null || true)
+  SCHED=/sys/block/$DISK/queue/scheduler
+  if [ -n "$DISK" ] && [ -w "$SCHED" ]; then
+    grep -qw bfq "$SCHED" || modprobe bfq 2>/dev/null || true
+    if grep -qw bfq "$SCHED"; then
+      echo bfq > "$SCHED" 2>/dev/null || true
+      echo bfq >> /etc/modules-load.d/hatch.conf
+      printf 'ACTION=="add|change", KERNEL=="%s", ATTR{queue/scheduler}="bfq"\n' "$DISK" > /etc/udev/rules.d/60-hatch-iosched.rules
+    fi
+  fi
+
+  # Under memory pressure the kernel should kill instance processes, not
+  # the ways in: SSH and the container runtimes.
+  for unit in ssh.service sshd.service incus.service lxd.service snap.lxd.daemon.service; do
+    systemctl cat "$unit" >/dev/null 2>&1 || continue
+    SCORE=-500
+    case "$unit" in ssh*) SCORE=-900 ;; esac
+    mkdir -p "/etc/systemd/system/$unit.d"
+    printf '[Service]\nOOMScoreAdjust=%s\n' "$SCORE" > "/etc/systemd/system/$unit.d/hatch-oom.conf"
+    PID=$(systemctl show -p MainPID --value "$unit" 2>/dev/null || true)
+    [ "${PID:-0}" -gt 0 ] && echo "$SCORE" > "/proc/$PID/oom_score_adj" 2>/dev/null || true
+  done
+  systemctl daemon-reload
+
+  # Without zram (not available, or --no-zram) a small host still gets some
+  # swap, so a memory spike slows it down instead of killing processes.
+  SWAP_KB=$(awk '/^SwapTotal:/ { print $2 }' /proc/meminfo)
+  if [ "${SWAP_KB:-0}" = 0 ] && [ "$CONTAINER" = 0 ] && [ "$RAM_MB" -le 2048 ] && [ ! -e /var/lib/hatch-swap ]; then
+    SIZE=$RAM_MB
+    [ "$SIZE" -le 1024 ] || SIZE=1024
+    if fallocate -l "${SIZE}M" /var/lib/hatch-swap 2>/dev/null && chmod 600 /var/lib/hatch-swap && mkswap -q /var/lib/hatch-swap >/dev/null && swapon /var/lib/hatch-swap; then
+      grep -q '^/var/lib/hatch-swap ' /etc/fstab || echo '/var/lib/hatch-swap none swap sw 0 0' >> /etc/fstab
+      echo "Created a ${SIZE} MB swap file"
+    else
+      rm -f /var/lib/hatch-swap
+    fi
+  fi
+
+  echo "Host tuning: congestion $CC, fq, conntrack $(sysctl -n net.netfilter.nf_conntrack_max 2>/dev/null), disk scheduler $(sed -n 's/.*\[\(.*\)\].*/\1/p' "$SCHED" 2>/dev/null)"
 }
 
 PODMAN_MOUNT=/var/lib/hatch-podman
@@ -254,6 +401,7 @@ if [ "$USE_LXC" = 1 ]; then
   done
 fi
 [ "$ZRAM" = 0 ] || setup_zram
+[ "$TUNE" = 0 ] || tune_host
 
 if [ -z "$BINARY" ]; then
   case "$(uname -m)" in

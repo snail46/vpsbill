@@ -9,6 +9,9 @@ Type=simple
 ExecStart=/usr/local/bin/hatch-agent run --config /etc/hatch/agent.json
 Restart=always
 RestartSec=5
+# Under memory pressure the kernel kills instance processes first; losing
+# the agent would leave the node unmanaged.
+OOMScoreAdjust=-900
 # The agent drives the root LXD/Podman sockets and nftables, so it runs as
 # root; the file system outside its state directory stays read-only.
 ProtectSystem=strict

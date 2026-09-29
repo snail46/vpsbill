@@ -133,3 +133,15 @@ type StorageReporter interface {
 	// CheckDiskQuota fails when instance disk sizes cannot be enforced.
 	CheckDiskQuota(ctx context.Context) error
 }
+
+// instanceSysctls are set in each new instance's network namespace: BBR
+// (when the host kernel has it) copes far better than CUBIC with the lossy,
+// long international paths NAT instances often sit behind, and MTU probing
+// recovers from paths that drop large packets without telling anyone.
+func instanceSysctls() map[string]string {
+	sysctls := map[string]string{"net.ipv4.tcp_mtu_probing": "1"}
+	if congestionAvailable("bbr") {
+		sysctls["net.ipv4.tcp_congestion_control"] = "bbr"
+	}
+	return sysctls
+}

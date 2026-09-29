@@ -5,6 +5,9 @@ package agent
 import (
 	"os"
 	"runtime"
+	"slices"
+	"strconv"
+	"strings"
 	"syscall"
 
 	"vpsbill/internal/hatch/protocol"
@@ -57,4 +60,21 @@ func mountOf(path string) (mountEntry, bool) {
 	}
 	defer file.Close()
 	return findMount(file, path)
+}
+
+// conntrackMax reads the host's connection tracking table size, or 0.
+func conntrackMax() int {
+	data, err := os.ReadFile("/proc/sys/net/netfilter/nf_conntrack_max")
+	if err != nil {
+		return 0
+	}
+	n, _ := strconv.Atoi(strings.TrimSpace(string(data)))
+	return n
+}
+
+// congestionAvailable reports whether the kernel offers the named TCP
+// congestion control, e.g. bbr once tcp_bbr is loaded.
+func congestionAvailable(name string) bool {
+	data, err := os.ReadFile("/proc/sys/net/ipv4/tcp_available_congestion_control")
+	return err == nil && slices.Contains(strings.Fields(string(data)), name)
 }

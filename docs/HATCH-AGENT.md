@@ -83,6 +83,26 @@ fib daddr type local tcp dport 20022 dnat to 10.20.30.254:22
 
 轮换令牌：`hatch-agent init --force --server ...`，然后在后台用新令牌重新接入节点。
 
+## 母机调优
+
+安装脚本默认按母机内存自动调优（`--no-tune` 跳过）。管理员已经设得更高的值保留不动，调优前的值保存在 `/etc/hatch/tune-before.conf`。
+
+| 项目 | 设置 | 解决的问题 |
+|---|---|---|
+| 连接跟踪表 | `nf_conntrack_max` = 内存 MB × 64（最少 16384，最多 1048576），哈希表为其 1/4；已建立连接超时 2 小时、TIME_WAIT 30 秒 | NAT 和端口转发都依赖它。内核默认按内存算，256 MB 母机只有约 4096 条，一台跑 P2P 或代理的实例就能占满，之后整台母机（包括 SSH）都建不了新连接 |
+| 每实例连接数上限 | 实例内存 MB × 64（2048–65536），且不超过整表的 1/4，出入方向各算 | 单个实例占不满整张表，其他实例和母机不受影响。由 Agent 写进自己的 nftables 表 |
+| 拥塞控制 | 母机和每个新实例都用 BBR（内核有 `tcp_bbr` 时） | 国际线路、丢包多的线路上速度明显更好。实例的 TCP 连接从实例自己的网络命名空间发出，所以 Agent 在创建实例时单独设置 |
+| 出口排队 | 出口网卡用 fq | 各连接公平分享上行带宽，一个实例的大流量不会拉高其他实例的延迟，同时给 BBR 做发包节奏控制。自定义的排队规则（htb、cake 等）不改 |
+| MTU 探测 | `tcp_mtu_probing = 1`（母机和实例） | 某些线路丢大包又不回 ICMP 时，网页打不开、SSH 卡在登录，开启后自动退到小包 |
+| 队列与缓冲 | `somaxconn` 4096；`netdev_max_backlog` 与 TCP 缓冲上限按内存分档（≤1 GB：4096 / 4 MB，≤4 GB：16384 / 16 MB，更大：32768 / 32 MB） | 突发流量不丢包，单连接高带宽传输不受缓冲限制；小内存母机不会因为缓冲过大挤占内存 |
+| 磁盘调度 | `/var/lib` 所在磁盘用 BFQ（写入 udev 规则，重启保持） | 各实例公平分享磁盘，一台实例持续写盘不会让其他实例和母机卡住 |
+| 内存保护 | Agent、SSH 的 OOM 分数 -900，Incus/LXD 守护进程 -500；`vm.min_free_kbytes` 为内存的 1/64（最多 64 MB） | 内存紧张时内核先杀实例里的进程，母机始终能登录和管理 |
+| swap | 优先 zram（内存的一半）；zram 不可用且内存 ≤ 2 GB 时建一个与内存等大（最多 1 GB）的 swap 文件 | 内存尖峰时变慢而不是直接杀进程 |
+
+回退：删除 `/etc/sysctl.d/90-hatch-tune.conf`、`/etc/modprobe.d/hatch-conntrack.conf`、`/etc/udev/rules.d/60-hatch-iosched.rules` 和 `/etc/systemd/system/*/hatch-oom.conf` 后重启。
+
+母机本身是容器（LXC、OpenVZ 的小 NAT 机）时，很多内核参数不能在里面修改，脚本会提示有几项没生效，其余照常；这种母机的连接跟踪表和磁盘调度由它的宿主决定。
+
 ## 配置参考（`/etc/hatch/agent.json`）
 
 ```json

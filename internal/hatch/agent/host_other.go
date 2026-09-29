@@ -23,3 +23,7 @@ func readHealth() *protocol.HostHealth {
 func fsSpace(string) (int64, int64, error) { return 0, 0, errors.ErrUnsupported }
 
 func mountOf(string) (mountEntry, bool) { return mountEntry{}, false }
+
+func conntrackMax() int { return 0 }
+
+func congestionAvailable(string) bool { return false }
