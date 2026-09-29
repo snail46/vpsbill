@@ -5,7 +5,7 @@ import { CouponManager } from '../Coupons'
 import { PageActions, StatusBadge, cycleLabel } from '../shared/ui'
 import { cycleOrder, CyclePriceFields, readCyclePrices } from '../shared/cycles'
 import { readStock, StockField, StockTag } from '../shared/stock'
-import { DiskIOFields, readDiskIO } from '../shared/diskio'
+import { DiskIOFields, diskIOText, readDiskIO } from '../shared/diskio'
 import type { StockCapacityRecord } from '../api'
 import { virtualizationLabel } from './Nodes'
 
@@ -86,6 +86,7 @@ export function PlansView() {
             </div>
 
             <small>默认镜像：{plan.default_template_id}</small>
+            {diskIOText(plan) && <small>{diskIOText(plan)}</small>}
             <small className="plan-network">
               网络：
               {[
