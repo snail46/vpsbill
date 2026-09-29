@@ -49,7 +49,7 @@ func (t TC) Apply(ctx context.Context, iface string, downMbps, upMbps int) error
 			return err
 		}
 		if _, err := run(ctx, "tc", "filter", "add", "dev", iface, "parent", "ffff:", "protocol", "all", "prio", "1",
-			"matchall", "action", "police", "rate", strconv.Itoa(upMbps)+"mbit", "burst", burstBytes(upMbps), "conform-exceed", "drop"); err != nil {
+			"matchall", "action", "police", "rate", strconv.Itoa(upMbps)+"mbit", "burst", policeBurst(upMbps), "mtu", "64kb", "conform-exceed", "drop"); err != nil {
 			return err
 		}
 	}
@@ -59,6 +59,14 @@ func (t TC) Apply(ctx context.Context, iface string, downMbps, upMbps int) error
 // burstBytes allows 10ms of traffic at the given rate, at least 32 KiB.
 func burstBytes(mbps int) string {
 	return strconv.Itoa(max(32768, mbps*1_000_000/8/100)) + "b"
+}
+
+// policeBurst sizes the upload policer, which drops rather than queues:
+// 200ms of traffic (what Incus uses), at least 64 KiB; with 10ms TCP kept
+// backing off to about half the rate. Its mtu is raised to 64 KiB too, as
+// the default of 2 KiB drops every GRO-merged packet on the veth.
+func policeBurst(mbps int) string {
+	return strconv.Itoa(max(65536, mbps*1_000_000/8/5)) + "b"
 }
 
 var peerIndex = regexp.MustCompile(`@if(\d+)`)

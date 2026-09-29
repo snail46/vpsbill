@@ -130,7 +130,7 @@ func TestPodmanAppliesBandwidthLimitsOncePerVeth(t *testing.T) {
 	if got := commands.matching("tc qdisc add dev veth15 root tbf rate 100mbit"); len(got) != 1 {
 		t.Fatalf("download limit not applied: %v", commands.commands)
 	}
-	if got := commands.matching("tc filter add dev veth15 parent ffff: protocol all prio 1 matchall action police rate 20mbit"); len(got) != 1 {
+	if got := commands.matching("tc filter add dev veth15 parent ffff: protocol all prio 1 matchall action police rate 20mbit burst 500000b mtu 64kb"); len(got) != 1 {
 		t.Fatalf("upload limit not applied: %v", commands.commands)
 	}
 	if err := runtime.Maintain(ctx, "svc"); err != nil {
@@ -142,6 +142,9 @@ func TestPodmanAppliesBandwidthLimitsOncePerVeth(t *testing.T) {
 }
 
 func TestBurstBytes(t *testing.T) {
+	if policeBurst(1) != "65536b" || policeBurst(10) != "250000b" {
+		t.Fatalf("unexpected police bursts %s %s", policeBurst(1), policeBurst(10))
+	}
 	if burstBytes(1) != "32768b" || burstBytes(1000) != "1250000b" {
 		t.Fatalf("unexpected bursts %s %s", burstBytes(1), burstBytes(1000))
 	}
