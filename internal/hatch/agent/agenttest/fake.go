@@ -31,6 +31,8 @@ type Runtime struct {
 	Creates   int
 	// FailExec makes the next n Exec calls fail, as while an instance boots.
 	FailExec int
+	// FailCreate makes the next n Create calls fail.
+	FailCreate int
 }
 
 func NewRuntime(kind string) *Runtime {
@@ -55,6 +57,10 @@ func (r *Runtime) Create(_ context.Context, spec agent.RuntimeSpec) error {
 	defer r.mu.Unlock()
 	if _, exists := r.Instances[spec.Name]; exists {
 		return errors.New("already exists")
+	}
+	if r.FailCreate > 0 {
+		r.FailCreate--
+		return errors.New("image not found")
 	}
 	r.Creates++
 	r.Instances[spec.Name] = &Instance{Spec: spec, Status: "running"}

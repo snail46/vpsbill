@@ -35,6 +35,17 @@ type InstanceRecord struct {
 	CreatedAt   time.Time `json:"created_at"`
 }
 
+// applySpec copies the sold specification into the record.
+func (r *InstanceRecord) applySpec(spec protocol.CreateSpec) {
+	r.Virtualization, r.Template = spec.Virtualization, spec.TemplateID
+	r.VCPU, r.RAMMB, r.DiskGB = spec.VCPU, spec.RAMMB, spec.DiskGB
+	r.NetworkDownMbps, r.NetworkUpMbps, r.MonthlyTrafficGB = spec.NetworkDownMbps, spec.NetworkUpMbps, spec.MonthlyTrafficGB
+	r.PortMappingLimit = 0
+	if spec.AssignNAT {
+		r.PortMappingLimit = max(spec.PortMappingCount, 1)
+	}
+}
+
 // TrafficRecord accumulates counter deltas so totals survive container
 // restarts (which reset counters) and agent restarts.
 type TrafficRecord struct {

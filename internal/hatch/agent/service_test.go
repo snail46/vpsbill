@@ -107,6 +107,23 @@ func TestEnsureStartsInstanceLeftStopped(t *testing.T) {
 	}
 }
 
+func TestEnsureRetryTakesCorrectedSpec(t *testing.T) {
+	runtime := agenttest.NewRuntime("lxc")
+	service := newService(t, t.TempDir(), runtime, &agenttest.NAT{})
+	runtime.FailCreate = 1
+	wrong := spec
+	wrong.TemplateID = "missing-image"
+	if _, err := call[protocol.EnsureResult](t, service, protocol.MethodEnsure, wrong); err == nil {
+		t.Fatal("expected create failure")
+	}
+	if _, err := call[protocol.EnsureResult](t, service, protocol.MethodEnsure, spec); err != nil {
+		t.Fatal(err)
+	}
+	if got := runtime.Instances[spec.Name].Spec.Image; got != spec.TemplateID {
+		t.Fatalf("retry created %q, want %q", got, spec.TemplateID)
+	}
+}
+
 func TestUnmanagedInstanceIsNotAdopted(t *testing.T) {
 	runtime := agenttest.NewRuntime("lxc")
 	runtime.Instances["svc-1"] = &agenttest.Instance{Status: "running"}

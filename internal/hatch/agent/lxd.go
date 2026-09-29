@@ -56,6 +56,10 @@ func (l *LXD) request(ctx context.Context, method, path string, body any) (json.
 		return nil, fmt.Errorf("wait for %s: %w", response.Operation, err)
 	}
 	var operation struct {
+		// LXD answers the wait for a failed operation with an error
+		// response (type "error") instead of a Failure status.
+		Type     string `json:"type"`
+		Error    string `json:"error"`
 		Metadata struct {
 			Status   string          `json:"status"`
 			Err      string          `json:"err"`
@@ -64,6 +68,9 @@ func (l *LXD) request(ctx context.Context, method, path string, body any) (json.
 	}
 	if err := json.Unmarshal(waited, &operation); err != nil {
 		return nil, fmt.Errorf("decode LXD operation: %w", err)
+	}
+	if operation.Type == "error" {
+		return nil, fmt.Errorf("LXD operation failed: %s", operation.Error)
 	}
 	if operation.Metadata.Status != "Success" {
 		return nil, fmt.Errorf("LXD operation %s: %s", strings.ToLower(operation.Metadata.Status), operation.Metadata.Err)

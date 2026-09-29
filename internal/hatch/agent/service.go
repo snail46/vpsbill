@@ -286,6 +286,17 @@ func (s *Service) ensure(ctx context.Context, spec protocol.CreateSpec) (protoco
 		if err != nil {
 			return protocol.EnsureResult{}, err
 		}
+	} else if !runtimeHas {
+		// An earlier create failed; a retry may carry a corrected
+		// specification (another template, say), so it replaces the saved
+		// one. The allocated addresses and mappings stay.
+		if err := s.store.Update(spec.Name, func(current *InstanceRecord) (*InstanceRecord, error) {
+			current.applySpec(spec)
+			return current, nil
+		}); err != nil {
+			return protocol.EnsureResult{}, err
+		}
+		record, _ = s.store.Get(spec.Name)
 	}
 	if !runtimeHas {
 		// Every instance must have its disk size enforced, or one customer
@@ -365,16 +376,10 @@ func (s *Service) newRecord(ctx context.Context, runtime Runtime, spec protocol.
 		}
 		ipv6 = allocated.String()
 	}
-	limit := 0
-	if spec.AssignNAT {
-		limit = max(spec.PortMappingCount, 1)
-	}
 	record := InstanceRecord{
-		Name: spec.Name, Virtualization: spec.Virtualization, Template: spec.TemplateID, VCPU: spec.VCPU, RAMMB: spec.RAMMB,
-		DiskGB: spec.DiskGB, NetworkDownMbps: spec.NetworkDownMbps, NetworkUpMbps: spec.NetworkUpMbps,
-		MonthlyTrafficGB: spec.MonthlyTrafficGB, PortMappingLimit: limit, PrivateIPv4: address.String(), IPv6: ipv6,
-		Mappings: []protocol.PortMapping{}, CreatedAt: s.now().UTC(),
+		Name: spec.Name, PrivateIPv4: address.String(), IPv6: ipv6, Mappings: []protocol.PortMapping{}, CreatedAt: s.now().UTC(),
 	}
+	record.applySpec(spec)
 	err = s.store.Update(spec.Name, func(*InstanceRecord) (*InstanceRecord, error) { return &record, nil })
 	return record, err
 }
