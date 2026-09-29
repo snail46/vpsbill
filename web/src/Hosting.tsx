@@ -764,7 +764,10 @@ function HostedNodeCard({
                     {plan.purchase_limit ? `每人限购 ${plan.purchase_limit} 台` : '不限购'} · {plan.early_refund ? '允许早期全额退款' : '按比例退款'}
                   </small>
                 </td>
-                <td>{plan.vcpu} 核 / {plan.ram_mb} MB / {plan.disk_gb} GB / {plan.traffic_gb || '不限'} GB / NAT×{plan.port_mapping_count}</td>
+                <td>
+                  {plan.vcpu} 核 / {plan.ram_mb} MB / {plan.disk_gb} GB / {plan.traffic_gb || '不限'} GB / NAT×{plan.port_mapping_count}
+                  {diskIOText(plan) && <small className="block">{diskIOText(plan)}</small>}
+                </td>
                 <td>
                   {plan.prices.map(price => `${cycleName(price.billing_cycle)} ${walletMoney(price.amount_minor, price.currency)}${price.purchase_limit ? `（限购 ${price.purchase_limit}，已售 ${price.sold ?? 0}）` : ''}`).join('，')}
                   <small className="block">{plan.stock_limit == null ? '库存不限（受资源限制）' : `库存 ${plan.stock_limit}，已售及待支付 ${plan.stock_held ?? 0}`}</small>
