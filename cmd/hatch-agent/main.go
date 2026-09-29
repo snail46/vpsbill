@@ -159,6 +159,11 @@ func run(args []string) error {
 		runtimes = append(runtimes, agent.NewPodman(*config.Podman))
 	}
 	service := agent.NewService(config, version, store, runtimes, agent.NFT{}, logger)
+	forwarding := agent.Forwarding{PortStart: config.PortRangeStart, PortEnd: config.PortRangeEnd}
+	if config.LXD != nil {
+		forwarding.Bridge = config.LXD.Network
+	}
+	service.SetForwarding(forwarding)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()

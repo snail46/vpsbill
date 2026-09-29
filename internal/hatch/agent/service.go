@@ -31,8 +31,11 @@ type Service struct {
 	store    *Store
 	runtimes map[string]Runtime
 	nat      NATApplier
-	logger   *slog.Logger
-	now      func() time.Time
+	// forwarding opens the iptables FORWARD chain after each NAT update;
+	// nil in tests.
+	forwarding *Forwarding
+	logger     *slog.Logger
+	now        func() time.Time
 	// passwordRetry is the wait between root password attempts while a new
 	// instance boots.
 	passwordRetry time.Duration
@@ -53,6 +56,10 @@ type sample struct {
 	at    time.Time
 	state RuntimeState
 }
+
+// SetForwarding makes NAT updates also allow instance traffic through the
+// iptables FORWARD chain (see Forwarding).
+func (s *Service) SetForwarding(forwarding Forwarding) { s.forwarding = &forwarding }
 
 func NewService(config Config, version string, store *Store, runtimes []Runtime, nat NATApplier, logger *slog.Logger) *Service {
 	byKind := make(map[string]Runtime, len(runtimes))
@@ -793,6 +800,11 @@ func (s *Service) applyNAT(ctx context.Context) error {
 	defer s.natMu.Unlock()
 	if err := s.nat.Apply(ctx, renderRuleset(s.config.NFTTable, s.store.List(), conntrackMax())); err != nil {
 		return fmt.Errorf("apply port forwards: %w", err)
+	}
+	if s.forwarding != nil {
+		if err := s.forwarding.Ensure(ctx); err != nil {
+			s.logger.Warn("instance traffic may be blocked", "error", err)
+		}
 	}
 	return nil
 }
