@@ -724,7 +724,7 @@ table {
 }
 
 th, td {
-  padding: 13px 18px;
+  padding: 12px 14px;
   border-bottom: 1px solid var(--border-subtle);
   font-size: 13.5px;
   line-height: 1.45;
@@ -3395,7 +3395,7 @@ td small.danger-text, .danger-text { color: var(--danger-text); }
 td small.warn-text, .warn-text { color: var(--warning-text); }
 .supply-details { display: grid; gap: 6px; margin: 4px 0 10px; }
 .supply-details .service-notice { margin: 0; }
-.capacity-cell { display: inline-block; min-width: 220px; }
+.capacity-cell { display: inline-block; }
 
 /* My VPS: compact tiles, source tags and the detail page */
 .filter-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
@@ -3431,8 +3431,8 @@ td small.warn-text, .warn-text { color: var(--warning-text); }
 .detail-facts dt { font-size: 12px; color: var(--text-subtle); }
 .detail-facts dd { margin: 2px 0 0; font-size: 13.5px; color: var(--text-secondary); overflow-wrap: anywhere; }
 .auto-renew { display: grid; gap: 4px; padding-top: 12px; border-top: 1px solid var(--border-default); }
-.switch { display: inline-flex; align-items: center; gap: 10px; font-weight: 600; font-size: 13.5px; cursor: pointer; }
-.switch input { position: absolute; opacity: 0; pointer-events: none; }
+.switch { position: relative; display: inline-flex; align-items: center; gap: 10px; font-weight: 600; font-size: 13.5px; cursor: pointer; }
+.switch input { position: absolute; width: 1px; height: 1px; margin: 0; opacity: 0; pointer-events: none; }
 .switch span { position: relative; width: 36px; height: 20px; border-radius: 999px; background: var(--border-highlight); transition: background 0.15s ease; }
 .switch span::after { content: ''; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: transform 0.15s ease; }
 .switch input:checked + span { background: var(--accent-customer); }
@@ -3525,3 +3525,159 @@ td .tag, .tag { white-space: nowrap; }
 .field-warning { color: var(--warning-text, #b45309); }
 .cycle-price-cell { display: grid; gap: 6px; align-content: start; }
 .cycle-custom-row { grid-template-columns: minmax(0, 110px) 90px minmax(0, 140px) minmax(0, 140px); }
+
+/* ==========================================================================
+   Layout refresh: page headers, onboarding, mobile navigation and tables
+   ========================================================================== */
+
+/* The top bar names the page; a page's own first heading would repeat it,
+   so only its description and actions stay. */
+main > section > .page-actions:first-child > div:first-child > .eyebrow,
+main > section > .page-actions:first-child > div:first-child > h2 {
+  display: none;
+}
+main > section > .page-actions:first-child { padding-top: 0; }
+.page-actions > div:first-child { min-width: 0; }
+.page-actions p:last-child { line-height: 1.6; }
+
+.menu-toggle { display: none; }
+
+/* Grid and flex children with long unbreakable content (commands, URLs)
+   must be allowed to shrink, or they push their card wider than the page. */
+.guide-body > *, .install-step, .install-step > *, .panel > *, .form-grid > * { min-width: 0; }
+.tag-row { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.tag.muted { color: var(--text-muted); background: var(--bg-card-elevated); border-color: var(--border-default); }
+td small.truncate { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Onboarding: install steps, pending agents, the integration guide. */
+.step-list { margin: 0 0 12px; padding-left: 20px; display: grid; gap: 6px; color: var(--text-secondary); font-size: 13.5px; line-height: 1.7; }
+.step-list code, .guide-body code { padding: 1px 5px; border-radius: 4px; background: var(--bg-card-elevated); font-size: 12px; }
+.install-step .code-line code { background: none; padding: 0; }
+.auto-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; }
+.auto-list li { position: relative; padding-left: 22px; color: var(--text-secondary); font-size: 13px; line-height: 1.6; }
+.auto-list li::before { content: '✓'; position: absolute; left: 2px; color: var(--success-text); font-weight: 700; }
+.guide-body { display: grid; gap: 14px; padding-top: 16px; }
+.guide-body > p { margin: 0; color: var(--text-secondary); font-size: 13.5px; line-height: 1.7; }
+.guide-body > .muted-text { color: var(--text-muted); font-size: 12.5px; }
+.guide-body a { color: var(--accent-text); }
+.guide-body > .primary-button { justify-self: start; }
+.guide-panel .segmented { flex-wrap: wrap; }
+.count-badge {
+  display: inline-grid; place-items: center; min-width: 18px; height: 18px; margin-left: 6px; padding: 0 5px;
+  border-radius: 9px; background: var(--accent-admin); color: #fff; font-size: 11px; font-weight: 600;
+}
+.subheading { margin: 4px 0 0; font-size: 14px; font-weight: 600; color: var(--text-primary); }
+.section-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 28px 0 12px; }
+.section-heading h3 { margin: 0; font-size: 16px; color: var(--text-primary); }
+.connect-panel .install-step { margin-bottom: 4px; }
+.connect-panel .subheading { margin-top: 14px; margin-bottom: 8px; }
+.pending-agents { display: grid; gap: 10px; }
+.pending-agent {
+  display: flex; align-items: center; gap: 14px; padding: 12px 14px;
+  border: 1px solid var(--border-default); border-radius: var(--radius-md); background: var(--bg-card-subtle);
+}
+.pending-agent > svg { flex: none; color: var(--accent-text); }
+.pending-agent-main { flex: 1; min-width: 0; display: grid; gap: 3px; }
+.pending-agent-main strong { color: var(--text-primary); font-size: 14px; }
+.pending-agent-main small { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; color: var(--text-muted); font-size: 12.5px; overflow-wrap: anywhere; }
+.pending-agent-actions { display: flex; align-items: center; gap: 8px; flex: none; }
+.pending-empty { margin: 0; padding: 16px; border: 1px dashed var(--border-default); border-radius: var(--radius-md); text-align: center; }
+.link-button.inline { display: inline; margin: 0 2px; color: var(--accent-text); text-decoration: underline; }
+.input-with-button { display: flex; gap: 8px; }
+.input-with-button input { flex: 1; min-width: 0; }
+.input-with-button button { flex: none; }
+
+/* Region management */
+.region-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; }
+.region-item {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 14px;
+  border: 1px solid var(--border-default); border-radius: var(--radius-md); background: var(--bg-card-subtle);
+}
+.region-item > div:first-child { display: grid; gap: 2px; min-width: 0; }
+.region-item strong { color: var(--text-primary); font-size: 14px; }
+.region-item small { color: var(--text-muted); font-size: 12px; }
+.region-item .row-actions { margin: 0; flex: none; }
+.region-item.disabled { opacity: 0.6; }
+.region-item.editing input { flex: 1; min-width: 0; }
+
+/* Long commands wrap instead of hiding behind a scrollbar on small screens. */
+@media (max-width: 900px) {
+  .code-line { align-items: flex-start; }
+  .code-line code { white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-all; }
+}
+
+@media (max-width: 640px) {
+  /* A sticky top bar with a menu button replaces the sidebar. */
+  .sidebar {
+    position: sticky;
+    top: 0;
+    z-index: 40;
+    flex-wrap: wrap;
+    gap: 10px;
+    padding: 10px 16px;
+    border-right: 0;
+    border-bottom: 1px solid var(--border-default);
+    box-shadow: var(--shadow-sm);
+  }
+  .brand-mark { width: 32px; height: 32px; font-size: 13px; }
+  .menu-toggle {
+    display: inline-flex; align-items: center; gap: 6px; margin-left: auto; max-width: 55%;
+    padding: 7px 12px; border: 1px solid var(--border-default); border-radius: var(--radius-full);
+    background: var(--bg-card); color: var(--text-primary); font: inherit; font-size: 13px; cursor: pointer;
+  }
+  .menu-toggle span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sidebar.menu-open nav {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 4px; width: 100%;
+    max-height: calc(100vh - 80px); overflow-y: auto; padding: 6px 0 4px; margin: 0;
+  }
+  .sidebar.menu-open .nav-item { justify-content: flex-start; padding: 10px 12px; }
+  .sidebar.menu-open .nav-item span { display: inline; }
+  .sidebar.menu-open .nav-item svg:last-child:not(:first-child) { display: none; }
+
+  main { padding: 16px 14px 48px; }
+  .topbar { margin-bottom: 16px; padding-bottom: 12px; gap: 10px; }
+  .topbar .eyebrow { display: none; }
+  .topbar h1 { font-size: 20px; }
+  .operator { gap: 8px; }
+  .page-actions { flex-direction: column; align-items: stretch; gap: 12px; }
+  .page-actions > button, .page-actions > .form-actions { align-self: flex-start; }
+  .panel, .inline-form { padding: 16px; }
+  .metrics { grid-template-columns: 1fr 1fr; gap: 10px; }
+  .metrics article { padding: 14px; }
+  .form-actions { flex-wrap: wrap; }
+  .pending-agent { flex-wrap: wrap; }
+  .pending-agent-actions { width: 100%; justify-content: flex-end; }
+  .capacity-cell { min-width: 0; }
+
+  /* Tables become one card per row; shared/tableLabels.ts labels cells. */
+  .table-wrap { overflow: visible; border: 0; background: transparent; border-radius: 0; }
+  .table-wrap table { min-width: 0 !important; }
+  .table-wrap thead { display: none; }
+  .table-wrap table, .table-wrap tbody, .table-wrap tr { display: block; width: 100%; }
+  .table-wrap tr {
+    margin-bottom: 10px; padding: 6px 14px;
+    border: 1px solid var(--border-default); border-radius: var(--radius-md); background: var(--bg-card);
+  }
+  .table-wrap td {
+    display: block; position: relative; min-height: 34px; padding: 8px 0 8px 92px;
+    border-bottom: 1px dashed var(--border-subtle); text-align: left; white-space: normal; overflow-wrap: anywhere;
+  }
+  .table-wrap td:last-child { border-bottom: 0; }
+  .table-wrap td::before {
+    content: attr(data-label); position: absolute; left: 0; top: 8px; width: 82px;
+    color: var(--text-subtle); font-size: 12px; line-height: 1.6;
+  }
+  .table-wrap td:not([data-label]), .table-wrap td[data-label=""] { padding-left: 0; }
+  .table-wrap td:not([data-label])::before, .table-wrap td[data-label=""]::before { content: none; }
+}
+
+/* Tables: keep short Chinese phrases (个人客户, 已暂停) on one line and
+   let row actions sit side by side. */
+td { word-break: keep-all; overflow-wrap: break-word; }
+td small { word-break: normal; }
+td .row-actions { flex-wrap: nowrap; }
+td .text-button { white-space: nowrap; }
+@media (max-width: 1080px) {
+  td .row-actions { flex-wrap: wrap; }
+}
+.badge-pair { display: inline-flex; flex-wrap: wrap; gap: 4px; }

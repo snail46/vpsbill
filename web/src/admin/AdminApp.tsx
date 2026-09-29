@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react'
-import { ArrowLeftRight, Boxes, CheckCircle2, ChevronRight, CircleDollarSign, Cpu, CreditCard, Headphones, LayoutDashboard, Megaphone, LogOut, PackageOpen, ReceiptText, ScrollText, ServerCog, Settings, SlidersHorizontal, ShieldCheck, Store, Users } from 'lucide-react'
+import { ArrowLeftRight, Boxes, CheckCircle2, ChevronRight, CircleDollarSign, Cpu, CreditCard, Headphones, LayoutDashboard, Megaphone, LogOut, Menu, X, PackageOpen, ReceiptText, ScrollText, ServerCog, Settings, SlidersHorizontal, ShieldCheck, Store, Users } from 'lucide-react'
 import { api, StaffUser } from '../api'
 import HostDetailPanel from '../HostDetail'
 import AdminMarketplace from '../AdminMarketplace'
@@ -379,6 +379,7 @@ export function InstallPage({ onInstalled }: { onInstalled: (user: StaffUser, ap
 
 export function AdminShell({ meta, user, onLogout }: { meta: Meta | null; user: StaffUser; onLogout: () => void }) {
   const [route, setRoute] = useState<AdminRoute>(adminRouteFromPath)
+  const [menuOpen, setMenuOpen] = useState(false)
   const view = route.view
 
   useEffect(() => {
@@ -393,6 +394,7 @@ export function AdminShell({ meta, user, onLogout }: { meta: Meta | null; user: 
   }, [])
 
   const navigate = (next: AdminRoute) => {
+    setMenuOpen(false)
     const path = adminRoutePath(next)
     if (window.location.pathname === path) return
     window.history.pushState(null, '', path)
@@ -401,7 +403,7 @@ export function AdminShell({ meta, user, onLogout }: { meta: Meta | null; user: 
 
   return (
     <div className="app-shell">
-      <aside className="sidebar">
+      <aside className={menuOpen ? 'sidebar menu-open' : 'sidebar'}>
         <div className="brand">
           <div className="brand-mark">VB</div>
           <div>
@@ -409,6 +411,10 @@ export function AdminShell({ meta, user, onLogout }: { meta: Meta | null; user: 
             <span>商家控制中心</span>
           </div>
         </div>
+        <button type="button" className="menu-toggle" aria-label={menuOpen ? '关闭菜单' : '打开菜单'} aria-expanded={menuOpen} onClick={() => setMenuOpen(open => !open)}>
+          {menuOpen ? <X size={20} /> : <Menu size={20} />}
+          <span>{navItems.find(item => item.id === view)?.label ?? '菜单'}</span>
+        </button>
         <nav aria-label="主导航">
           {navItems.map(({ id, label, icon: Icon }) => (
             <button

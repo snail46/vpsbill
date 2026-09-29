@@ -5,6 +5,7 @@ import ChatRoom from './ChatRoom'
 import { AdminReports } from './Reports'
 import { walletMoney } from './Wallet'
 import { formatTime } from './shared/time'
+import { StatusBadge } from './shared/ui'
 import { overcommitText } from './Supply'
 
 function offlineFor(node: HostedNodeRecord) {
@@ -190,7 +191,7 @@ function HostedNodes() {
                                 <td><code>{item.instance_name}</code></td>
                                 <td>{item.plan_name}</td>
                                 <td>{item.buyer_name}</td>
-                                <td>{item.status} · {item.runtime_status}</td>
+                                <td><span className="badge-pair"><StatusBadge status={item.status} /><StatusBadge status={item.runtime_status} /></span></td>
                                 <td>{walletMoney(item.remaining_value_minor)}</td>
                               </tr>
                             ))}

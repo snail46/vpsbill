@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react'
-import { ArrowLeftRight, Boxes, ChevronRight, Coins, Headphones, LayoutDashboard, LogOut, ShieldCheck, ShoppingCart, Store, UserCircle, WalletCards } from 'lucide-react'
+import { ArrowLeftRight, Boxes, ChevronRight, Coins, Headphones, LayoutDashboard, LogOut, Menu, X, ShieldCheck, ShoppingCart, Store, UserCircle, WalletCards } from 'lucide-react'
 import { api, CustomerIdentity } from '../api'
 import CustomerServicesPanel from '../CustomerServices'
 import CustomerWallet from '../Wallet'
@@ -262,6 +262,7 @@ export function CustomerAuthPage({
 
 export function CustomerShell({ customer, onLogout }: { customer: CustomerIdentity; onLogout: () => void }) {
   const [view, setView] = useState<PortalView>(portalViewFromPath)
+  const [menuOpen, setMenuOpen] = useState(false)
 
   useEffect(() => {
     // Pages may add a segment, e.g. /portal/services/<id>.
@@ -276,7 +277,10 @@ export function CustomerShell({ customer, onLogout }: { customer: CustomerIdenti
 
   // Choosing the current page again leaves any item on it (e.g. a service
   // detail) for the page itself.
-  const navigate = (next: PortalView) => navigatePortal(`/portal/${next}`)
+  const navigate = (next: PortalView) => {
+    setMenuOpen(false)
+    navigatePortal(`/portal/${next}`)
+  }
 
   const items: [PortalView, string, typeof LayoutDashboard][] = [
     ['overview', '服务概览', LayoutDashboard],
@@ -305,7 +309,7 @@ export function CustomerShell({ customer, onLogout }: { customer: CustomerIdenti
 
   return (
     <div className="app-shell customer-shell">
-      <aside className="sidebar">
+      <aside className={menuOpen ? 'sidebar menu-open' : 'sidebar'}>
         <div className="brand">
           <div className="brand-mark">VB</div>
           <div>
@@ -313,6 +317,10 @@ export function CustomerShell({ customer, onLogout }: { customer: CustomerIdenti
             <span>Customer Portal</span>
           </div>
         </div>
+        <button type="button" className="menu-toggle" aria-label={menuOpen ? '关闭菜单' : '打开菜单'} aria-expanded={menuOpen} onClick={() => setMenuOpen(open => !open)}>
+          {menuOpen ? <X size={20} /> : <Menu size={20} />}
+          <span>{titles[view]}</span>
+        </button>
         <nav aria-label="客户导航">
           {items.map(([id, label, Icon]) => (
             <button
