@@ -3883,3 +3883,19 @@ td .text-button { white-space: nowrap; }
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+.backup-encryption {
+  grid-column: 1 / -1;
+}
+
+.backup-encryption .muted-text {
+  margin: 0;
+  font-size: 13px;
+}
+
+.tag-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--success-text);
+}

@@ -35,8 +35,12 @@ type Manifest struct {
 	// KeyFingerprint identifies the ENCRYPTION_KEY the stored secrets
 	// (payment keys, node tokens, SMTP password) are sealed with.
 	KeyFingerprint string `json:"key_fingerprint"`
-	DumpSize       int64  `json:"dump_size"`
-	DumpSHA256     string `json:"dump_sha256"`
+	// DumpSize and DumpSHA256 describe database.dump as stored, encrypted
+	// or not, so any copy can be checked without the passphrase.
+	DumpSize   int64  `json:"dump_size"`
+	DumpSHA256 string `json:"dump_sha256"`
+	// Encryption is set when the dump is encrypted with a passphrase.
+	Encryption *Encryption `json:"encryption,omitempty"`
 }
 
 var namePattern = regexp.MustCompile(`^vpsbill-[0-9]{8}-[0-9]{6}(-[a-z][a-z-]{0,19})?\.tar$`)

@@ -177,6 +177,7 @@ func (a *backupAPI) restore(w http.ResponseWriter, r *http.Request) {
 	var input struct {
 		Confirm          string `json:"confirm"`
 		AllowKeyMismatch bool   `json:"allow_key_mismatch"`
+		Passphrase       string `json:"passphrase"`
 	}
 	if !decodeJSON(w, r, &input) {
 		return
@@ -188,7 +189,15 @@ func (a *backupAPI) restore(w http.ResponseWriter, r *http.Request) {
 	// Checking a large backup's checksum takes a while.
 	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(time.Hour))
 	name := r.PathValue("name")
-	manifest, err := a.service.Restore(r.Context(), name, input.AllowKeyMismatch, principalFromContext(r.Context()).UserID)
+	manifest, err := a.service.Restore(r.Context(), name, input.AllowKeyMismatch, input.Passphrase, principalFromContext(r.Context()).UserID)
+	if errors.Is(err, backup.ErrPassphraseRequired) {
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "passphrase_required", "message": "这份备份已用口令加密，请输入备份时使用的口令"})
+		return
+	}
+	if errors.Is(err, backup.ErrWrongPassphrase) {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "wrong_passphrase", "message": "备份口令不正确"})
+		return
+	}
 	if errors.Is(err, backup.ErrKeyMismatch) {
 		writeJSON(w, http.StatusConflict, map[string]any{"error": "key_mismatch", "message": "这份备份使用了另一个 ENCRYPTION_KEY：还原后，支付密钥、节点令牌、SMTP 密码和 WebDAV 密码等已保存的密钥无法解密，需要重新填写。建议先把 .env 里的 ENCRYPTION_KEY 改回备份时的值。"})
 		return

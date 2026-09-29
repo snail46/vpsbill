@@ -121,6 +121,10 @@ type Settings struct {
 	KeepRemote    int
 	WebDAV        WebDAV
 	ScheduledAt   *time.Time
+	// Encrypt seals new backups with Passphrase, which is also tried first
+	// when restoring an encrypted backup.
+	Encrypt    bool
+	Passphrase string
 }
 
 // SettingsView is what the admin page shows; the WebDAV password only as
@@ -136,6 +140,8 @@ type SettingsView struct {
 	WebDAVPasswordSet bool       `json:"webdav_password_set"`
 	WebDAVDirectory   string     `json:"webdav_directory"`
 	WebDAVInsecure    bool       `json:"webdav_insecure"`
+	Encrypt           bool       `json:"encrypt"`
+	PassphraseSet     bool       `json:"passphrase_set"`
 	NextRunAt         *time.Time `json:"next_run_at,omitempty"`
 }
 
@@ -152,16 +158,20 @@ type SettingsInput struct {
 	WebDAVPassword  string `json:"webdav_password"`
 	WebDAVDirectory string `json:"webdav_directory"`
 	WebDAVInsecure  bool   `json:"webdav_insecure"`
+	Encrypt         bool   `json:"encrypt"`
+	// EncryptionPassphrase replaces the stored passphrase; empty keeps it.
+	EncryptionPassphrase string `json:"encryption_passphrase"`
 }
 
 var dailyPattern = regexp.MustCompile(`^([01][0-9]|2[0-3]):[0-5][0-9]$`)
 
 func (s *Service) Settings(ctx context.Context) (Settings, error) {
 	var settings Settings
-	var sealed []byte
-	err := s.db.QueryRow(ctx, `SELECT schedule,daily_at,interval_hours,keep_local,keep_remote,webdav_url,webdav_username,webdav_password_encrypted,webdav_directory,webdav_insecure,scheduled_at FROM backup_config WHERE singleton`).
+	var sealed, sealedPassphrase []byte
+	err := s.db.QueryRow(ctx, `SELECT schedule,daily_at,interval_hours,keep_local,keep_remote,webdav_url,webdav_username,webdav_password_encrypted,webdav_directory,webdav_insecure,scheduled_at,encrypt,encryption_passphrase_encrypted FROM backup_config WHERE singleton`).
 		Scan(&settings.Schedule, &settings.DailyAt, &settings.IntervalHours, &settings.KeepLocal, &settings.KeepRemote,
-			&settings.WebDAV.URL, &settings.WebDAV.Username, &sealed, &settings.WebDAV.Directory, &settings.WebDAV.Insecure, &settings.ScheduledAt)
+			&settings.WebDAV.URL, &settings.WebDAV.Username, &sealed, &settings.WebDAV.Directory, &settings.WebDAV.Insecure, &settings.ScheduledAt,
+			&settings.Encrypt, &sealedPassphrase)
 	if err != nil {
 		return Settings{}, err
 	}
@@ -169,6 +179,11 @@ func (s *Service) Settings(ctx context.Context) (Settings, error) {
 		if settings.WebDAV.Password, err = s.box.Open(sealed); err != nil {
 			return Settings{}, fmt.Errorf("decrypt WebDAV password: %w", err)
 		}
+	}
+	// A passphrase sealed with another ENCRYPTION_KEY (a restored database)
+	// is as good as none: restores then ask for it.
+	if len(sealedPassphrase) > 0 {
+		settings.Passphrase, _ = s.box.Open(sealedPassphrase)
 	}
 	return settings, nil
 }
@@ -183,6 +198,7 @@ func (s *Service) View(ctx context.Context) (SettingsView, error) {
 		KeepLocal: settings.KeepLocal, KeepRemote: settings.KeepRemote,
 		WebDAVURL: settings.WebDAV.URL, WebDAVUsername: settings.WebDAV.Username, WebDAVPasswordSet: settings.WebDAV.Password != "",
 		WebDAVDirectory: settings.WebDAV.Directory, WebDAVInsecure: settings.WebDAV.Insecure,
+		Encrypt: settings.Encrypt, PassphraseSet: settings.Passphrase != "",
 		NextRunAt: nextRun(settings, s.now()),
 	}, nil
 }
@@ -229,6 +245,26 @@ func (s *Service) Save(ctx context.Context, in SettingsInput) (SettingsView, err
 	if err != nil {
 		return SettingsView{}, err
 	}
+	current, err := s.Settings(ctx)
+	if err != nil {
+		return SettingsView{}, err
+	}
+	passphrase := current.Passphrase
+	if in.EncryptionPassphrase != "" {
+		if len([]rune(in.EncryptionPassphrase)) < MinPassphrase {
+			return SettingsView{}, invalid("备份口令至少 %d 个字符", MinPassphrase)
+		}
+		passphrase = in.EncryptionPassphrase
+	}
+	if in.Encrypt && passphrase == "" {
+		return SettingsView{}, invalid("开启加密需要设置备份口令（至少 %d 个字符）", MinPassphrase)
+	}
+	var sealedPassphrase []byte
+	if passphrase != "" {
+		if sealedPassphrase, err = s.box.Seal(passphrase); err != nil {
+			return SettingsView{}, err
+		}
+	}
 	var sealed []byte
 	if target.URL != "" && target.Password != "" {
 		if sealed, err = s.box.Seal(target.Password); err != nil {
@@ -247,10 +283,12 @@ func (s *Service) Save(ctx context.Context, in SettingsInput) (SettingsView, err
 		UPDATE backup_config SET
 		    scheduled_at = CASE WHEN schedule<>$1 OR daily_at<>$2 OR interval_hours<>$3 THEN now() ELSE scheduled_at END,
 		    schedule=$1, daily_at=$2, interval_hours=$3, keep_local=$4, keep_remote=$5,
-		    webdav_url=$6, webdav_username=$7, webdav_password_encrypted=$8, webdav_directory=$9, webdav_insecure=$10, updated_at=now()
+		    webdav_url=$6, webdav_username=$7, webdav_password_encrypted=$8, webdav_directory=$9, webdav_insecure=$10,
+		    encrypt=$11, encryption_passphrase_encrypted=$12, updated_at=now()
 		WHERE singleton`,
 		in.Schedule, in.DailyAt, in.IntervalHours, in.KeepLocal, in.KeepRemote,
-		target.URL, target.Username, sealed, target.Directory, target.Insecure)
+		target.URL, target.Username, sealed, target.Directory, target.Insecure,
+		in.Encrypt, sealedPassphrase)
 	if err != nil {
 		return SettingsView{}, err
 	}
@@ -281,6 +319,7 @@ type LocalFile struct {
 	// KeyMatches is false when the backup's secrets were sealed with
 	// another ENCRYPTION_KEY.
 	KeyMatches bool   `json:"key_matches"`
+	Encrypted  bool   `json:"encrypted"`
 	Error      string `json:"error,omitempty"`
 }
 
@@ -304,6 +343,7 @@ func (s *Service) ListLocal() ([]LocalFile, error) {
 		} else {
 			file.CreatedAt, file.Trigger, file.Version = manifest.CreatedAt, manifest.Trigger, manifest.AppVersion
 			file.KeyMatches = manifest.KeyFingerprint == s.keyFingerprint
+			file.Encrypted = manifest.Encryption != nil
 		}
 		files = append(files, file)
 	}
@@ -387,7 +427,7 @@ func (s *Service) SaveUpload(body io.Reader) (LocalFile, error) {
 		return LocalFile{}, err
 	}
 	info, _ := os.Stat(filepath.Join(s.dir, name))
-	file := LocalFile{Name: name, CreatedAt: manifest.CreatedAt, Trigger: manifest.Trigger, Version: manifest.AppVersion, KeyMatches: manifest.KeyFingerprint == s.keyFingerprint}
+	file := LocalFile{Name: name, CreatedAt: manifest.CreatedAt, Trigger: manifest.Trigger, Version: manifest.AppVersion, KeyMatches: manifest.KeyFingerprint == s.keyFingerprint, Encrypted: manifest.Encryption != nil}
 	if info != nil {
 		file.SizeBytes = info.Size()
 	}
@@ -513,13 +553,34 @@ func (s *Service) createLocal(ctx context.Context, trigger string) (string, int6
 	if err := pgDump(ctx, s.databaseURL, versionNum/10000, dumpPath); err != nil {
 		return "", 0, err
 	}
+	settings, err := s.Settings(ctx)
+	if err != nil {
+		return "", 0, err
+	}
+	var encryption *Encryption
+	if settings.Encrypt {
+		if settings.Passphrase == "" {
+			return "", 0, errors.New("已开启加密，但没有可用的备份口令（可能是还原了另一台服务器的数据），请在设置里重新填写口令")
+		}
+		sealed, err := newEncryption()
+		if err != nil {
+			return "", 0, err
+		}
+		encrypted := dumpPath + ".enc"
+		defer os.Remove(encrypted)
+		if err := encryptFile(dumpPath, encrypted, settings.Passphrase, sealed); err != nil {
+			return "", 0, fmt.Errorf("加密备份失败：%w", err)
+		}
+		_ = os.Remove(dumpPath)
+		dumpPath, encryption = encrypted, &sealed
+	}
 	size, sum, err := hashFile(dumpPath)
 	if err != nil {
 		return "", 0, err
 	}
 	manifest := Manifest{
 		Format: formatVersion, CreatedAt: now, Trigger: trigger, AppVersion: s.version, SchemaVersion: schema,
-		PostgresVersion: serverVersion, KeyFingerprint: s.keyFingerprint, DumpSize: size, DumpSHA256: sum,
+		PostgresVersion: serverVersion, KeyFingerprint: s.keyFingerprint, DumpSize: size, DumpSHA256: sum, Encryption: encryption,
 	}
 	if err := writeArchive(tarPath, manifest, dumpPath); err != nil {
 		return "", 0, fmt.Errorf("写入备份文件失败：%w", err)
@@ -658,7 +719,9 @@ func (s *Service) fetch(ctx context.Context, name string) (int64, error) {
 // current data, stops the workers and replaces every table with the
 // backup's in one transaction. The process then exits so the container
 // restarts on the restored data.
-func (s *Service) Restore(ctx context.Context, name string, allowKeyMismatch bool, actorID string) (Manifest, error) {
+// An encrypted backup needs its passphrase: the one given, else the stored
+// one; ErrPassphraseRequired asks the administrator for it.
+func (s *Service) Restore(ctx context.Context, name string, allowKeyMismatch bool, passphrase, actorID string) (Manifest, error) {
 	path, err := s.LocalPath(name)
 	if err != nil {
 		return Manifest{}, err
@@ -670,21 +733,53 @@ func (s *Service) Restore(ctx context.Context, name string, allowKeyMismatch boo
 	if err == nil && manifest.SchemaVersion > postgres.LatestMigration() {
 		err = invalid("这份备份来自更新的版本（数据库结构 %s），请先把系统升级到同一版本或更新版本再还原", manifest.SchemaVersion)
 	}
+	if err == nil && manifest.Encryption != nil {
+		passphrase, err = s.checkPassphrase(ctx, path, *manifest.Encryption, passphrase)
+	}
 	if err == nil && manifest.KeyFingerprint != s.keyFingerprint && !allowKeyMismatch {
 		err = ErrKeyMismatch
 	}
 	if err != nil {
 		s.busy.Unlock()
-		if errors.Is(err, ErrKeyMismatch) || errors.Is(err, ErrInvalid) {
+		if errors.Is(err, ErrKeyMismatch) || errors.Is(err, ErrInvalid) || errors.Is(err, ErrPassphraseRequired) || errors.Is(err, ErrWrongPassphrase) {
 			return manifest, err
 		}
 		return manifest, invalid("%s", err.Error())
 	}
-	go s.restore(path, name, actorID)
+	go s.restore(path, name, manifest, passphrase, actorID)
 	return manifest, nil
 }
 
-func (s *Service) restore(path, name, actorID string) {
+// checkPassphrase finds the passphrase that opens the backup: the given
+// one, else the stored one.
+func (s *Service) checkPassphrase(ctx context.Context, path string, encryption Encryption, given string) (string, error) {
+	passphrase := given
+	if passphrase == "" {
+		settings, err := s.Settings(ctx)
+		if err != nil {
+			return "", err
+		}
+		passphrase = settings.Passphrase
+	}
+	if passphrase == "" {
+		return "", ErrPassphraseRequired
+	}
+	sealed := filepath.Join(s.dir, ".tmp-check.dump")
+	defer os.Remove(sealed)
+	if _, err := extractDump(path, sealed); err != nil {
+		return "", err
+	}
+	if err := decryptFile(sealed, "", passphrase, encryption); err != nil {
+		if errors.Is(err, ErrWrongPassphrase) && given == "" {
+			// The stored passphrase is not this backup's.
+			return "", ErrPassphraseRequired
+		}
+		return "", passphraseError(err)
+	}
+	return passphrase, nil
+}
+
+func (s *Service) restore(path, name string, manifest Manifest, passphrase, actorID string) {
 	defer s.busy.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Hour)
 	defer cancel()
@@ -703,6 +798,20 @@ func (s *Service) restore(path, name, actorID string) {
 		s.finishRun(ctx, runID, "failed", "", name, 0, "解包失败，未做任何改动："+err.Error())
 		s.activity.Store(nil)
 		return
+	}
+	if manifest.Encryption != nil {
+		s.setActivity("restore", "正在解密备份", name, started)
+		sealed := dumpPath + ".enc"
+		defer os.Remove(sealed)
+		err := os.Rename(dumpPath, sealed)
+		if err == nil {
+			err = decryptFile(sealed, dumpPath, passphrase, *manifest.Encryption)
+		}
+		if err != nil {
+			s.finishRun(ctx, runID, "failed", "", name, 0, "解密失败，未做任何改动："+passphraseError(err).Error())
+			s.activity.Store(nil)
+			return
+		}
 	}
 
 	// From here on the process restarts whatever happens.

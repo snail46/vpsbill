@@ -1,5 +1,5 @@
 import { ChangeEvent, FormEvent, useEffect, useRef, useState } from 'react'
-import { ArchiveRestore, CloudDownload, DatabaseBackup, Download, PlugZap, RefreshCw, Trash2, Upload, X } from 'lucide-react'
+import { ArchiveRestore, CloudDownload, DatabaseBackup, Download, Lock, PlugZap, RefreshCw, Trash2, Upload, X } from 'lucide-react'
 import { api, cached, csrfToken } from '../api'
 import { formatBytes } from '../shared/ui'
 import { formatTime } from '../shared/time'
@@ -15,9 +15,11 @@ type BackupSettings = {
   webdav_password_set: boolean
   webdav_directory: string
   webdav_insecure: boolean
+  encrypt: boolean
+  passphrase_set: boolean
   next_run_at?: string
 }
-type LocalBackup = { name: string; size_bytes: number; created_at: string; trigger: string; app_version: string; key_matches: boolean; error?: string }
+type LocalBackup = { name: string; size_bytes: number; created_at: string; trigger: string; app_version: string; key_matches: boolean; encrypted: boolean; error?: string }
 type RemoteBackup = { name: string; size_bytes: number; modified_at: string }
 type BackupRun = { id: number; kind: string; trigger: string; file_name: string; size_bytes: number; status: string; webdav_status: string; message: string; started_at: string; finished_at?: string }
 type Activity = { kind: string; stage: string; file?: string; started_at: string }
@@ -55,6 +57,9 @@ function settingsForm(settings?: BackupSettings) {
     webdav_password: '',
     webdav_directory: settings?.webdav_directory ?? 'vpsbill',
     webdav_insecure: settings?.webdav_insecure ?? false,
+    encrypt: settings?.encrypt ?? false,
+    encryption_passphrase: '',
+    passphrase_confirm: '',
   }
 }
 
@@ -115,6 +120,7 @@ export function BackupsView() {
 
   const body = () => ({
     ...form,
+    passphrase_confirm: undefined,
     interval_hours: Number(form.interval_hours) || 0,
     keep_local: Number(form.keep_local) || 0,
     keep_remote: Number(form.keep_remote) || 0,
@@ -122,6 +128,10 @@ export function BackupsView() {
 
   async function save(event: FormEvent) {
     event.preventDefault()
+    if (form.encryption_passphrase !== form.passphrase_confirm) {
+      setError('两次输入的备份口令不一致')
+      return
+    }
     setSaving(true)
     setError('')
     setNotice('')
@@ -347,6 +357,34 @@ export function BackupsView() {
           </div>
         </section>
 
+        <section className="panel backup-encryption">
+          <div className="panel-heading">
+            <h3>备份加密</h3>
+            {settings?.encrypt && <span className="tag"><Lock size={12} /> 已开启</span>}
+          </div>
+          <div className="form-grid">
+            <label className="checkbox wide">
+              <input type="checkbox" checked={form.encrypt} onChange={update('encrypt')} /> 用口令加密备份（AES-256-GCM）
+            </label>
+            {(form.encrypt || settings?.passphrase_set) && (
+              <>
+                <label>
+                  <span>备份口令{settings?.passphrase_set ? '（留空保持不变）' : ''}</span>
+                  <input type="password" value={form.encryption_passphrase} onChange={update('encryption_passphrase')} autoComplete="new-password" minLength={12} placeholder="至少 12 个字符" />
+                </label>
+                <label>
+                  <span>再输入一次</span>
+                  <input type="password" value={form.passphrase_confirm} onChange={update('passphrase_confirm')} autoComplete="new-password" />
+                </label>
+              </>
+            )}
+            <p className="muted-text wide">
+              开启后，之后的备份只有凭口令才能打开，存在 WebDAV 上也读不到内容；备份时间和版本仍然可见。本机还原时自动使用保存的口令；换服务器，或还原修改口令之前的备份时，需要输入当时的口令。
+              <strong>口令丢失后备份无法恢复</strong>，请记在密码管理器里。已有的备份不会被重新加密。
+            </p>
+          </div>
+        </section>
+
         <div className="form-actions">
           <button type="button" className="secondary-button" disabled={testing || !form.webdav_url.trim()} onClick={() => void testWebDAV()}>
             <PlugZap size={15} />
@@ -381,6 +419,7 @@ export function BackupsView() {
                 <tr key={file.name}>
                   <td>
                     <strong className="truncate" title={file.name}>{file.name}</strong>
+                    {file.encrypted && <small className="tag-inline"><Lock size={11} /> 已加密</small>}
                     {file.error ? <small className="danger-text">{file.error}</small> : !file.key_matches && <small className="warn-text">加密密钥与当前不同</small>}
                   </td>
                   <td>{formatTime(file.created_at)}</td>
@@ -526,6 +565,8 @@ function RestoreDialog({ file, onClose, onStarted }: { file: LocalBackup; onClos
   const [confirm, setConfirm] = useState('')
   const [keyMismatch, setKeyMismatch] = useState(!file.key_matches)
   const [allowMismatch, setAllowMismatch] = useState(false)
+  const [passphrase, setPassphrase] = useState('')
+  const [needPassphrase, setNeedPassphrase] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
 
@@ -536,12 +577,13 @@ function RestoreDialog({ file, onClose, onStarted }: { file: LocalBackup; onClos
     try {
       const result = await api<{ activity: Activity | null }>(`${endpoint}/local/${encodeURIComponent(file.name)}/restore`, {
         method: 'POST',
-        body: JSON.stringify({ confirm, allow_key_mismatch: allowMismatch }),
+        body: JSON.stringify({ confirm, allow_key_mismatch: allowMismatch, passphrase }),
       })
       onStarted(result.activity?.stage ?? '正在准备还原')
     } catch (err) {
       const status = (err as { status?: number }).status
       if (status === 409 && err instanceof Error && err.message.includes('ENCRYPTION_KEY')) setKeyMismatch(true)
+      if (err instanceof Error && err.message.includes('口令')) setNeedPassphrase(true)
       setError(err instanceof Error ? err.message : '还原失败')
     } finally {
       setBusy(false)
@@ -578,6 +620,12 @@ function RestoreDialog({ file, onClose, onStarted }: { file: LocalBackup; onClos
             </label>
           </div>
         )}
+        {file.encrypted && (
+          <label>
+            <span>备份口令{needPassphrase ? '' : '（留空使用已保存的口令）'}</span>
+            <input type="password" value={passphrase} onChange={event => setPassphrase(event.target.value)} autoComplete="off" required={needPassphrase} />
+          </label>
+        )}
         <label className="checkbox">
           <input type="checkbox" checked={understood} onChange={event => setUnderstood(event.target.checked)} /> 我已了解当前数据会被替换
         </label>
@@ -588,7 +636,7 @@ function RestoreDialog({ file, onClose, onStarted }: { file: LocalBackup; onClos
         {error && <div className="form-error">{error}</div>}
         <div className="form-actions">
           <button type="button" className="secondary-button" onClick={onClose}>取消</button>
-          <button className="danger-button" disabled={busy || !understood || confirm.trim() !== '还原' || (keyMismatch && !allowMismatch)}>
+          <button className="danger-button" disabled={busy || !understood || confirm.trim() !== '还原' || (keyMismatch && !allowMismatch) || (needPassphrase && !passphrase)}>
             {busy ? '正在校验备份…' : '开始还原'}
           </button>
         </div>
