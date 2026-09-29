@@ -459,6 +459,7 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const pending = request<T>(path, init)
     .then(data => {
       responses.set(path, data)
+      store(path, data)
       return data
     })
     .finally(() => {
@@ -491,15 +492,70 @@ async function request<T>(path: string, init: RequestInit): Promise<T> {
 const responses = new Map<string, unknown>()
 const inflight = new Map<string, Promise<unknown>>()
 
-// cached is the last response for path, for a view's initial state.
+// cached is the last response for path, for a view's initial state: from
+// this page, or from before a reload of this tab.
 export function cached<T>(path: string): T | undefined {
-  return responses.get(path) as T | undefined
+  return (responses.has(path) ? responses.get(path) : restore(path)) as T | undefined
 }
 
 // clearCached forgets every response; signing in or out changes whose data
 // it is.
 export function clearCached() {
   responses.clear()
+  owner = ''
+  clearStored()
+}
+
+// Responses are also kept in the tab's sessionStorage, for the signed-in
+// user only, so a reload shows the page's data at once too. The storage
+// ends with the tab and is cleared on sign-out.
+const storagePrefix = 'vpsbill:get:'
+const ownerKey = 'vpsbill:owner'
+const storedLimit = 256 * 1024
+let owner = ''
+
+// adoptCache names the signed-in user; what the tab stored for anyone else
+// is dropped.
+export function adoptCache(id: string) {
+  owner = id
+  try {
+    if (sessionStorage.getItem(ownerKey) !== id) {
+      clearStored()
+      if (id) sessionStorage.setItem(ownerKey, id)
+    }
+  } catch {
+    // storage unavailable (private mode); the page cache still works
+  }
+}
+
+function store(path: string, data: unknown) {
+  if (!owner) return
+  try {
+    const text = JSON.stringify(data)
+    if (text.length <= storedLimit) sessionStorage.setItem(storagePrefix + path, text)
+  } catch {
+    // full or unavailable
+  }
+}
+
+function restore(path: string): unknown {
+  if (!owner) return undefined
+  try {
+    const text = sessionStorage.getItem(storagePrefix + path)
+    return text ? JSON.parse(text) : undefined
+  } catch {
+    return undefined
+  }
+}
+
+function clearStored() {
+  try {
+    for (const key of Object.keys(sessionStorage)) {
+      if (key.startsWith(storagePrefix) || key === ownerKey) sessionStorage.removeItem(key)
+    }
+  } catch {
+    // unavailable
+  }
 }
 
 // prefetch loads the paths that are not cached yet, a few at a time so the

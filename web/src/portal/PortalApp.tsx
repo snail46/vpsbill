@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react'
 import { ArrowLeftRight, Boxes, ChevronRight, Coins, Headphones, LayoutDashboard, LogOut, Menu, X, ShieldCheck, ShoppingCart, Store, UserCircle, WalletCards } from 'lucide-react'
-import { api, clearCached, CustomerIdentity } from '../api'
+import { adoptCache, api, clearCached, CustomerIdentity } from '../api'
 import { prefetchPage, usePrefetch } from '../shared/prefetch'
 import CustomerServicesPanel from '../CustomerServices'
 import CustomerWallet from '../Wallet'
@@ -92,6 +92,7 @@ export function CustomerPortalApp() {
         onMode={setScreen}
         onAuthenticated={value => {
           clearCached()
+          adoptCache(value.id)
           setCustomer(value)
           setScreen('ready')
         }}

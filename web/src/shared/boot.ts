@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react'
-import type { CustomerIdentity, StaffUser } from '../api'
+import { adoptCache, type CustomerIdentity, type StaffUser } from '../api'
 import type { Meta } from './ui'
 
 // Boot is what a page needs before it can render: the site facts, whether
@@ -33,7 +33,7 @@ export function inlineBoot(): Boot | null {
   } catch {
     // an SSI error or an old HTML file; fetch it instead
   }
-  if (inline) applyMeta(inline.meta)
+  if (inline) applyBoot(inline)
   return inline
 }
 
@@ -52,7 +52,7 @@ export function loadBoot(): Promise<Boot> {
           })
           .then(async (payload: { data: Boot | null }) => {
             const boot = payload.data ?? (await legacyBoot())
-            applyMeta(boot.meta)
+            applyBoot(boot)
             return boot
           })
     // A failed request may be retried by the next caller.
@@ -83,6 +83,13 @@ async function legacyBoot(): Promise<Boot> {
     staff: admin ? (user as StaffUser | null) : null,
     customer: admin ? null : (user as CustomerIdentity | null),
   }
+}
+
+// applyBoot scopes the data cache to whoever is signed in and shows the
+// site name and logo.
+function applyBoot(boot: Boot) {
+  adoptCache(boot.staff?.id ?? boot.customer?.id ?? '')
+  applyMeta(boot.meta)
 }
 
 // applyMeta shows the site name in the browser tab and the site logo.

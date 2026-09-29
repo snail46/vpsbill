@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react'
 import { ArrowLeftRight, Boxes, CheckCircle2, ChevronRight, CircleDollarSign, Cpu, CreditCard, Headphones, LayoutDashboard, Megaphone, LogOut, Menu, X, PackageOpen, ReceiptText, ScrollText, ServerCog, Settings, SlidersHorizontal, ShieldCheck, Store, Users } from 'lucide-react'
-import { api, clearCached, StaffUser } from '../api'
+import { adoptCache, api, clearCached, StaffUser } from '../api'
 import { prefetchPage, usePrefetch } from '../shared/prefetch'
 import HostDetailPanel from '../HostDetail'
 import AdminMarketplace from '../AdminMarketplace'
@@ -153,6 +153,7 @@ export function AdminApp() {
         mode={authScreen}
         onAuthenticated={current => {
           clearCached()
+          adoptCache(current.id)
           setUser(current)
           setAuthScreen('ready')
         }}
