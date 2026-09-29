@@ -46,7 +46,9 @@ func blockDevices() []string {
 }
 
 const (
-	benchFileSize = 128 << 20
+	// benchFileSize caps the scratch file; the sequential passes stop after
+	// benchSeqTime, and a small file is mostly absorbed by caches.
+	benchFileSize = 512 << 20
 	benchSeqTime  = 3 * time.Second
 	benchRandTime = 2 * time.Second
 	benchDepth    = 8
@@ -55,7 +57,9 @@ const (
 
 // measureDisk benchmarks the file system holding dir with O_DIRECT and
 // random data (so compressing or deduplicating storage cannot flatter it):
-// about ten seconds and a 128 MiB scratch file.
+// about ten seconds and a scratch file of up to 512 MiB (a tenth of the
+// free space at most). On a VM both passes may be helped by the
+// hypervisor's cache, so the numbers lean high.
 func measureDisk(dir string) (*protocol.DiskPerf, error) {
 	// Agents sharing a machine take turns, or each would measure a third.
 	// (/dev stays writable under the unit's ProtectSystem=strict.)
@@ -71,6 +75,10 @@ func measureDisk(dir string) (*protocol.DiskPerf, error) {
 	defer os.Remove(path)
 	defer file.Close()
 
+	size := int64(benchFileSize)
+	if total, used, err := fsSpace(dir); err == nil {
+		size = min(size, max((total-used)/10, 16<<20))
+	}
 	block := alignedBuffer(1 << 20)
 	if _, err := rand.Read(block); err != nil {
 		return nil, err
@@ -78,7 +86,7 @@ func measureDisk(dir string) (*protocol.DiskPerf, error) {
 	perf := &protocol.DiskPerf{MeasuredAt: time.Now().UTC()}
 	var written int64
 	start := time.Now()
-	for written < benchFileSize && time.Since(start) < benchSeqTime {
+	for written < size && time.Since(start) < benchSeqTime {
 		n, err := file.WriteAt(block, written)
 		if err != nil {
 			return nil, err
