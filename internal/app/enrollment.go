@@ -21,6 +21,7 @@ import (
 	"vpsbill/internal/hatch/protocol"
 	"vpsbill/internal/provider"
 	"vpsbill/internal/security"
+	"vpsbill/internal/settings"
 	"vpsbill/internal/store/postgres"
 )
 
@@ -42,11 +43,26 @@ func AgentEnroller(catalog *postgres.CatalogStore, box *security.SecretBox, logg
 }
 
 // agentIP tells an agent the address it connects from, which is its public
-// IPv4 when the host itself only has a private one (1:1 NAT).
-func agentIP(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-store")
-	_, _ = w.Write([]byte(remoteIP(r)))
+// IPv4 when the host itself only has a private one (1:1 NAT). An agent on
+// the billing server's own machine connects over loopback; it shares the
+// site's public address, taken from the public URL.
+func agentIP(runtime *settings.Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		address := remoteIP(r)
+		if ip := net.ParseIP(address); ip != nil && ip.IsLoopback() {
+			address = ""
+			if site, err := url.Parse(runtime.Current().PublicURL); err == nil {
+				if ip := net.ParseIP(site.Hostname()); ip != nil {
+					address = ip.String()
+				} else if ips, err := net.DefaultResolver.LookupIP(r.Context(), "ip4", site.Hostname()); err == nil && len(ips) > 0 {
+					address = ips[0].String()
+				}
+			}
+		}
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		_, _ = w.Write([]byte(address))
+	}
 }
 
 // installCommand is the one command every host of an owner runs.

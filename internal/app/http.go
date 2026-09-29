@@ -195,7 +195,7 @@ func NewHandler(deps Dependencies) (http.Handler, error) {
 	// Public on purpose: nodes fetch the agent before they hold any credential.
 	mux.HandleFunc("GET /api/v1/agent/download/{file}", agentDownloads(deps.Config.AgentDownloadDir))
 	// Public too: agents behind 1:1 NAT learn their public IPv4 from it.
-	mux.HandleFunc("GET /api/v1/agent/ip", agentIP)
+	mux.HandleFunc("GET /api/v1/agent/ip", agentIP(deps.Settings))
 	if deps.AgentGateway != nil {
 		// Authenticated by the agent bearer token inside the gateway.
 		mux.Handle("GET /api/v1/agent/connect", deps.AgentGateway)
