@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react'
 import { RefreshCw } from 'lucide-react'
-import { api, AuditLogRecord, TicketDetailRecord, TicketRecord } from '../api'
+import { api, cached, AuditLogRecord, TicketDetailRecord, TicketRecord } from '../api'
 import { ticketRequestBody, useAttachmentLimit } from '../TicketAttachments'
 import { ticketStatusLabel, TicketConversation } from '../shared/ui'
 import { formatTime } from '../shared/time'
 
 export function AdminSupport() {
-  const [tickets, setTickets] = useState<TicketRecord[]>([])
+  const [tickets, setTickets] = useState<TicketRecord[]>(() => cached<TicketRecord[]>('/api/v1/admin/tickets') ?? [])
   const [scope, setScope] = useState<'platform' | 'hosted'>('platform')
   const [detail, setDetail] = useState<TicketDetailRecord | null>(null)
   const [error, setError] = useState('')
@@ -120,7 +120,7 @@ export function AdminSupport() {
 }
 
 export function AuditView() {
-  const [rows, setRows] = useState<AuditLogRecord[]>([])
+  const [rows, setRows] = useState<AuditLogRecord[]>(() => cached<AuditLogRecord[]>('/api/v1/admin/audit-logs') ?? [])
   const [error, setError] = useState('')
 
   const load = () =>

@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react'
 import { Flag, RefreshCw, X } from 'lucide-react'
-import { api, reportReasons, type ReportRecord } from './api'
+import { api, cached, reportReasons, type ReportRecord } from './api'
 import { formatTime } from './shared/time'
 
 const nodeReasons = ['resources', 'oversell', 'false_info', 'other']
@@ -83,7 +83,7 @@ const statusNames: Record<ReportRecord['status'], string> = { open: '待处理',
 // AdminReports lists customer reports; staff resolve them, and can mute a
 // reported chat author or pause a reported node from here.
 export function AdminReports() {
-  const [reports, setReports] = useState<ReportRecord[]>([])
+  const [reports, setReports] = useState<ReportRecord[]>(() => cached<{ reports: ReportRecord[] }>('/api/v1/admin/reports')?.reports ?? [])
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
 

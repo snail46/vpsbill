@@ -447,6 +447,28 @@ function csrfToken(path: string) {
 }
 
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const reading = (!init.method || init.method.toUpperCase() === 'GET') && init.body === undefined && !init.signal
+  if (!reading) {
+    // A reload after a change must not reuse a read that started before it.
+    inflight.clear()
+    return request<T>(path, init).finally(() => inflight.clear())
+  }
+  // Two views asking for the same data at once share one request.
+  const running = inflight.get(path)
+  if (running) return running as Promise<T>
+  const pending = request<T>(path, init)
+    .then(data => {
+      responses.set(path, data)
+      return data
+    })
+    .finally(() => {
+      if (inflight.get(path) === pending) inflight.delete(path)
+    })
+  inflight.set(path, pending)
+  return pending
+}
+
+async function request<T>(path: string, init: RequestInit): Promise<T> {
   const headers = new Headers(init.headers)
   headers.set('Accept', 'application/json')
   if (typeof init.body === 'string') headers.set('Content-Type', 'application/json')
@@ -462,6 +484,34 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
     throw error
   }
   return payload.data as T
+}
+
+// Every successful GET is kept for this page, so a view opened again (or
+// opened after prefetch) shows its last data at once while it reloads.
+const responses = new Map<string, unknown>()
+const inflight = new Map<string, Promise<unknown>>()
+
+// cached is the last response for path, for a view's initial state.
+export function cached<T>(path: string): T | undefined {
+  return responses.get(path) as T | undefined
+}
+
+// clearCached forgets every response; signing in or out changes whose data
+// it is.
+export function clearCached() {
+  responses.clear()
+}
+
+// prefetch loads the paths that are not cached yet, a few at a time so the
+// open view's own requests are not held up.
+export async function prefetch(paths: string[], parallel = 3) {
+  const queue = [...new Set(paths)].filter(path => !responses.has(path) && !inflight.has(path))
+  const worker = async () => {
+    for (let path = queue.shift(); path; path = queue.shift()) {
+      if (!responses.has(path)) await api(path).catch(() => undefined)
+    }
+  }
+  await Promise.all(Array.from({ length: parallel }, worker))
 }
 
 // imageLabel names a system image; release and arch are optional because

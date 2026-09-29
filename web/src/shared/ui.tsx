@@ -3,6 +3,7 @@ import { Plus, Send, ShieldCheck } from 'lucide-react'
 import { api, TicketDetailRecord } from '../api'
 import { AttachmentGallery, AttachmentPicker } from '../TicketAttachments'
 import { formatTime, startOfDay } from './time'
+import { useSiteLogo } from './boot'
 
 export type Meta = {
   name: string
@@ -13,6 +14,10 @@ export type Meta = {
   surface?: 'portal' | 'admin' | ''
   admin_url?: string
   public_url?: string
+  // logo_url is the site logo; empty shows the default mark.
+  logo_url?: string
+  ticket_attachment_max_mb?: number
+  marketplace_enabled?: boolean
 }
 
 // useReveal brings a form that just opened into view, flashes it and puts
@@ -33,10 +38,21 @@ export function useReveal(ref: RefObject<HTMLElement | null>, ready = true) {
   }, [ref, ready])
 }
 
+// BrandMark is the logo in the top-left corner and on the sign-in pages:
+// the one set in the site settings, or the default mark.
+export function BrandMark() {
+  const logo = useSiteLogo()
+  const [failed, setFailed] = useState('')
+  if (logo && failed !== logo) return <img className="brand-logo" src={logo} alt="" onError={() => setFailed(logo)} />
+  return <div className="brand-mark">VB</div>
+}
+
+// SessionLoading shows only when loading takes a while (see styles.css),
+// so a fast start does not flash a spinner.
 export function SessionLoading({ portal }: { portal: 'admin' | 'customer' }) {
   return (
-    <main className="session-loading">
-      <div className="brand-mark">VB</div>
+    <main className="session-loading delayed">
+      <BrandMark />
       <div className="spinner" />
       <strong>正在恢复{portal === 'admin' ? '商家控制中心' : '客户中心'}会话…</strong>
     </main>

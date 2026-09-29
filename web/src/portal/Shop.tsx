@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react'
-import { api, CustomerCatalogRecord, CustomerIdentity, OrderRecord, PaymentIntentRecord } from '../api'
+import { api, cached, CustomerCatalogRecord, CustomerIdentity, OrderRecord, PaymentIntentRecord } from '../api'
 import { CouponField } from '../Coupons'
 import { cycleLabel, money } from '../shared/ui'
 import { cycleOrder, priceLeft } from '../shared/cycles'
@@ -13,7 +13,7 @@ function cardPrice<T extends { currency: string; billing_cycle: string }>(prices
 }
 
 export function CustomerShop({ customer }: { customer: CustomerIdentity }) {
-  const [catalog, setCatalog] = useState<CustomerCatalogRecord | null>(null)
+  const [catalog, setCatalog] = useState<CustomerCatalogRecord | null>(() => cached<CustomerCatalogRecord>('/api/v1/customer/catalog') ?? null)
   const [selectedID, setSelectedID] = useState('')
   const [cycle, setCycle] = useState('monthly')
   const [error, setError] = useState('')

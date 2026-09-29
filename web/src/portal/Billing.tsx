@@ -1,15 +1,15 @@
 import { useEffect, useState } from 'react'
 import { RefreshCw } from 'lucide-react'
-import { api, CustomerCatalogRecord, CustomerInvoiceRecord, CustomerTransactionRecord, OrderRecord, PaymentIntentRecord, WalletRecord } from '../api'
+import { api, cached, CustomerCatalogRecord, CustomerInvoiceRecord, CustomerTransactionRecord, OrderRecord, PaymentIntentRecord, WalletRecord } from '../api'
 import { StatusBadge, money } from '../shared/ui'
 import { formatDate, formatTime } from '../shared/time'
 
 export function CustomerBilling() {
-  const [invoices, setInvoices] = useState<CustomerInvoiceRecord[]>([])
-  const [transactions, setTransactions] = useState<CustomerTransactionRecord[]>([])
-  const [orders, setOrders] = useState<OrderRecord[]>([])
-  const [checkoutEnabled, setCheckoutEnabled] = useState(false)
-  const [balance, setBalance] = useState(0)
+  const [invoices, setInvoices] = useState<CustomerInvoiceRecord[]>(() => cached<CustomerInvoiceRecord[]>('/api/v1/customer/invoices') ?? [])
+  const [transactions, setTransactions] = useState<CustomerTransactionRecord[]>(() => cached<CustomerTransactionRecord[]>('/api/v1/customer/transactions') ?? [])
+  const [orders, setOrders] = useState<OrderRecord[]>(() => cached<OrderRecord[]>('/api/v1/customer/orders') ?? [])
+  const [checkoutEnabled, setCheckoutEnabled] = useState(() => cached<CustomerCatalogRecord>('/api/v1/customer/catalog')?.checkout_enabled ?? false)
+  const [balance, setBalance] = useState(() => cached<WalletRecord>('/api/v1/customer/wallet')?.balance_minor ?? 0)
   const [paying, setPaying] = useState('')
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')

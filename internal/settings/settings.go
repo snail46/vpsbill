@@ -48,6 +48,9 @@ type Runtime struct {
 	MailNotifications         MailNotifications
 	TicketAttachmentMaxMB     int
 	Marketplace               MarketplaceSettings
+	// LogoURL is an external logo address; LogoVersion is set instead when
+	// a logo image was uploaded (see Logo).
+	LogoURL, LogoVersion string
 }
 
 // MarketplaceSettings controls the hosting center: whether customers can
@@ -267,13 +270,15 @@ func (m *Manager) reload(ctx context.Context) error {
 		smtp_host,smtp_port,smtp_username,smtp_password_encrypted,smtp_from,smtp_security,
 		mail_notifications,ticket_attachment_max_mb,
 		marketplace_enabled,marketplace_fee_percent::float8,marketplace_offline_hours,trade_fee_percent::float8,admin_url,
-		max_overcommit_cpu::float8,max_overcommit_ram::float8,max_overcommit_disk::float8,max_overcommit_traffic::float8
+		max_overcommit_cpu::float8,max_overcommit_ram::float8,max_overcommit_disk::float8,max_overcommit_traffic::float8,
+		logo_url,logo_version
 		FROM system_settings WHERE singleton=true`).Scan(&v.AppName, &v.PublicURL, &v.Timezone, &v.PaymentProviderName, &v.PaymentCheckoutURL,
 		&payment, &v.NotificationWebhookURL, &notification, &metrics, &poll, &reconcile, &lifecycle, &lead, &grace, &retention, &gatewayType, &gatewayConfig,
 		&v.SMTP.Host, &v.SMTP.Port, &v.SMTP.Username, &smtpPassword, &v.SMTP.From, &v.SMTP.Security,
 		&mailNotifications, &v.TicketAttachmentMaxMB,
 		&v.Marketplace.Enabled, &v.Marketplace.FeePercent, &v.Marketplace.OfflineHours, &v.Marketplace.TradeFeePercent, &v.AdminURL,
-		&v.Marketplace.MaxOvercommitCPU, &v.Marketplace.MaxOvercommitRAM, &v.Marketplace.MaxOvercommitDisk, &v.Marketplace.MaxOvercommitTraffic)
+		&v.Marketplace.MaxOvercommitCPU, &v.Marketplace.MaxOvercommitRAM, &v.Marketplace.MaxOvercommitDisk, &v.Marketplace.MaxOvercommitTraffic,
+		&v.LogoURL, &v.LogoVersion)
 	if err != nil {
 		return err
 	}

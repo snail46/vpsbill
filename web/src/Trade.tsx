@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react'
 import { AlertTriangle, ArrowLeftRight, RefreshCw, Tag, X } from 'lucide-react'
-import { api, type CustomerServiceRecord, type TradeListingRecord, type TradeRecord, type WalletRecord } from './api'
+import { api, cached, type CustomerServiceRecord, type TradeListingRecord, type TradeRecord, type WalletRecord } from './api'
 import { walletMoney } from './Wallet'
 import { formatDate, formatTime } from './shared/time'
 import { cycleName } from './shared/cycles'
@@ -90,7 +90,7 @@ function ListingSpecs({ listing }: { listing: TradeListingRecord }) {
 }
 
 export default function TradeMarket() {
-  const [data, setData] = useState<TradeRecord | null>(null)
+  const [data, setData] = useState<TradeRecord | null>(() => cached<TradeRecord>('/api/v1/customer/trade') ?? null)
   const [tab, setTab] = useState<'market' | 'mine'>('market')
   const [buying, setBuying] = useState<TradeListingRecord | null>(null)
   const [error, setError] = useState('')
@@ -227,7 +227,7 @@ export default function TradeMarket() {
 }
 
 function BuyListing({ listing, onClose, onDone }: { listing: TradeListingRecord; onClose: () => void; onDone: () => void }) {
-  const [wallet, setWallet] = useState<WalletRecord | null>(null)
+  const [wallet, setWallet] = useState<WalletRecord | null>(() => cached<WalletRecord>('/api/v1/customer/wallet') ?? null)
   const [accepted, setAccepted] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -293,7 +293,7 @@ function BuyListing({ listing, onClose, onDone }: { listing: TradeListingRecord;
 export function ListServiceDialog({ service, onClose, onDone }: { service: CustomerServiceRecord; onClose: () => void; onDone: () => void }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  const [feePercent, setFeePercent] = useState<number | null>(null)
+  const [feePercent, setFeePercent] = useState<number | null>(() => cached<TradeRecord>('/api/v1/customer/trade')?.fee_percent ?? null)
   useEffect(() => {
     api<TradeRecord>('/api/v1/customer/trade').then(value => setFeePercent(value.fee_percent)).catch(() => undefined)
   }, [])
@@ -355,7 +355,7 @@ export function ListServiceDialog({ service, onClose, onDone }: { service: Custo
 
 // AdminTradeListings lets staff watch the market and take listings down.
 export function AdminTradeListings() {
-  const [rows, setRows] = useState<TradeListingRecord[]>([])
+  const [rows, setRows] = useState<TradeListingRecord[]>(() => cached<TradeListingRecord[]>('/api/v1/admin/trade/listings') ?? [])
   const [error, setError] = useState('')
   const load = () =>
     api<TradeListingRecord[]>('/api/v1/admin/trade/listings')

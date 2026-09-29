@@ -37,6 +37,10 @@ type SiteView struct {
 	MailNotifications        MailNotifications   `json:"mail_notifications"`
 	TicketAttachmentMaxMB    int                 `json:"ticket_attachment_max_mb"`
 	Marketplace              MarketplaceSettings `json:"marketplace"`
+	// Logo is the logo shown (see Runtime.Logo); LogoExternalURL is set when
+	// it comes from another site.
+	Logo            string `json:"logo_url"`
+	LogoExternalURL string `json:"logo_external_url"`
 }
 
 // SiteInput updates the site settings. Empty secrets keep the stored value;
@@ -77,6 +81,7 @@ func (m *Manager) SiteView() SiteView {
 		SMTPHost: c.SMTP.Host, SMTPPort: c.SMTP.Port, SMTPUsername: c.SMTP.Username, SMTPPasswordConfigured: c.SMTP.Password != "",
 		SMTPFrom: c.SMTP.From, SMTPSecurity: c.SMTP.Security, PasswordResetMailEnabled: c.SMTP.Configured(),
 		MailNotifications: c.MailNotifications, TicketAttachmentMaxMB: c.TicketAttachmentMaxMB, Marketplace: c.Marketplace,
+		Logo: c.Logo(), LogoExternalURL: c.LogoURL,
 	}
 }
 

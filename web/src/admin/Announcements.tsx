@@ -1,11 +1,11 @@
 import { FormEvent, useEffect, useState } from 'react'
 import { Pin, Plus } from 'lucide-react'
-import { api, AnnouncementRecord } from '../api'
+import { api, cached, AnnouncementRecord } from '../api'
 import { formatTime } from '../shared/time'
 
 // AnnouncementsView lets staff publish notices on the customer overview.
 export function AnnouncementsView() {
-  const [items, setItems] = useState<AnnouncementRecord[]>([])
+  const [items, setItems] = useState<AnnouncementRecord[]>(() => cached<AnnouncementRecord[]>('/api/v1/admin/announcements') ?? [])
   const [editing, setEditing] = useState<AnnouncementRecord | 'new' | null>(null)
   const [error, setError] = useState('')
 

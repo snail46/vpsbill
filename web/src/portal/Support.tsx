@@ -1,13 +1,13 @@
 import { FormEvent, useEffect, useState } from 'react'
 import { Plus } from 'lucide-react'
-import { api, CustomerServiceRecord, TicketDetailRecord, TicketRecord } from '../api'
+import { api, cached, CustomerServiceRecord, TicketDetailRecord, TicketRecord } from '../api'
 import { AttachmentPicker, ticketRequestBody, useAttachmentLimit } from '../TicketAttachments'
 import { ticketStatusLabel, TicketConversation } from '../shared/ui'
 import { formatTime } from '../shared/time'
 
 export function CustomerSupport() {
-  const [tickets, setTickets] = useState<TicketRecord[]>([])
-  const [services, setServices] = useState<CustomerServiceRecord[]>([])
+  const [tickets, setTickets] = useState<TicketRecord[]>(() => cached<TicketRecord[]>('/api/v1/customer/tickets') ?? [])
+  const [services, setServices] = useState<CustomerServiceRecord[]>(() => cached<CustomerServiceRecord[]>('/api/v1/customer/services') ?? [])
   const [detail, setDetail] = useState<TicketDetailRecord | null>(null)
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState('')

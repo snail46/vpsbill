@@ -1,12 +1,12 @@
 import { FormEvent, useEffect, useState } from 'react'
 import { X } from 'lucide-react'
-import { AccountRecord, api } from '../api'
+import { AccountRecord, api, cached } from '../api'
 import { AdminWalletPanel, walletMoney } from '../Wallet'
 import { PageActions, StatusBadge } from '../shared/ui'
 import { formatTime } from '../shared/time'
 
 export function CustomersView() {
-  const [customers, setCustomers] = useState<AccountRecord[]>([])
+  const [customers, setCustomers] = useState<AccountRecord[]>(() => cached<AccountRecord[]>('/api/v1/admin/customers') ?? [])
   const [showForm, setShowForm] = useState(false)
   const [error, setError] = useState('')
   const [updating, setUpdating] = useState('')

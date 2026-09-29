@@ -22,7 +22,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react'
-import { api, imageLabel, serviceUsable, CustomerServiceRecord, PortMappingRecord, RefundQuoteRecord, ServiceCredentialRecord, ServiceRuntimeRecord } from './api'
+import { api, cached, imageLabel, serviceUsable, CustomerServiceRecord, PortMappingRecord, RefundQuoteRecord, ServiceCredentialRecord, ServiceRuntimeRecord } from './api'
 import { walletMoney } from './Wallet'
 import { ListServiceDialog, tradeEligibleAt } from './Trade'
 import { formatDate, formatTime, platformMonth } from './shared/time'
@@ -753,8 +753,16 @@ function ServiceDetail({ service, onReload }: { service: CustomerServiceRecord; 
   )
 }
 
+// Terminated services stay listed for reference, below the live ones.
+function sortServices(rows: CustomerServiceRecord[]) {
+  return [...rows].sort((a, b) => Number(a.status === 'terminated') - Number(b.status === 'terminated'))
+}
+
 export default function CustomerServices() {
-  const [services, setServices] = useState<CustomerServiceRecord[] | null>(null)
+  const [services, setServices] = useState<CustomerServiceRecord[] | null>(() => {
+    const rows = cached<CustomerServiceRecord[]>('/api/v1/customer/services')
+    return rows ? sortServices(rows) : null
+  })
   const [error, setError] = useState('')
   const [selected, setSelected] = useState(() => portalPathPart(2))
   const [filter, setFilter] = useState<SourceFilter>('all')
@@ -762,8 +770,7 @@ export default function CustomerServices() {
 
   const load = () =>
     api<CustomerServiceRecord[]>('/api/v1/customer/services')
-      // Keep terminated services for reference, below the live ones.
-      .then(rows => setServices([...rows].sort((a, b) => Number(a.status === 'terminated') - Number(b.status === 'terminated'))))
+      .then(rows => setServices(sortServices(rows)))
       .catch(err => setError(err.message))
 
   useEffect(() => {

@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react'
 import { X } from 'lucide-react'
-import { api, imageLabel, AvailableTemplateRecord, ProviderTypeRecord, PlanRecord } from '../api'
+import { api, cached, imageLabel, AvailableTemplateRecord, ProviderTypeRecord, PlanRecord } from '../api'
 import { CouponManager } from '../Coupons'
 import { PageActions, StatusBadge, cycleLabel } from '../shared/ui'
 import { cycleOrder, CyclePriceFields, readCyclePrices } from '../shared/cycles'
@@ -10,7 +10,7 @@ import type { StockCapacityRecord } from '../api'
 import { virtualizationLabel } from './Nodes'
 
 export function PlansView() {
-  const [plans, setPlans] = useState<PlanRecord[]>([])
+  const [plans, setPlans] = useState<PlanRecord[]>(() => cached<PlanRecord[]>('/api/v1/admin/plans') ?? [])
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState<PlanRecord | null>(null)
   const [error, setError] = useState('')
@@ -156,7 +156,7 @@ export function PlanForm({
   const [templates, setTemplates] = useState<AvailableTemplateRecord[]>([])
   const [loadingTemplates, setLoadingTemplates] = useState(true)
 
-  const [providers, setProviders] = useState<ProviderTypeRecord[]>([])
+  const [providers, setProviders] = useState<ProviderTypeRecord[]>(() => cached<ProviderTypeRecord[]>('/api/v1/admin/provider-types') ?? [])
   const [providerType, setProviderType] = useState(plan?.provider_type || 'clicd')
   const [virtualization, setVirtualization] = useState<'lxc' | 'kvm' | 'podman'>(plan?.virtualization || 'lxc')
   const [allowed, setAllowed] = useState<string[]>(plan?.allowed_template_ids || [])

@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react'
 import { RefreshCw } from 'lucide-react'
-import { api, ProvisioningJobRecord, ServiceRecord } from '../api'
+import { api, cached, ProvisioningJobRecord, ServiceRecord } from '../api'
 import { JobError, StatusBadge } from '../shared/ui'
 import { formatDate, formatTime } from '../shared/time'
 
 export function ServicesView() {
-  const [services, setServices] = useState<ServiceRecord[]>([])
-  const [jobs, setJobs] = useState<ProvisioningJobRecord[]>([])
+  const [services, setServices] = useState<ServiceRecord[]>(() => cached<ServiceRecord[]>('/api/v1/admin/services') ?? [])
+  const [jobs, setJobs] = useState<ProvisioningJobRecord[]>(() => cached<ProvisioningJobRecord[]>('/api/v1/admin/jobs') ?? [])
   const [error, setError] = useState('')
   const [retrying, setRetrying] = useState('')
 

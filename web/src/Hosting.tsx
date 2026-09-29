@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useRef, useState } from 'react'
 import { MapPin, MessagesSquare, Plus, RefreshCw, Server, Store, Ticket, TicketPercent, X } from 'lucide-react'
 import {
   api,
+  cached,
   type ChatRoomRecord,
   type CustomerIdentity,
   type HostedNodeRecord,
@@ -119,7 +120,7 @@ function PlanTerms({ plan }: { plan: PlanRecord }) {
 // ---- Market ----
 
 function Market({ customer }: { customer: CustomerIdentity }) {
-  const [market, setMarket] = useState<MarketRecord | null>(null)
+  const [market, setMarket] = useState<MarketRecord | null>(() => cached<MarketRecord>('/api/v1/customer/market') ?? null)
   const [buying, setBuying] = useState<{ node: HostedNodeRecord; plan: PlanRecord } | null>(null)
   const [reporting, setReporting] = useState<HostedNodeRecord | null>(null)
   const [error, setError] = useState('')
@@ -383,7 +384,7 @@ function BuyDialog({
 // ---- My nodes ----
 
 function MyNodes() {
-  const [data, setData] = useState<HostingRecord | null>(null)
+  const [data, setData] = useState<HostingRecord | null>(() => cached<HostingRecord>('/api/v1/customer/hosting') ?? null)
   // publishing is the pending agent being published, or 'token' for the
   // fallback of pasting an agent token.
   const [publishing, setPublishing] = useState<PendingAgentRecord | 'token' | null>(null)
@@ -1038,7 +1039,7 @@ function HostedPlanForm({ node, plan, onClose, onSaved }: { node: HostedNodeReco
 // ---- Host coupons ----
 
 function HostCoupons() {
-  const [data, setData] = useState<HostingRecord | null>(null)
+  const [data, setData] = useState<HostingRecord | null>(() => cached<HostingRecord>('/api/v1/customer/hosting') ?? null)
   const [error, setError] = useState('')
   useEffect(() => {
     api<HostingRecord>('/api/v1/customer/hosting')
@@ -1062,7 +1063,7 @@ function HostCoupons() {
 // ---- Hosted tickets ----
 
 function HostTickets() {
-  const [tickets, setTickets] = useState<TicketRecord[]>([])
+  const [tickets, setTickets] = useState<TicketRecord[]>(() => cached<TicketRecord[]>('/api/v1/customer/hosting/tickets') ?? [])
   const [detail, setDetail] = useState<TicketDetailRecord | null>(null)
   const [error, setError] = useState('')
   const maxMB = useAttachmentLimit()

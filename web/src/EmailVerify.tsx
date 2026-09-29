@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { MailCheck } from 'lucide-react'
 import { api } from './api'
+import { BrandMark } from './shared/ui'
 
 // EmailVerifyBanner reminds a customer to confirm their address; buying,
 // top-ups and publishing stay locked until they do.
@@ -51,7 +52,7 @@ export function VerifyEmailPage() {
   }, [])
   return (
     <main className="session-loading">
-      <div className="brand-mark">VB</div>
+      <BrandMark />
       {state === 'working' && <strong>正在验证邮箱…</strong>}
       {state === 'done' && <strong>邮箱已验证，现在可以正常下单和充值了。</strong>}
       {state === 'failed' && <strong>{message}</strong>}

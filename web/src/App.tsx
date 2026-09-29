@@ -3,7 +3,8 @@ import { VerifyEmailPage } from './EmailVerify'
 import { SessionLoading } from './shared/ui'
 
 // The admin console and the customer portal load separately, so each side
-// downloads only its own code.
+// downloads only its own code; index.html preloads the side it opens on
+// (see vite.config.ts).
 const AdminApp = lazy(() => import('./admin/AdminApp').then(module => ({ default: module.AdminApp })))
 const CustomerPortalApp = lazy(() => import('./portal/PortalApp').then(module => ({ default: module.CustomerPortalApp })))
 

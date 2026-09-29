@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react'
 import { RefreshCw, WalletCards, X } from 'lucide-react'
-import { api, type CustomerCatalogRecord, type PaymentIntentRecord, type TopupInvoiceRecord, type WalletEntryRecord, type WalletRecord } from './api'
+import { api, cached, type CustomerCatalogRecord, type PaymentIntentRecord, type TopupInvoiceRecord, type WalletEntryRecord, type WalletRecord } from './api'
 import { formatTime } from './shared/time'
 
 export const walletKindLabels: Record<WalletEntryRecord['kind'], string> = {
@@ -65,8 +65,8 @@ export function WalletLedger({ entries }: { entries: WalletEntryRecord[] }) {
 const quickAmounts = [10, 50, 100, 200, 500]
 
 export default function CustomerWallet() {
-  const [wallet, setWallet] = useState<WalletRecord | null>(null)
-  const [checkoutEnabled, setCheckoutEnabled] = useState(false)
+  const [wallet, setWallet] = useState<WalletRecord | null>(() => cached<WalletRecord>('/api/v1/customer/wallet') ?? null)
+  const [checkoutEnabled, setCheckoutEnabled] = useState(() => cached<CustomerCatalogRecord>('/api/v1/customer/catalog')?.checkout_enabled ?? false)
   const [amount, setAmount] = useState('50')
   const [created, setCreated] = useState<TopupInvoiceRecord | null>(null)
   const [agreed, setAgreed] = useState(false)

@@ -1,5 +1,7 @@
 import { ChangeEvent, FormEvent, useEffect, useState } from 'react'
-import { api, PaymentSettingsRecord } from '../api'
+import { api, cached, PaymentSettingsRecord } from '../api'
+import { ImageUp, RotateCcw } from 'lucide-react'
+import { setSiteLogo } from '../shared/boot'
 import { StatusBadge } from '../shared/ui'
 
 export function PaymentSettingsView() {
@@ -22,11 +24,15 @@ export function PaymentSettingsView() {
   const [saved, setSaved] = useState(false)
 
   useEffect(() => {
+    const fill = (value: PaymentSettingsRecord) => {
+      setSettings(value)
+      setForm(current => ({ ...current, ...value.gateway }))
+    }
+    // Show what was loaded before at once; the request brings it up to date.
+    const known = cached<PaymentSettingsRecord>('/api/v1/admin/settings/payment')
+    if (known) fill(known)
     api<PaymentSettingsRecord>('/api/v1/admin/settings/payment')
-      .then(value => {
-        setSettings(value)
-        setForm(current => ({ ...current, ...value.gateway }))
-      })
+      .then(fill)
       .catch(err => setError(err.message))
   }, [])
 
@@ -243,6 +249,10 @@ export type SiteSettingsRecord = {
   mail_notifications: MailNotificationSettings
   ticket_attachment_max_mb: number
   marketplace: MarketplaceSettings
+  // logo_url is the logo shown; logo_external_url is set when it is linked
+  // from another site rather than uploaded.
+  logo_url: string
+  logo_external_url: string
 }
 
 export type MarketplaceSettings = {
@@ -346,6 +356,9 @@ export function SiteSettingsView() {
   }
 
   useEffect(() => {
+    // Show what was loaded before at once; the request brings it up to date.
+    const known = cached<SiteSettingsRecord>('/api/v1/admin/settings/site')
+    if (known) apply(known)
     api<SiteSettingsRecord>('/api/v1/admin/settings/site')
       .then(apply)
       .catch(err => setError(err.message))
@@ -408,6 +421,8 @@ export function SiteSettingsView() {
 
       {error && <div className="form-error">{error}</div>}
       {notice && <div className="success-note">{notice}</div>}
+
+      {settings && <LogoSettings key={settings.logo_url} current={settings.logo_url} external={settings.logo_external_url} />}
 
       <form className="panel site-settings" onSubmit={submit}>
         <div className="form-grid">
@@ -668,6 +683,90 @@ export function SiteSettingsView() {
           </button>
         </div>
       </form>
+    </section>
+  )
+}
+
+// LogoSettings changes the logo in the top-left corner on its own, apart
+// from the site settings form: upload an image or link one.
+function LogoSettings({ current, external }: { current: string; external: string }) {
+  const [logo, setLogo] = useState(current)
+  const [link, setLink] = useState(external)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
+
+  async function save(request: Promise<{ logo_url: string; logo_external_url: string }>, message: string) {
+    setBusy(true)
+    setError('')
+    setNotice('')
+    try {
+      const result = await request
+      setLogo(result.logo_url)
+      setLink(result.logo_external_url)
+      setSiteLogo(result.logo_url)
+      setNotice(message)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '保存失败')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  function upload(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+    if (file.size > 512 * 1024) {
+      setError('图片不能超过 512 KB')
+      return
+    }
+    const body = new FormData()
+    body.append('file', file)
+    void save(api('/api/v1/admin/settings/logo', { method: 'POST', body }), '新 Logo 已上传，前台和后台立即生效。')
+  }
+
+  const linkLogo = (url: string, message: string) =>
+    save(api('/api/v1/admin/settings/logo', { method: 'PUT', body: JSON.stringify({ url }) }), message)
+
+  return (
+    <section className="panel logo-settings">
+      <div className="panel-heading">
+        <h3>站点 Logo</h3>
+      </div>
+      <div className="logo-settings-body">
+        <div className="logo-preview" aria-label="当前 Logo">
+          {logo ? <img src={logo} alt="当前 Logo" /> : <div className="brand-mark">VB</div>}
+        </div>
+        <div className="logo-settings-actions">
+          <p className="muted-text">显示在前台和后台左上角、登录页和浏览器标签上。支持 SVG、PNG、JPG、WebP、GIF、ICO，不超过 512 KB；按 36 像素高显示，正方形或横向图片效果最好。</p>
+          <div className="form-actions">
+            <label className={busy ? 'primary-button disabled' : 'primary-button'}>
+              <ImageUp size={15} />
+              上传图片
+              <input type="file" accept=".svg,.png,.jpg,.jpeg,.webp,.gif,.ico,image/*" hidden disabled={busy} onChange={upload} />
+            </label>
+            {logo && (
+              <button type="button" className="secondary-button" disabled={busy} onClick={() => void linkLogo('', '已恢复默认 Logo。')}>
+                <RotateCcw size={15} />
+                恢复默认
+              </button>
+            )}
+          </div>
+          <form
+            className="input-with-button"
+            onSubmit={event => {
+              event.preventDefault()
+              void linkLogo(link, '已改用该地址的 Logo。')
+            }}
+          >
+            <input type="url" value={link} onChange={event => setLink(event.target.value)} placeholder="或填写图片地址，例如 https://cdn.example.com/logo.svg" aria-label="Logo 图片地址" />
+            <button className="secondary-button compact" disabled={busy || !link.trim()}>使用此地址</button>
+          </form>
+          {error && <div className="form-error">{error}</div>}
+          {notice && <div className="success-note">{notice}</div>}
+        </div>
+      </div>
     </section>
   )
 }

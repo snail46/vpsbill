@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react'
 import { Activity, CircleDollarSign, Headphones, ReceiptText } from 'lucide-react'
-import { api, OperationsOverviewRecord } from '../api'
+import { api, cached, OperationsOverviewRecord } from '../api'
 import { money, CapacityBar } from '../shared/ui'
 
 export function Overview() {
-  const [data, setData] = useState<OperationsOverviewRecord | null>(null)
+  const [data, setData] = useState<OperationsOverviewRecord | null>(() => cached<OperationsOverviewRecord>('/api/v1/admin/overview') ?? null)
   const [error, setError] = useState('')
 
   const load = () =>

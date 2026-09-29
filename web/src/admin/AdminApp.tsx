@@ -1,11 +1,13 @@
 import { FormEvent, useEffect, useState } from 'react'
 import { ArrowLeftRight, Boxes, CheckCircle2, ChevronRight, CircleDollarSign, Cpu, CreditCard, Headphones, LayoutDashboard, Megaphone, LogOut, Menu, X, PackageOpen, ReceiptText, ScrollText, ServerCog, Settings, SlidersHorizontal, ShieldCheck, Store, Users } from 'lucide-react'
-import { api, StaffUser } from '../api'
+import { api, clearCached, StaffUser } from '../api'
+import { prefetchPage, usePrefetch } from '../shared/prefetch'
 import HostDetailPanel from '../HostDetail'
 import AdminMarketplace from '../AdminMarketplace'
 import { AdminTradeListings } from '../Trade'
 import { ThemeToggle } from '../ThemeToggle'
-import { Meta, SessionLoading, Field, SecuritySettings } from '../shared/ui'
+import { Meta, SessionLoading, Field, SecuritySettings, BrandMark } from '../shared/ui'
+import { Boot, inlineBoot, loadBoot } from '../shared/boot'
 import { Overview } from './Overview'
 import { CustomersView } from './Customers'
 import { OrdersView, BillingView } from './Orders'
@@ -74,6 +76,25 @@ export const adminViews: View[] = [
   'security',
 ]
 
+// adminPageData is what each page loads first, for prefetching.
+const adminPageData: Record<string, string[]> = {
+  overview: ['/api/v1/admin/overview'],
+  customers: ['/api/v1/admin/customers'],
+  orders: ['/api/v1/admin/orders', '/api/v1/admin/customers', '/api/v1/admin/plans', '/api/v1/admin/regions'],
+  billing: ['/api/v1/admin/invoices', '/api/v1/admin/transactions'],
+  payment: ['/api/v1/admin/settings/payment'],
+  services: ['/api/v1/admin/services', '/api/v1/admin/jobs'],
+  plans: ['/api/v1/admin/plans', '/api/v1/admin/provider-types'],
+  nodes: ['/api/v1/admin/nodes', '/api/v1/admin/agent-enrollments', '/api/v1/admin/regions/all', '/api/v1/admin/overcommit-limits'],
+  hosts: ['/api/v1/admin/hosts'],
+  support: ['/api/v1/admin/tickets'],
+  marketplace: ['/api/v1/admin/marketplace/nodes'],
+  trade: ['/api/v1/admin/trade/listings'],
+  audit: ['/api/v1/admin/audit-logs'],
+  announcements: ['/api/v1/admin/announcements'],
+  settings: ['/api/v1/admin/settings/site'],
+}
+
 export type AdminRoute = { view: View; hostID?: string }
 
 export function adminRouteFromPath(): AdminRoute {
@@ -90,25 +111,22 @@ export function adminRoutePath(route: AdminRoute) {
 }
 
 export function AdminApp() {
-  const [meta, setMeta] = useState<Meta | null>(null)
-  const [authScreen, setAuthScreen] = useState<AuthScreen>('loading')
-  const [user, setUser] = useState<StaffUser | null>(null)
+  // The boot data usually comes inline with the page, so the first render
+  // already knows who is signed in.
+  const [meta, setMeta] = useState<Meta | null>(() => inlineBoot()?.meta ?? null)
+  const [authScreen, setAuthScreen] = useState<AuthScreen>(() => {
+    const boot = inlineBoot()
+    return boot ? adminScreen(boot) : 'loading'
+  })
+  const [user, setUser] = useState<StaffUser | null>(() => inlineBoot()?.staff ?? null)
 
   useEffect(() => {
-    Promise.all([api<Meta>('/api/v1/meta'), api<{ required: boolean }>('/api/v1/install')])
-      .then(async ([currentMeta, installation]) => {
-        setMeta(currentMeta)
-        if (installation.required) {
-          setAuthScreen('install')
-          return
-        }
-        try {
-          const current = await api<StaffUser>('/api/v1/auth/me')
-          setUser(current)
-          setAuthScreen('ready')
-        } catch {
-          setAuthScreen('login')
-        }
+    if (inlineBoot()) return
+    loadBoot()
+      .then(boot => {
+        setMeta(boot.meta)
+        setUser(boot.staff)
+        setAuthScreen(adminScreen(boot))
       })
       .catch(() => setAuthScreen('login'))
   }, [])
@@ -134,6 +152,7 @@ export function AdminApp() {
         portalURL={meta?.surface === 'admin' && meta.public_url ? meta.public_url : '/portal'}
         mode={authScreen}
         onAuthenticated={current => {
+          clearCached()
           setUser(current)
           setAuthScreen('ready')
         }}
@@ -147,11 +166,17 @@ export function AdminApp() {
       user={user}
       onLogout={async () => {
         await api<void>('/api/v1/auth/logout', { method: 'POST' })
+        clearCached()
         setUser(null)
         setAuthScreen('login')
       }}
     />
   )
+}
+
+function adminScreen(boot: Boot): AuthScreen {
+  if (boot.install_required) return 'install'
+  return boot.staff ? 'ready' : 'login'
 }
 
 export function AuthPage({
@@ -194,7 +219,7 @@ export function AuthPage({
       <div className="auth-theme"><ThemeToggle /></div>
       <section className="auth-brand-panel">
         <div className="brand auth-brand">
-          <div className="brand-mark">VB</div>
+          <BrandMark />
           <div>
             <strong>{appName}</strong>
             <span>VPS 商业运营控制平面</span>
@@ -281,7 +306,7 @@ export function InstallPage({ onInstalled }: { onInstalled: (user: StaffUser, ap
       <main className="installer-page">
         <section className="installer-card installer-complete">
           <div className="brand">
-            <div className="brand-mark">VB</div>
+            <BrandMark />
             <div>
               <strong>{form.app_name}</strong>
               <span>首次初始化已完成</span>
@@ -381,6 +406,7 @@ export function AdminShell({ meta, user, onLogout }: { meta: Meta | null; user: 
   const [route, setRoute] = useState<AdminRoute>(adminRouteFromPath)
   const [menuOpen, setMenuOpen] = useState(false)
   const view = route.view
+  usePrefetch(adminPageData)
 
   useEffect(() => {
     const initial = adminRouteFromPath()
@@ -405,7 +431,7 @@ export function AdminShell({ meta, user, onLogout }: { meta: Meta | null; user: 
     <div className="app-shell">
       <aside className={menuOpen ? 'sidebar menu-open' : 'sidebar'}>
         <div className="brand">
-          <div className="brand-mark">VB</div>
+          <BrandMark />
           <div>
             <strong>{meta?.name ?? 'VPSBill'}</strong>
             <span>商家控制中心</span>
@@ -422,6 +448,7 @@ export function AdminShell({ meta, user, onLogout }: { meta: Meta | null; user: 
               key={label}
               type="button"
               onClick={() => navigate({ view: id })}
+              onPointerEnter={() => prefetchPage(adminPageData, id)}
             >
               <Icon size={18} aria-hidden="true" />
               <span>{label}</span>

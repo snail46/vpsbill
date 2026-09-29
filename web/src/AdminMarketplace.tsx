@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useState } from 'react'
 import { Flag, MessagesSquare, RefreshCw, Server, X } from 'lucide-react'
-import { api, type ChatRoomRecord, type ClearanceRecord, type HostedNodeRecord } from './api'
+import { api, cached, type ChatRoomRecord, type ClearanceRecord, type HostedNodeRecord } from './api'
 import ChatRoom from './ChatRoom'
 import { AdminReports } from './Reports'
 import { walletMoney } from './Wallet'
@@ -44,7 +44,7 @@ export default function AdminMarketplace() {
 }
 
 function HostedNodes() {
-  const [nodes, setNodes] = useState<HostedNodeRecord[]>([])
+  const [nodes, setNodes] = useState<HostedNodeRecord[]>(() => cached<HostedNodeRecord[]>('/api/v1/admin/marketplace/nodes') ?? [])
   const [expanded, setExpanded] = useState('')
   const [clearing, setClearing] = useState<HostedNodeRecord | null>(null)
   const [capping, setCapping] = useState<HostedNodeRecord | null>(null)
@@ -298,7 +298,7 @@ function ClearDialog({ node, onClose, onCleared }: { node: HostedNodeRecord; onC
 }
 
 function AdminChat() {
-  const [rooms, setRooms] = useState<ChatRoomRecord[]>([])
+  const [rooms, setRooms] = useState<ChatRoomRecord[]>(() => cached<ChatRoomRecord[]>('/api/v1/admin/chat/rooms') ?? [])
   const [selected, setSelected] = useState('')
   const [error, setError] = useState('')
 

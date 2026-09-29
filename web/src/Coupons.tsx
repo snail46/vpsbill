@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react'
 import { Plus, TicketPercent, X } from 'lucide-react'
-import { api, type CouponQuoteRecord, type CouponRecord } from './api'
+import { api, cached, type CouponQuoteRecord, type CouponRecord } from './api'
 import { walletMoney } from './Wallet'
 import { formatDate } from './shared/time'
 
@@ -86,7 +86,7 @@ type PlanOption = { id: string; name: string }
 // CouponManager lists and edits one owner's coupons: staff coupons for
 // platform plans, or a host's coupons for their own plans.
 export function CouponManager({ endpoint, plans, intro, canCreate = true }: { endpoint: string; plans: PlanOption[]; intro: string; canCreate?: boolean }) {
-  const [coupons, setCoupons] = useState<CouponRecord[]>([])
+  const [coupons, setCoupons] = useState<CouponRecord[]>(() => cached<CouponRecord[]>(endpoint) ?? [])
   const [editing, setEditing] = useState<CouponRecord | 'new' | null>(null)
   const [error, setError] = useState('')
 

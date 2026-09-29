@@ -1,13 +1,15 @@
 import { FormEvent, useEffect, useState } from 'react'
 import { ArrowLeftRight, Boxes, ChevronRight, Coins, Headphones, LayoutDashboard, LogOut, Menu, X, ShieldCheck, ShoppingCart, Store, UserCircle, WalletCards } from 'lucide-react'
-import { api, CustomerIdentity } from '../api'
+import { api, clearCached, CustomerIdentity } from '../api'
+import { prefetchPage, usePrefetch } from '../shared/prefetch'
 import CustomerServicesPanel from '../CustomerServices'
 import CustomerWallet from '../Wallet'
 import HostingCenter from '../Hosting'
 import TradeMarket from '../Trade'
 import { ThemeToggle } from '../ThemeToggle'
 import { EmailVerifyBanner } from '../EmailVerify'
-import { Meta, SessionLoading, Field } from '../shared/ui'
+import { Meta, SessionLoading, Field, BrandMark } from '../shared/ui'
+import { Boot, inlineBoot, loadBoot } from '../shared/boot'
 import { CustomerAnnouncements, CustomerOverview } from './Overview'
 import { navigatePortal } from '../shared/nav'
 import { CustomerShop } from './Shop'
@@ -15,11 +17,31 @@ import { CustomerBilling } from './Billing'
 import { CustomerProfile } from './Profile'
 import { CustomerSupport } from './Support'
 
-export type CustomerAuthScreen = 'loading' | 'login' | 'register' | 'forgot' | 'reset' | 'ready' | 'uninstalled'
+export type CustomerAuthScreen = 'loading' | 'install' | 'login' | 'register' | 'forgot' | 'reset' | 'ready' | 'uninstalled'
+
+function portalScreen(boot: Boot): CustomerAuthScreen {
+  if (boot.install_required) return boot.meta.surface === 'portal' ? 'uninstalled' : 'install'
+  // Reset links open the reset form even when a session exists.
+  if (window.location.pathname === '/portal/reset-password') return 'reset'
+  return boot.customer ? 'ready' : 'login'
+}
 
 export type PortalView = 'overview' | 'shop' | 'services' | 'billing' | 'wallet' | 'hosting' | 'trade' | 'support' | 'profile' | 'announcements'
 
 export const portalViews: PortalView[] = ['overview', 'shop', 'services', 'billing', 'wallet', 'hosting', 'trade', 'support', 'profile', 'announcements']
+
+// portalPageData is what each page loads first, for prefetching.
+const portalPageData: Record<string, string[]> = {
+  overview: ['/api/v1/customer/services', '/api/v1/customer/invoices', '/api/v1/customer/overview'],
+  shop: ['/api/v1/customer/catalog'],
+  services: ['/api/v1/customer/services'],
+  billing: ['/api/v1/customer/invoices', '/api/v1/customer/transactions', '/api/v1/customer/orders', '/api/v1/customer/catalog', '/api/v1/customer/wallet'],
+  wallet: ['/api/v1/customer/wallet', '/api/v1/customer/catalog'],
+  hosting: ['/api/v1/customer/market', '/api/v1/customer/hosting'],
+  trade: ['/api/v1/customer/trade', '/api/v1/customer/wallet'],
+  support: ['/api/v1/customer/tickets', '/api/v1/customer/services'],
+  announcements: ['/api/v1/customer/announcements'],
+}
 
 export function portalViewFromPath(): PortalView {
   const candidate = window.location.pathname.split('/').filter(Boolean)[1] as PortalView
@@ -27,45 +49,37 @@ export function portalViewFromPath(): PortalView {
 }
 
 export function CustomerPortalApp() {
-  const [screen, setScreen] = useState<CustomerAuthScreen>('loading')
-  const [customer, setCustomer] = useState<CustomerIdentity | null>(null)
-  const [meta, setMeta] = useState<Meta | null>(null)
+  // The boot data usually comes inline with the page, so the first render
+  // already knows who is signed in.
+  const [screen, setScreen] = useState<CustomerAuthScreen>(() => {
+    const boot = inlineBoot()
+    return boot ? portalScreen(boot) : 'loading'
+  })
+  const [customer, setCustomer] = useState<CustomerIdentity | null>(() => inlineBoot()?.customer ?? null)
+  const [meta, setMeta] = useState<Meta | null>(() => inlineBoot()?.meta ?? null)
 
   useEffect(() => {
-    api<Meta>('/api/v1/meta').then(setMeta).catch(() => undefined)
-    api<{ required: boolean }>('/api/v1/install')
-      .then(installation => {
-        if (installation.required) {
-          // The installer runs on the admin console, which may live on
-          // another port or domain than the portal.
-          api<Meta>('/api/v1/meta')
-            .then(current => {
-              if (current.surface === 'portal') setScreen('uninstalled')
-              else window.location.replace('/admin')
-            })
-            .catch(() => window.location.replace('/admin'))
-          return
-        }
-        // Reset links open the reset form even when a session exists.
-        if (window.location.pathname === '/portal/reset-password') {
-          setScreen('reset')
-          return
-        }
-        return api<CustomerIdentity>('/api/v1/customer/auth/me')
-          .then(value => {
-            setCustomer(value)
-            setScreen('ready')
-          })
-          .catch(() => setScreen('login'))
+    if (screen === 'install') {
+      // The installer runs on the admin console, which may live on another
+      // port or domain than the portal.
+      window.location.replace('/admin')
+      return
+    }
+    if (inlineBoot()) return
+    loadBoot()
+      .then(boot => {
+        setMeta(boot.meta)
+        setCustomer(boot.customer)
+        setScreen(portalScreen(boot))
       })
       .catch(() => setScreen('login'))
-  }, [])
+  }, [screen])
 
-  if (screen === 'loading') return <SessionLoading portal="customer" />
+  if (screen === 'loading' || screen === 'install') return <SessionLoading portal="customer" />
   if (screen === 'uninstalled') {
     return (
       <main className="session-loading">
-        <div className="brand-mark">VB</div>
+        <BrandMark />
         <strong>站点尚未完成安装。请打开管理后台地址（默认是服务器的后台端口）完成 Web 安装向导。</strong>
       </main>
     )
@@ -77,6 +91,7 @@ export function CustomerPortalApp() {
         meta={meta}
         onMode={setScreen}
         onAuthenticated={value => {
+          clearCached()
           setCustomer(value)
           setScreen('ready')
         }}
@@ -87,8 +102,10 @@ export function CustomerPortalApp() {
   return (
     <CustomerShell
       customer={customer}
+      siteName={meta?.name}
       onLogout={async () => {
         await api('/api/v1/customer/auth/logout', { method: 'POST' })
+        clearCached()
         setCustomer(null)
         setScreen('login')
       }}
@@ -186,7 +203,7 @@ export function CustomerAuthPage({
     <main className="auth-page customer-auth-page">
       <section className="auth-brand-panel customer-brand-panel">
         <div className="brand auth-brand">
-          <div className="brand-mark">VB</div>
+          <BrandMark />
           <div>
             <strong>{siteName}</strong>
             <span>客户服务中心</span>
@@ -260,9 +277,10 @@ export function CustomerAuthPage({
   )
 }
 
-export function CustomerShell({ customer, onLogout }: { customer: CustomerIdentity; onLogout: () => void }) {
+export function CustomerShell({ customer, siteName, onLogout }: { customer: CustomerIdentity; siteName?: string; onLogout: () => void }) {
   const [view, setView] = useState<PortalView>(portalViewFromPath)
   const [menuOpen, setMenuOpen] = useState(false)
+  usePrefetch(portalPageData)
 
   useEffect(() => {
     // Pages may add a segment, e.g. /portal/services/<id>.
@@ -311,10 +329,10 @@ export function CustomerShell({ customer, onLogout }: { customer: CustomerIdenti
     <div className="app-shell customer-shell">
       <aside className={menuOpen ? 'sidebar menu-open' : 'sidebar'}>
         <div className="brand">
-          <div className="brand-mark">VB</div>
+          <BrandMark />
           <div>
-            <strong>客户中心</strong>
-            <span>Customer Portal</span>
+            <strong>{siteName || '客户中心'}</strong>
+            <span>客户中心</span>
           </div>
         </div>
         <button type="button" className="menu-toggle" aria-label={menuOpen ? '关闭菜单' : '打开菜单'} aria-expanded={menuOpen} onClick={() => setMenuOpen(open => !open)}>
@@ -327,6 +345,7 @@ export function CustomerShell({ customer, onLogout }: { customer: CustomerIdenti
               key={id}
               className={id === view ? 'nav-item active' : 'nav-item'}
               onClick={() => navigate(id)}
+              onPointerEnter={() => prefetchPage(portalPageData, id)}
             >
               <Icon size={18} />
               <span>{label}</span>

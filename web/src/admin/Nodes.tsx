@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useRef, useState } from 'react'
 import { ChevronRight, RefreshCw, ShieldCheck, X } from 'lucide-react'
-import { api, HostProbeRecord, NodeRecord, Overcommit, PendingAgentRecord, ProviderTypeRecord, RegionAdminRecord } from '../api'
+import { api, cached, HostProbeRecord, NodeRecord, Overcommit, PendingAgentRecord, ProviderTypeRecord, RegionAdminRecord } from '../api'
 import { OvercommitDialog, overcommitText } from '../Supply'
 import { PageActions, StatusBadge, formatBytes, NodeExpiry, CapacityBar, useReveal } from '../shared/ui'
 import { formatTime } from '../shared/time'
@@ -12,15 +12,15 @@ type Enrollments = { install_command: string; agents: PendingAgentRecord[] }
 type FormTarget = { agent: PendingAgentRecord } | { type: string } | { node: NodeRecord }
 
 export function NodesView() {
-  const [nodes, setNodes] = useState<NodeRecord[]>([])
+  const [nodes, setNodes] = useState<NodeRecord[]>(() => cached<NodeRecord[]>('/api/v1/admin/nodes') ?? [])
   const [form, setForm] = useState<FormTarget | null>(null)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [testing, setTesting] = useState('')
   const [overselling, setOverselling] = useState<NodeRecord | null>(null)
-  const [limits, setLimits] = useState<Overcommit>()
-  const [enrollments, setEnrollments] = useState<Enrollments | null>(null)
-  const [regions, setRegions] = useState<RegionAdminRecord[]>([])
+  const [limits, setLimits] = useState<Overcommit | undefined>(() => cached<Overcommit>('/api/v1/admin/overcommit-limits'))
+  const [enrollments, setEnrollments] = useState<Enrollments | null>(() => cached<Enrollments>('/api/v1/admin/agent-enrollments') ?? null)
+  const [regions, setRegions] = useState<RegionAdminRecord[]>(() => cached<RegionAdminRecord[]>('/api/v1/admin/regions/all') ?? [])
 
   const load = () =>
     api<NodeRecord[]>('/api/v1/admin/nodes')
@@ -390,7 +390,7 @@ export function NodeForm({
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [saving, setSaving] = useState(false)
-  const [types, setTypes] = useState<ProviderTypeRecord[]>([])
+  const [types, setTypes] = useState<ProviderTypeRecord[]>(() => cached<ProviderTypeRecord[]>('/api/v1/admin/provider-types') ?? [])
   const [selected, setSelected] = useState(node?.provider_type ?? (agent ? 'hatch' : 'type' in target ? target.type : 'hatch'))
   const [probing, setProbing] = useState(false)
   const editing = Boolean(node)
@@ -631,7 +631,7 @@ export function virtualizationLabel(kind: string) {
 }
 
 export function HostsView({ onOpen }: { onOpen?: (id: string) => void }) {
-  const [hosts, setHosts] = useState<HostProbeRecord[]>([])
+  const [hosts, setHosts] = useState<HostProbeRecord[]>(() => cached<HostProbeRecord[]>('/api/v1/admin/hosts') ?? [])
   const [error, setError] = useState('')
 
   const load = () =>

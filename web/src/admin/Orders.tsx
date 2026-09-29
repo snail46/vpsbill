@@ -1,14 +1,14 @@
 import { FormEvent, useEffect, useState } from 'react'
 import { X } from 'lucide-react'
-import { AccountRecord, api, InvoiceRecord, OrderRecord, PlanRecord, RegionRecord, TransactionRecord } from '../api'
+import { AccountRecord, api, cached, InvoiceRecord, OrderRecord, PlanRecord, RegionRecord, TransactionRecord } from '../api'
 import { PageActions, StatusBadge, cycleLabel, money } from '../shared/ui'
 import { formatDate, formatTime } from '../shared/time'
 
 export function OrdersView() {
-  const [orders, setOrders] = useState<OrderRecord[]>([])
-  const [customers, setCustomers] = useState<AccountRecord[]>([])
-  const [plans, setPlans] = useState<PlanRecord[]>([])
-  const [regions, setRegions] = useState<RegionRecord[]>([])
+  const [orders, setOrders] = useState<OrderRecord[]>(() => cached<OrderRecord[]>('/api/v1/admin/orders') ?? [])
+  const [customers, setCustomers] = useState<AccountRecord[]>(() => cached<AccountRecord[]>('/api/v1/admin/customers') ?? [])
+  const [plans, setPlans] = useState<PlanRecord[]>(() => (cached<PlanRecord[]>('/api/v1/admin/plans') ?? []).filter(plan => plan.enabled))
+  const [regions, setRegions] = useState<RegionRecord[]>(() => cached<RegionRecord[]>('/api/v1/admin/regions') ?? [])
   const [showForm, setShowForm] = useState(false)
   const [error, setError] = useState('')
 
@@ -235,8 +235,8 @@ export function OrderForm({
 }
 
 export function BillingView() {
-  const [invoices, setInvoices] = useState<InvoiceRecord[]>([])
-  const [transactions, setTransactions] = useState<TransactionRecord[]>([])
+  const [invoices, setInvoices] = useState<InvoiceRecord[]>(() => cached<InvoiceRecord[]>('/api/v1/admin/invoices') ?? [])
+  const [transactions, setTransactions] = useState<TransactionRecord[]>(() => cached<TransactionRecord[]>('/api/v1/admin/transactions') ?? [])
   const [error, setError] = useState('')
   const [paying, setPaying] = useState('')
 

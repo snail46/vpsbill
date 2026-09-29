@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Activity, Boxes, CalendarClock, CircleDollarSign, Coins, Megaphone, Pin, ReceiptText, Store } from 'lucide-react'
-import { api, AnnouncementRecord, CustomerIdentity, CustomerInvoiceRecord, CustomerOverviewRecord, CustomerServiceRecord } from '../api'
+import { api, cached, AnnouncementRecord, CustomerIdentity, CustomerInvoiceRecord, CustomerOverviewRecord, CustomerServiceRecord } from '../api'
 import { money } from '../shared/ui'
 import { navigatePortal } from '../shared/nav'
 import { formatDate, formatTime } from '../shared/time'
@@ -29,9 +29,9 @@ function MetricCard({ to, icon, label, value, note, action }: { to: string; icon
 }
 
 export function CustomerOverview({ customer }: { customer: CustomerIdentity }) {
-  const [services, setServices] = useState<CustomerServiceRecord[]>([])
-  const [invoices, setInvoices] = useState<CustomerInvoiceRecord[]>([])
-  const [overview, setOverview] = useState<CustomerOverviewRecord | null>(null)
+  const [services, setServices] = useState<CustomerServiceRecord[]>(() => (cached<CustomerServiceRecord[]>('/api/v1/customer/services') ?? []).filter(item => item.status !== 'terminated'))
+  const [invoices, setInvoices] = useState<CustomerInvoiceRecord[]>(() => cached<CustomerInvoiceRecord[]>('/api/v1/customer/invoices') ?? [])
+  const [overview, setOverview] = useState<CustomerOverviewRecord | null>(() => cached<CustomerOverviewRecord>('/api/v1/customer/overview') ?? null)
 
   useEffect(() => {
     void Promise.all([
@@ -126,7 +126,7 @@ export function CustomerOverview({ customer }: { customer: CustomerIdentity }) {
 
 // CustomerAnnouncements lists every published announcement.
 export function CustomerAnnouncements() {
-  const [items, setItems] = useState<AnnouncementRecord[] | null>(null)
+  const [items, setItems] = useState<AnnouncementRecord[] | null>(() => cached<AnnouncementRecord[]>('/api/v1/customer/announcements') ?? null)
   const [error, setError] = useState('')
   useEffect(() => {
     api<AnnouncementRecord[]>('/api/v1/customer/announcements')

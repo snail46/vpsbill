@@ -90,23 +90,11 @@ func NewHandler(deps Dependencies) (http.Handler, error) {
 	})
 	mux.HandleFunc("GET /metrics", metrics.serve)
 	mux.HandleFunc("GET /api/v1/meta", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]any{
-			"data": map[string]any{
-				"surface":                  r.Header.Get("X-VPSBill-Surface"),
-				"admin_url":                deps.Settings.Current().AdminURL,
-				"public_url":               deps.Settings.Current().PublicURL,
-				"name":                     deps.Settings.Current().AppName,
-				"environment":              deps.Config.Environment,
-				"installed":                deps.Settings.Current().Installed,
-				"password_reset_mail":      deps.Settings.Current().SMTP.Configured(),
-				"ticket_attachment_max_mb": deps.Settings.Current().TicketAttachmentMaxMB,
-				"marketplace_enabled":      deps.Settings.Current().Marketplace.Enabled,
-				"capabilities": []string{
-					"accounts", "catalog", "billing", "provisioning", "clicd", "support", "audit", "notifications", "wallet", "marketplace",
-				},
-			},
-		})
+		writeJSON(w, http.StatusOK, map[string]any{"data": siteMeta(deps.Config, deps.Settings, r)})
 	})
+	mux.HandleFunc("GET /api/v1/boot", auth.boot)
+	logo := &siteLogo{settings: deps.Settings}
+	mux.HandleFunc("GET /api/v1/site/logo", logo.serve)
 	mux.HandleFunc("GET /api/v1/install", install.status)
 	mux.HandleFunc("POST /api/v1/install", install.install)
 	mux.HandleFunc("POST /api/v1/auth/login", auth.login)
@@ -240,6 +228,8 @@ func NewHandler(deps Dependencies) (http.Handler, error) {
 	mux.Handle("PUT /api/v1/admin/settings/payment", auth.require("billing:write", http.HandlerFunc(adminSettings.updatePayment)))
 	mux.Handle("GET /api/v1/admin/settings/site", auth.require("settings:read", http.HandlerFunc(adminSettings.site)))
 	mux.Handle("PUT /api/v1/admin/settings/site", auth.require("settings:write", http.HandlerFunc(adminSettings.updateSite)))
+	mux.Handle("POST /api/v1/admin/settings/logo", auth.require("settings:write", http.HandlerFunc(adminSettings.uploadLogo)))
+	mux.Handle("PUT /api/v1/admin/settings/logo", auth.require("settings:write", http.HandlerFunc(adminSettings.linkLogo)))
 	mux.Handle("POST /api/v1/admin/settings/site/test-mail", auth.require("settings:write", http.HandlerFunc(adminSettings.testMail)))
 	mux.Handle("GET /api/v1/admin/services", auth.require("services:read", http.HandlerFunc(automation.listServices)))
 	mux.Handle("GET /api/v1/admin/jobs", auth.require("services:read", http.HandlerFunc(automation.listJobs)))
@@ -284,7 +274,7 @@ func NewHandler(deps Dependencies) (http.Handler, error) {
 
 func installationGate(runtime *settings.Manager, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if runtime.Current().Installed || r.URL.Path == "/health/live" || r.URL.Path == "/health/ready" || r.URL.Path == "/api/v1/meta" || r.URL.Path == "/api/v1/install" {
+		if runtime.Current().Installed || r.URL.Path == "/health/live" || r.URL.Path == "/health/ready" || r.URL.Path == "/api/v1/meta" || r.URL.Path == "/api/v1/boot" || r.URL.Path == "/api/v1/install" {
 			next.ServeHTTP(w, r)
 			return
 		}
