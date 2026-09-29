@@ -176,6 +176,16 @@ func (a *marketplaceAPI) hosting(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "internal_error"})
 		return
 	}
+	enrollKey, err := a.catalog.EnrollKey(r.Context(), identity.AccountID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "internal_error"})
+		return
+	}
+	pending, err := pendingAgents(r.Context(), a.catalog, a.box, identity.AccountID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "internal_error"})
+		return
+	}
 	regions, err := a.billing.ListRegions(r.Context())
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "internal_error"})
@@ -193,8 +203,8 @@ func (a *marketplaceAPI) hosting(w http.ResponseWriter, r *http.Request) {
 		"regions":           regions,
 		"balance_minor":     wallet.BalanceMinor,
 		"currency":          wallet.Currency,
-		"install_command": "curl -fsSL " + server + "/api/v1/agent/download/install.sh | sh -s -- --server " + server +
-			" --runtime lxd,podman --public-ip <本机公网 IPv4>",
+		"install_command":   installCommand(server, enrollKey),
+		"pending_agents":    pending,
 	}})
 }
 
@@ -204,8 +214,13 @@ func (a *marketplaceAPI) publishNode(w http.ResponseWriter, r *http.Request) {
 	}
 	var input struct {
 		postgres.HostedNodeInput
-		Token      string `json:"token"`
-		AgreeRules bool   `json:"agree_rules"`
+		// RegionName creates or picks a region by name when RegionID is empty.
+		RegionName string `json:"region_name"`
+		// EnrollmentID publishes a host from the pending list; Token is the
+		// fallback of pasting the agent token.
+		EnrollmentID string `json:"enrollment_id"`
+		Token        string `json:"token"`
+		AgreeRules   bool   `json:"agree_rules"`
 	}
 	if !decodeJSON(w, r, &input) {
 		return
@@ -216,6 +231,18 @@ func (a *marketplaceAPI) publishNode(w http.ResponseWriter, r *http.Request) {
 	}
 	if message := input.Validate(); message != "" {
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "validation_error", "message": message})
+		return
+	}
+	identity := customerPrincipalFromContext(r.Context())
+	if input.EnrollmentID != "" {
+		token, err := enrollmentToken(r.Context(), a.catalog, a.box, input.EnrollmentID, identity.AccountID)
+		if err != nil {
+			writeJSON(w, http.StatusNotFound, map[string]any{"error": "not_found", "message": "待接入的母机不存在，请刷新后重试"})
+			return
+		}
+		input.Token = token
+	}
+	if !resolveRegion(w, r.Context(), a.catalog, &input.RegionID, input.RegionName) {
 		return
 	}
 	token := strings.ToLower(strings.TrimSpace(input.Token))
@@ -248,7 +275,6 @@ func (a *marketplaceAPI) publishNode(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "internal_error"})
 		return
 	}
-	identity := customerPrincipalFromContext(r.Context())
 	id, err := a.store.CreateHostedNode(r.Context(), identity.AccountID, identity.UserID, input.HostedNodeInput, postgres.HostedNodeRegistration{
 		BaseURL: endpoint, APIKeyCiphertext: ciphertext, VirtualizationTypes: virtualization, Capacity: info.Raw,
 		CapacityVCPU: int64(info.Capacity.VCPU), CapacityRAMMB: info.Capacity.RAMMB, CapacityDiskGB: info.Capacity.DiskGB,
@@ -261,6 +287,7 @@ func (a *marketplaceAPI) publishNode(w http.ResponseWriter, r *http.Request) {
 	case err != nil:
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "publish_failed", "message": "发布失败，请检查地域等信息"})
 	default:
+		_ = a.catalog.ClearEnrollment(r.Context(), endpoint)
 		writeJSON(w, http.StatusCreated, map[string]any{"data": map[string]string{"id": id}})
 	}
 }

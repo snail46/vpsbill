@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react'
-import { Copy, MapPin, MessagesSquare, Plus, RefreshCw, Server, Store, Ticket, TicketPercent, X } from 'lucide-react'
+import { MapPin, MessagesSquare, Plus, RefreshCw, Server, Store, Ticket, TicketPercent, X } from 'lucide-react'
 import {
   api,
   type ChatRoomRecord,
@@ -10,6 +10,7 @@ import {
   type NodeImageRecord,
   type OrderRecord,
   type PaymentIntentRecord,
+  type PendingAgentRecord,
   type PlanRecord,
   type StockCapacityRecord,
   type TicketDetailRecord,
@@ -19,7 +20,7 @@ import {
 import ChatRoom from './ChatRoom'
 import { CouponField, CouponManager } from './Coupons'
 import { ReportDialog } from './Reports'
-import { TicketConversation, ticketStatusLabel } from './shared/ui'
+import { StatusBadge, TicketConversation, ticketStatusLabel } from './shared/ui'
 import { ticketRequestBody, useAttachmentLimit } from './TicketAttachments'
 import { walletMoney } from './Wallet'
 import { formatDate, formatTime } from './shared/time'
@@ -27,6 +28,7 @@ import { cycleName, cycleOrder, CyclePriceFields, priceLeft, readCyclePrices } f
 import { readStock, stockLeft, StockField, StockTag } from './shared/stock'
 import { DiskIOFields, diskIOText, readDiskIO } from './shared/diskio'
 import { OvercommitDialog, SupplyDetails, overcommitText } from './Supply'
+import { ConnectSteps, PendingAgents } from './shared/agents'
 
 type Tab = 'market' | 'mine' | 'coupons' | 'tickets' | 'chat'
 const tabs: [Tab, string, typeof Store][] = [
@@ -382,7 +384,9 @@ function BuyDialog({
 
 function MyNodes() {
   const [data, setData] = useState<HostingRecord | null>(null)
-  const [publishing, setPublishing] = useState(false)
+  // publishing is the pending agent being published, or 'token' for the
+  // fallback of pasting an agent token.
+  const [publishing, setPublishing] = useState<PendingAgentRecord | 'token' | null>(null)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
 
@@ -393,6 +397,23 @@ function MyNodes() {
   useEffect(() => {
     void load()
   }, [])
+  // Freshly installed hosts show up on their own.
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (!document.hidden) void load()
+    }, 20000)
+    return () => window.clearInterval(timer)
+  }, [])
+
+  async function dismiss(agent: PendingAgentRecord) {
+    if (!window.confirm(`从待接入列表移除 ${agent.hostname || '这台母机'}？它重新连接后会再次出现。`)) return
+    try {
+      await api(`/api/v1/customer/hosting/agents/${agent.id}`, { method: 'DELETE' })
+      void load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '移除失败')
+    }
+  }
 
   if (!data) return error ? <div className="form-error">{error}</div> : null
   const active = data.nodes.filter(node => !node.retired_at)
@@ -429,20 +450,27 @@ function MyNodes() {
           <button className="secondary-button" onClick={() => void load()}>
             <RefreshCw size={15} />刷新
           </button>
-          {data.enabled && !publishing && (
-            <button className="primary-button compact" onClick={() => setPublishing(true)}>
-              <Plus size={15} />发布母机
-            </button>
-          )}
         </div>
       </div>
       {!data.enabled && <div className="note-banner warn">托管中心暂未开放发布。</div>}
+      {data.enabled && !publishing && (
+        <section className="panel connect-panel">
+          <div className="panel-heading">
+            <h3>接入新母机</h3>
+            <button type="button" className="text-button" onClick={() => setPublishing('token')}>已有 Agent 令牌？手动发布</button>
+          </div>
+          <ConnectSteps command={data.install_command} where="下方" actionLabel="发布" />
+          <h4 className="subheading">待接入的母机</h4>
+          <PendingAgents agents={data.pending_agents ?? []} actionLabel="发布" onAdd={setPublishing} onDismiss={agent => void dismiss(agent)} />
+        </section>
+      )}
       {publishing && (
         <PublishForm
           data={data}
-          onClose={() => setPublishing(false)}
+          agent={publishing === 'token' ? undefined : publishing}
+          onClose={() => setPublishing(null)}
           onPublished={() => {
-            setPublishing(false)
+            setPublishing(null)
             setNotice('母机已发布，接下来为它创建套餐。')
             void load()
           }}
@@ -451,7 +479,7 @@ function MyNodes() {
       {active.map(node => (
         <HostedNodeCard key={node.id} node={node} data={data} onChanged={() => void load()} onNotice={setNotice} onError={setError} />
       ))}
-      {!active.length && !publishing && <div className="empty-card">还没有托管母机。点击「发布母机」开始接入。</div>}
+      {!active.length && !publishing && <div className="empty-card">还没有托管母机。按上面的步骤安装 Agent 后即可发布。</div>}
       {retired.length > 0 && (
         <div className="panel">
           <div className="panel-heading">
@@ -485,21 +513,33 @@ function MyNodes() {
   )
 }
 
-function NodeInfoFields({ node, regions, editing = false }: { node?: HostedNodeRecord; regions: HostingRecord['regions']; editing?: boolean }) {
+function NodeInfoFields({
+  node,
+  regions,
+  editing = false,
+  defaultName,
+}: {
+  node?: HostedNodeRecord
+  regions: HostingRecord['regions']
+  editing?: boolean
+  defaultName?: string
+}) {
   return (
     <>
       <label>
         <span>母机名称</span>
-        <input name="name" required minLength={2} maxLength={40} defaultValue={node?.name} placeholder="例如 HK-CN2-01" />
+        <input name="name" required minLength={2} maxLength={40} defaultValue={node?.name ?? defaultName} placeholder="例如 HK-CN2-01" />
       </label>
       {!editing && (
         <label>
           <span>地域</span>
-          <select name="region_id" required>
+          <input name="region_name" required maxLength={40} list="hosting-regions" placeholder="选择或输入，例如 香港" autoComplete="off" />
+          <datalist id="hosting-regions">
             {regions.map(region => (
-              <option key={region.id} value={region.id}>{region.name}</option>
+              <option key={region.id} value={region.name} />
             ))}
-          </select>
+          </datalist>
+          <small>可以直接输入新地域，保存时自动创建</small>
         </label>
       )}
       <label>
@@ -532,7 +572,7 @@ function nodeInfo(data: FormData) {
   }
 }
 
-function PublishForm({ data, onClose, onPublished }: { data: HostingRecord; onClose: () => void; onPublished: () => void }) {
+function PublishForm({ data, agent, onClose, onPublished }: { data: HostingRecord; agent?: PendingAgentRecord; onClose: () => void; onPublished: () => void }) {
   const [agreed, setAgreed] = useState<boolean[]>(data.rules.map(() => false))
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -546,7 +586,13 @@ function PublishForm({ data, onClose, onPublished }: { data: HostingRecord; onCl
     try {
       await api('/api/v1/customer/hosting/nodes', {
         method: 'POST',
-        body: JSON.stringify({ ...nodeInfo(form), region_id: form.get('region_id'), token: String(form.get('token') || '').trim(), agree_rules: all }),
+        body: JSON.stringify({
+          ...nodeInfo(form),
+          region_name: String(form.get('region_name') || '').trim(),
+          enrollment_id: agent?.id ?? '',
+          token: String(form.get('token') || '').trim(),
+          agree_rules: all,
+        }),
       })
       onPublished()
     } catch (err) {
@@ -559,7 +605,7 @@ function PublishForm({ data, onClose, onPublished }: { data: HostingRecord; onCl
   return (
     <form className="panel" onSubmit={submit}>
       <div className="panel-heading">
-        <h3>发布托管母机</h3>
+        <h3>{agent ? `发布母机 ${agent.hostname}` : "手动发布托管母机"}</h3>
         <button type="button" className="icon-button" aria-label="关闭" onClick={onClose}>
           <X size={16} />
         </button>
@@ -574,33 +620,22 @@ function PublishForm({ data, onClose, onPublished }: { data: HostingRecord; onCl
           </li>
         ))}
       </ol>
-      <div className="install-step">
-        <p>
-          <strong>第一步：</strong>在母机上以 root 运行下面的命令安装 Hatch Agent（支持 LXD / Incus / Podman），把 <code>&lt;本机公网 IPv4&gt;</code>
-          换成母机的公网 IP。安装脚本最后会打印一行 64 位令牌。
+      {agent ? (
+        <p className="muted-text">
+          发布 <strong>{agent.hostname || '新母机'}</strong>（{agent.public_ipv4 || agent.remote_ip}）。勾选同意全部准则并填写下面的信息，平台确认 Agent 在线后立即上架。
         </p>
-        <div className="code-line">
-          <code>{data.install_command}</code>
-          <button type="button" className="icon-button" aria-label="复制" onClick={() => void navigator.clipboard?.writeText(data.install_command)}>
-            <Copy size={14} />
-          </button>
-        </div>
-        {data.install_command.includes('--server http://') && (
-          <p className="muted-text">
-            当前站点还没有启用 HTTPS。Agent 只允许经回环地址用 HTTP 连接，所以现在只有与计费站同机的服务器能接入；外部母机需要站点先配置域名和 HTTPS。
-          </p>
-        )}
-        <p>
-          <strong>第二步：</strong>填写母机信息和令牌。平台会先确认 Agent 已经连上，再上架。
-        </p>
-      </div>
+      ) : (
+        <p className="muted-text">手动发布：填写母机信息和安装脚本最后打印的 64 位 Agent 令牌（可在母机上运行 <code>hatch-agent token</code> 查看）。</p>
+      )}
       {error && <div className="form-error">{error}</div>}
       <div className="form-grid">
-        <NodeInfoFields regions={data.regions} />
-        <label className="wide">
-          <span>Agent 令牌</span>
-          <input name="token" required pattern="[0-9a-fA-F]{64}" placeholder="安装脚本最后打印的 64 位令牌" autoComplete="off" />
-        </label>
+        <NodeInfoFields regions={data.regions} defaultName={agent?.hostname} />
+        {!agent && (
+          <label className="wide">
+            <span>Agent 令牌</span>
+            <input name="token" required pattern="[0-9a-fA-F]{64}" placeholder="安装脚本最后打印的 64 位令牌" autoComplete="off" />
+          </label>
+        )}
         <div className="form-actions wide">
           <button type="button" className="secondary-button" onClick={onClose}>取消</button>
           <button className="primary-button compact" disabled={busy || !all}>
@@ -808,7 +843,7 @@ function HostedNodeCard({
                 <td><code>{item.instance_name}</code></td>
                 <td>{item.plan_name}</td>
                 <td>{item.buyer_name}</td>
-                <td>{item.status} · {item.runtime_status}</td>
+                <td><span className="badge-pair"><StatusBadge status={item.status} /><StatusBadge status={item.runtime_status} /></span></td>
                 <td>{item.next_due_at ? formatDate(item.next_due_at) : '—'}</td>
                 <td>{walletMoney(item.remaining_value_minor, data.currency)}</td>
               </tr>

@@ -37,6 +37,16 @@ type Client struct {
 }
 
 func NewClient(config Config, version string, service *Service, logger *slog.Logger) (*Client, error) {
+	client, err := serverClient(config)
+	if err != nil {
+		return nil, err
+	}
+	return &Client{config: config, version: version, service: service, logger: logger, http: client}, nil
+}
+
+// serverClient is an HTTP client for the billing server, trusting
+// config.CAFile when set.
+func serverClient(config Config) (*http.Client, error) {
 	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS12}
 	if config.CAFile != "" {
 		pem, err := os.ReadFile(config.CAFile)
@@ -49,10 +59,7 @@ func NewClient(config Config, version string, service *Service, logger *slog.Log
 		}
 		tlsConfig.RootCAs = pool
 	}
-	return &Client{
-		config: config, version: version, service: service, logger: logger,
-		http: &http.Client{Transport: &http.Transport{TLSClientConfig: tlsConfig, Proxy: http.ProxyFromEnvironment}},
-	}, nil
+	return &http.Client{Transport: &http.Transport{TLSClientConfig: tlsConfig, Proxy: http.ProxyFromEnvironment}}, nil
 }
 
 // Run reconnects with jittered exponential backoff until ctx ends.
@@ -78,11 +85,19 @@ func (c *Client) Run(ctx context.Context) {
 	}
 }
 
+func (c *Client) connectHeader() http.Header {
+	header := http.Header{"Authorization": {"Bearer " + c.config.Token}}
+	if c.config.EnrollKey != "" {
+		header.Set(protocol.EnrollHeader, "1")
+	}
+	return header
+}
+
 func (c *Client) session(ctx context.Context) error {
 	dialCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	conn, response, err := websocket.Dial(dialCtx, c.config.ConnectURL(), &websocket.DialOptions{
 		HTTPClient: c.http,
-		HTTPHeader: http.Header{"Authorization": {"Bearer " + c.config.Token}},
+		HTTPHeader: c.connectHeader(),
 	})
 	cancel()
 	if err != nil {
@@ -96,7 +111,7 @@ func (c *Client) session(ctx context.Context) error {
 
 	hostname, _ := os.Hostname()
 	if err := c.write(ctx, conn, protocol.Frame{Type: protocol.TypeHello, Params: mustJSON(protocol.Hello{
-		ProtocolVersion: protocol.Version, AgentVersion: c.version, Hostname: hostname, Runtimes: c.config.Runtimes(),
+		ProtocolVersion: protocol.Version, AgentVersion: c.version, Hostname: hostname, Runtimes: c.config.Runtimes(), EnrollKey: c.config.EnrollKey,
 	})}); err != nil {
 		return err
 	}

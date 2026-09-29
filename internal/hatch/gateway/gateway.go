@@ -38,9 +38,15 @@ var ErrOffline = errors.New("agent is not connected")
 // KnownFunc reports whether a node with this agent endpoint exists.
 type KnownFunc func(ctx context.Context, endpoint string) bool
 
+// EnrollFunc records an agent that no node uses yet under the account its
+// hello's enroll key belongs to, and reports whether the key was valid.
+// Enrolled agents stay connected until the account adds or dismisses them.
+type EnrollFunc func(ctx context.Context, endpoint, token string, hello protocol.Hello, r *http.Request) bool
+
 type Hub struct {
 	logger  *slog.Logger
 	known   KnownFunc
+	enroll  EnrollFunc
 	cluster *Cluster
 
 	mu       sync.Mutex
@@ -57,6 +63,7 @@ type Session struct {
 	conn     *websocket.Conn
 	hello    protocol.Hello
 	known    bool
+	enrolled bool
 
 	mu       sync.Mutex
 	pending  map[string]chan protocol.Frame
@@ -65,6 +72,9 @@ type Session struct {
 	done     chan struct{}
 	closed   bool
 }
+
+// SetEnroller accepts agents carrying an enroll key.
+func (h *Hub) SetEnroller(enroll EnrollFunc) { h.enroll = enroll }
 
 // Session returns the connected agent for an endpoint.
 func (h *Hub) Session(endpoint string) (*Session, bool) {
@@ -84,13 +94,20 @@ func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	endpoint := provider.AgentEndpoint(token)
 	known := h.known(r.Context(), endpoint)
-	if !known && !h.reserveUnknown() {
+	// Agents with an enroll key say so up front and skip the few slots for
+	// unregistered agents; one whose key turns out invalid is closed right
+	// after its hello.
+	claimsEnroll := r.Header.Get(protocol.EnrollHeader) != ""
+	if !known && !claimsEnroll && !h.reserveUnknown() {
 		http.Error(w, "too many unregistered agents", http.StatusServiceUnavailable)
 		return
 	}
-	if !known {
-		defer h.releaseUnknown()
-	}
+	reserved := !known && !claimsEnroll
+	defer func() {
+		if reserved {
+			h.releaseUnknown()
+		}
+	}()
 	// The API server's read/write timeouts would otherwise cut this
 	// long-lived connection; liveness is enforced by pings instead.
 	controller := http.NewResponseController(w)
@@ -109,11 +126,22 @@ func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_ = conn.Close(websocket.StatusPolicyViolation, err.Error())
 		return
 	}
-	session := &Session{endpoint: endpoint, conn: conn, hello: hello, known: known, pending: map[string]chan protocol.Frame{}, streams: map[string]*Stream{}, lastSeen: time.Now(), done: make(chan struct{})}
+	enrolled := !known && hello.EnrollKey != "" && h.enroll != nil && h.enroll(r.Context(), endpoint, token, hello, r)
+	if !known && claimsEnroll && !enrolled {
+		_ = conn.Close(websocket.StatusPolicyViolation, "enroll key is not valid")
+		return
+	}
+	// Enrolled agents may wait for their account indefinitely, so they do
+	// not hold one of the few slots for unregistered agents.
+	if enrolled && reserved {
+		h.releaseUnknown()
+		reserved = false
+	}
+	session := &Session{endpoint: endpoint, conn: conn, hello: hello, known: known, enrolled: enrolled, pending: map[string]chan protocol.Frame{}, streams: map[string]*Stream{}, lastSeen: time.Now(), done: make(chan struct{})}
 	h.attach(session)
 	defer h.detach(session)
 	h.register(r.Context(), endpoint)
-	h.logger.Info("hatch agent connected", "endpoint", endpoint, "hostname", hello.Hostname, "version", hello.AgentVersion, "registered", known)
+	h.logger.Info("hatch agent connected", "endpoint", endpoint, "hostname", hello.Hostname, "version", hello.AgentVersion, "registered", known, "enrolled", enrolled)
 
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
@@ -197,7 +225,7 @@ func (h *Hub) keepalive(ctx context.Context, session *Session) {
 			return
 		}
 		h.register(ctx, session.endpoint)
-		if !session.known && time.Since(started) > unknownSessionTTL {
+		if !session.known && !session.enrolled && time.Since(started) > unknownSessionTTL {
 			if !h.known(ctx, session.endpoint) {
 				_ = session.conn.Close(websocket.StatusPolicyViolation, "token is not registered to any node")
 				return

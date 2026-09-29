@@ -66,6 +66,7 @@ func main() {
 	workerID := hostname + ":" + fmt.Sprint(os.Getpid())
 	agentHub := gateway.NewHub(logger, catalogStore.NodeExistsByEndpoint)
 	hatchprovider.Register(agentHub)
+	agentHub.SetEnroller(app.AgentEnroller(catalogStore, secretBox, logger))
 	var agentInternal http.Handler
 	if cfg.InternalURL != "" {
 		internalURL, err := cfg.ResolveInternalURL()

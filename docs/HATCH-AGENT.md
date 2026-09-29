@@ -18,6 +18,8 @@ Hatch 是 VPSBill 自研的宿主机 Agent。它运行在母鸡上，驱动本�
 - **协议**：WebSocket + JSON 帧，定义在 `internal/hatch/protocol`。服务端只发送类型化请求（开通、电源、重装、改密、端口映射、用量、流量等），Agent 不执行任意命令。计费站点即使被攻破，也无法在宿主机上执行 shell。
 - **身份**：Agent 令牌是 64 位十六进制随机数，只保存在 Agent 的 `/etc/hatch/agent.json`（0600）和计费库中（AES-256-GCM 加密）。节点的 `base_url` 存的是 `agent://<令牌 SHA-256 前 16 位>`，用于匹配会话，不暴露令牌。
 - **未登记令牌**：尚未接入节点的 Agent 最多同时保持 8 个连接，15 分钟内未被接入即断开。已登记节点的 Agent 不受该上限影响。
+- **接入码（免复制令牌）**：安装命令带 `--enroll <接入码>`，接入码每个托管账户一个、平台一个（后台「节点对接」显示的命令），同一账户的所有母机用同一条命令。Agent 连接时在请求头 `X-Hatch-Enroll` 和 hello 里带上接入码；接入码有效时，平台把它记在该账户的待接入列表里（`agent_enrollments`，令牌加密保存），不占上面的 8 个名额，一直保持连接直到被接入或移除。机主在「我的母机」、管理员在「节点对接」点「发布 / 接入」即可，平台用保存的令牌完成验证。每个账户最多 50 台待接入。接入码无效的连接在 hello 后立即断开。
+- **公网 IP 自动识别**：配置里不填 `public_ipv4` 时，Agent 启动时自己识别：默认路由的源地址是公网地址就用它；否则（服务商 1:1 NAT，网卡上只有内网 IP，如甲骨文）向计费站 `GET /api/v1/agent/ip` 询问自己连过来的 IPv4。公网 IP 只用于给客户显示端口转发地址，端口转发规则不依赖它。
 - **多实例**：Agent 会话保存在它所连接的 API 进程中。部署多个 API 实例时设置 `INTERNAL_URL=auto`（或每个实例可互访的内部地址），实例会把持有的 Agent 登记到 `agent_sessions` 表并每 30 秒续期；其他实例收到针对该 Agent 的请求（含 WebSSH）时，通过内部端点 `/internal/v1/agent/` 转发给持有者。内部请求用由 `SESSION_SECRET`+`ENCRYPTION_KEY` 派生的 HMAC 签名，时间窗 60 秒，公网代理不转发 `/internal/`。单实例部署留空即可。
 
 ## Agent 负责的事情
@@ -66,10 +68,15 @@ fib daddr type local tcp dport 20022 dnat to 10.20.30.254:22
 
    ```sh
    curl -fsSL https://billing.example.com/api/v1/agent/download/install.sh | \
-     sh -s -- --server https://billing.example.com --runtime lxd,podman --public-ip 203.0.113.10
+     sh -s -- --server https://billing.example.com --enroll <接入码>
    ```
 
-   - `--runtime`：`lxd`、`incus`、`podman` 任意组合。宿主机用 Incus 时写 `incus`，Agent 会固定使用 `/var/lib/incus/unix.socket`；同一台机器同时装了 LXD snap 和 Incus 时必须这样写，否则自动探测会优先选中 LXD。
+   这条命令直接从后台「节点对接 → 接入教程」（托管机主在「托管中心 → 我的母机」）复制，接入码已经填好，所有母机通用。
+
+   - `--enroll`：账户接入码，装好后母机自动出现在待接入列表，不用复制令牌。不带时按老办法用令牌接入。
+   - `--runtime`：默认 `auto`：装了 Incus 用 Incus，装了 LXD 用 LXD，再加上 Podman（没装会自动安装）。也可以写 `lxd`、`incus`、`podman` 的任意组合。
+   - `--public-ip`：默认自动识别（见上文），一般不用填。
+   - 手动写 `--runtime` 时：宿主机用 Incus 时写 `incus`，Agent 会固定使用 `/var/lib/incus/unix.socket`；同一台机器同时装了 LXD snap 和 Incus 时必须这样写，否则自动探测会优先选中 LXD。
    - `--lxd-network`、`--podman-network`：实例接入的网桥 / Podman 网络，默认 `lxdbr0`（Incus 为 `incusbr0`）和 `podman`。
    - 计费站与母鸡是同一台机器时，`--server` 用 `http://127.0.0.1:端口`（只有回环地址允许 HTTP）。
 
@@ -77,11 +84,11 @@ fib daddr type local tcp dport 20022 dnat to 10.20.30.254:22
 
    脚本会写入 `/etc/hatch/agent.json`，打印令牌，并启用 `hatch-agent.service`。已有配置时保留原配置并重新打印令牌，所以同一条命令也用于升级 Agent。启动日志里的 `lxd_socket`、`lxd_network`、`podman_network` 是实际生效的值。
 
-3. 在计费后台「节点对接 → 新增节点」选择 **Hatch Agent**，填入令牌、地区和虚拟化类型（`lxc` / `podman`）。接入时会实时调用 Agent 验证连接。
+3. 约半分钟后，母机出现在后台「节点对接 → 接入教程 → 待接入的母机」里（显示主机名、公网 IP、运行时和检测到的配置）。点「接入」，填名称和地域（可以直接输入新地域），虚拟化类型按运行时预选好。接入时会实时调用 Agent 验证连接。没带接入码安装的老母机，用「手动填写令牌接入」（令牌在母机上运行 `hatch-agent token` 查看）。
 
 4. 新建套餐时选择对应的虚拟化类型（LXC 或 Podman），模板从在线节点的镜像中勾选。
 
-轮换令牌：`hatch-agent init --force --server ...`，然后在后台用新令牌重新接入节点。
+轮换令牌：`hatch-agent init --force --server ...`，然后在后台用新令牌重新接入节点。已安装的母机改用接入码：`hatch-agent enroll <接入码> && systemctl restart hatch-agent`。
 
 ## 母机调优
 

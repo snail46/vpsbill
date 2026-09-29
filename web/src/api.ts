@@ -538,6 +538,21 @@ export type HostedNodeRecord = NodeSupply & {
 }
 
 export type MarketRecord = { nodes: HostedNodeRecord[]; fee_percent: number; overcommit_limits: Overcommit }
+export type RegionAdminRecord = { id: string; code: string; name: string; enabled: boolean; nodes: number }
+
+export type PendingAgentRecord = {
+  id: string
+  hostname: string
+  agent_version: string
+  runtimes: string[]
+  remote_ip: string
+  public_ipv4?: string
+  first_seen_at: string
+  last_seen_at: string
+  online: boolean
+  capacity?: { vcpu: number; ram_mb: number; disk_gb: number }
+}
+
 export type HostingRecord = {
   enabled: boolean
   fee_percent: number
@@ -550,6 +565,7 @@ export type HostingRecord = {
   balance_minor: number
   currency: string
   install_command: string
+  pending_agents: PendingAgentRecord[]
 }
 export type NodeImageRecord = { id: string; name: string; type?: string; virtualization?: string; description?: string }
 

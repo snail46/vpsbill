@@ -1,8 +1,9 @@
 // Command hatch-agent runs on a host node and connects it to VPSBill.
 //
-//	hatch-agent init --server https://billing.example.com --runtime lxd,podman --public-ip 203.0.113.10
+//	hatch-agent init --server https://billing.example.com --runtime lxd,podman [--enroll KEY] [--public-ip 203.0.113.10]
 //	hatch-agent run
 //	hatch-agent token
+//	hatch-agent enroll KEY
 package main
 
 import (
@@ -37,6 +38,8 @@ func main() {
 		err = run(args)
 	case "token":
 		err = printToken(args)
+	case "enroll":
+		err = setEnroll(args)
 	case "version":
 		fmt.Println(version)
 	default:
@@ -53,7 +56,8 @@ func initConfig(args []string) error {
 	path := flags.String("config", agent.DefaultConfigPath, "config file to create")
 	server := flags.String("server", "", "billing site URL, e.g. https://billing.example.com")
 	runtimes := flags.String("runtime", "lxd", "comma separated runtimes: lxd (or incus), podman")
-	publicIP := flags.String("public-ip", "", "public IPv4 shown for NAT port forwards")
+	publicIP := flags.String("public-ip", "", "public IPv4 shown for NAT port forwards (default: detected at start)")
+	enroll := flags.String("enroll", "", "account key from the install command; lists this host for that account")
 	force := flags.Bool("force", false, "overwrite an existing config and rotate the token")
 	lxdNetwork := flags.String("lxd-network", "", "LXD/Incus bridge for instances (default lxdbr0 or incusbr0)")
 	podmanNetwork := flags.String("podman-network", "", "Podman network for instances (default podman)")
@@ -65,7 +69,7 @@ func initConfig(args []string) error {
 	if err != nil {
 		return err
 	}
-	config := agent.Config{ServerURL: *server, Token: token, PublicIPv4: *publicIP, PortRangeStart: 20000, PortRangeEnd: 60000, StateDir: "/var/lib/hatch"}
+	config := agent.Config{ServerURL: *server, Token: token, EnrollKey: *enroll, PublicIPv4: *publicIP, PortRangeStart: 20000, PortRangeEnd: 60000, StateDir: "/var/lib/hatch"}
 	for _, runtime := range strings.Split(*runtimes, ",") {
 		switch strings.TrimSpace(runtime) {
 		case "lxd":
@@ -91,6 +95,26 @@ func initConfig(args []string) error {
 	return nil
 }
 
+// setEnroll stores an account key in an existing config, so reinstalling
+// with a new install command lists the host without rotating its token.
+func setEnroll(args []string) error {
+	flags := flag.NewFlagSet("enroll", flag.ExitOnError)
+	path := flags.String("config", agent.DefaultConfigPath, "config file")
+	_ = flags.Parse(args)
+	if flags.NArg() != 1 {
+		return errors.New("usage: hatch-agent enroll [--config PATH] KEY")
+	}
+	config, err := agent.LoadConfig(*path)
+	if err != nil {
+		return err
+	}
+	config.EnrollKey = flags.Arg(0)
+	if err := config.Validate(); err != nil {
+		return err
+	}
+	return agent.WriteConfig(*path, config)
+}
+
 func printToken(args []string) error {
 	flags := flag.NewFlagSet("token", flag.ExitOnError)
 	path := flags.String("config", agent.DefaultConfigPath, "config file")
@@ -111,6 +135,17 @@ func run(args []string) error {
 	config, err := agent.LoadConfig(*path)
 	if err != nil {
 		return err
+	}
+	if config.PublicIPv4 == "" {
+		detectCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		address, err := agent.DetectPublicIPv4(detectCtx, config)
+		cancel()
+		if err != nil {
+			logger.Warn("public IPv4 not detected; customers will not see a NAT address", "error", err)
+		} else {
+			config.PublicIPv4 = address
+			logger.Info("detected public IPv4", "address", address)
+		}
 	}
 	store, err := agent.OpenStore(config.StateDir)
 	if err != nil {

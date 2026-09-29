@@ -4,15 +4,25 @@
 # Straight from the billing site (it bundles the matching agent build):
 #
 #   curl -fsSL https://billing.example.com/api/v1/agent/download/install.sh | \
-#       sh -s -- --server https://billing.example.com --runtime podman --public-ip 203.0.113.10
+#       sh -s -- --server https://billing.example.com --enroll KEY
+#
+# The billing site shows this command with your account's KEY filled in; the
+# same command works on every host. After installing, the host shows up on
+# the site as waiting to be added (hosting center "我的母机" for hosts, 节点对接
+# for administrators).
 #
 # Or with a binary you downloaded yourself:
 #
 #   ./install-hatch-agent.sh --binary ./hatch-agent-linux-amd64 \
-#       --server https://billing.example.com --runtime lxd --public-ip 203.0.113.10
+#       --server https://billing.example.com --runtime lxd
 #
 # Options:
-#   --runtime LIST          lxd, incus and/or podman, comma separated
+#   --enroll KEY            account key from the billing site; lists the host
+#                           there so nobody has to copy the agent token
+#   --runtime LIST          lxd, incus and/or podman, comma separated; "auto"
+#                           (default) uses Incus or LXD when installed, plus
+#                           Podman (installed if missing)
+#   --public-ip ADDRESS     the IPv4 customers reach; detected by default
 #   --lxd-network NAME      bridge LXC instances attach to (lxdbr0 / incusbr0)
 #   --podman-network NAME   Podman network for instances (created if missing)
 #   --podman-disk SIZE      size of the Podman data disk, e.g. 20G; "auto"
@@ -37,8 +47,9 @@ set -eu
 BINARY=""
 SERVER=""
 DOWNLOAD_FROM=""
-RUNTIME="lxd"
+RUNTIME="auto"
 PUBLIC_IP=""
+ENROLL=""
 EXTRA=""
 PODMAN_NETWORK="podman"
 PODMAN_DISK="auto"
@@ -53,6 +64,7 @@ while [ $# -gt 0 ]; do
     --download-from) DOWNLOAD_FROM="$2"; shift 2 ;;
     --runtime) RUNTIME="$2"; shift 2 ;;
     --public-ip) PUBLIC_IP="$2"; shift 2 ;;
+    --enroll) ENROLL="$2"; shift 2 ;;
     --lxd-network) EXTRA="$EXTRA $1 $2"; shift 2 ;;
     --podman-network) PODMAN_NETWORK="$2"; EXTRA="$EXTRA $1 $2"; shift 2 ;;
     --podman-disk) PODMAN_DISK="$2"; shift 2 ;;
@@ -67,6 +79,16 @@ done
 [ -n "$SERVER" ] || { echo "--server is required" >&2; exit 2; }
 command -v systemctl >/dev/null 2>&1 || { echo "systemd is required" >&2; exit 1; }
 
+if [ "$RUNTIME" = "auto" ]; then
+  if command -v incus >/dev/null 2>&1; then
+    RUNTIME="incus,podman"
+  elif command -v lxd >/dev/null 2>&1 || [ -S /var/snap/lxd/common/lxd/unix.socket ] || [ -S /var/lib/lxd/unix.socket ]; then
+    RUNTIME="lxd,podman"
+  else
+    RUNTIME="podman"
+  fi
+  echo "Runtimes: $RUNTIME"
+fi
 case ",$RUNTIME," in *,podman,*) USE_PODMAN=1 ;; *) USE_PODMAN=0 ;; esac
 case ",$RUNTIME," in *,lxd,*|*,incus,*) USE_LXC=1 ;; *) USE_LXC=0 ;; esac
 
@@ -411,10 +433,11 @@ install -d -m 0700 /etc/hatch /var/lib/hatch
 
 if [ ! -f /etc/hatch/agent.json ]; then
   /usr/local/bin/hatch-agent init --config /etc/hatch/agent.json \
-    --server "$SERVER" --runtime "$RUNTIME" --public-ip "$PUBLIC_IP" $EXTRA
+    --server "$SERVER" --runtime "$RUNTIME" --public-ip "$PUBLIC_IP" --enroll "$ENROLL" $EXTRA
 else
   echo "Keeping existing /etc/hatch/agent.json; token:"
   /usr/local/bin/hatch-agent token --config /etc/hatch/agent.json
+  [ -z "$ENROLL" ] || /usr/local/bin/hatch-agent enroll --config /etc/hatch/agent.json "$ENROLL"
 fi
 
 # The unit file sits next to this script in the repository; when the script
@@ -432,4 +455,9 @@ systemctl restart hatch-agent
 systemctl --no-pager --lines=5 status hatch-agent || true
 if [ "$USE_PODMAN" = 1 ] && [ "$PODMAN_IMAGES" != "skip" ]; then
   echo "Podman templates: localhost/hatch-debian12:latest and localhost/hatch-alpine:latest"
+fi
+if [ -n "$ENROLL" ]; then
+  echo
+  echo "安装完成：这台母机已出现在计费站的待接入列表（托管中心「我的母机」或后台「节点对接」），在网页上点「接入」即可，无需复制令牌。"
+  echo "Done: this host is now listed on the billing site as waiting to be added."
 fi

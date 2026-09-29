@@ -19,16 +19,23 @@ import (
 
 const DefaultConfigPath = "/etc/hatch/agent.json"
 
-var nftTablePattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,31}$`)
+var (
+	nftTablePattern  = regexp.MustCompile(`^[a-z][a-z0-9_]{0,31}$`)
+	enrollKeyPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{16,64}$`)
+)
 
 type Config struct {
 	// ServerURL is the billing site, e.g. https://billing.example.com.
 	ServerURL string `json:"server_url"`
 	Token     string `json:"token"`
+	// EnrollKey is the account key from the install command; the server
+	// lists the agent under that account until a node is added for it.
+	EnrollKey string `json:"enroll_key,omitempty"`
 	// CAFile optionally trusts a private CA for the billing server.
 	CAFile   string `json:"ca_file,omitempty"`
 	StateDir string `json:"state_dir"`
-	// PublicIPv4 is shown to customers as the address of their NAT ports.
+	// PublicIPv4 is shown to customers as the address of their NAT ports;
+	// empty detects it at start (see DetectPublicIPv4).
 	PublicIPv4     string `json:"public_ipv4"`
 	PortRangeStart int    `json:"port_range_start"`
 	PortRangeEnd   int    `json:"port_range_end"`
@@ -136,6 +143,9 @@ func (c Config) Validate() error {
 		if _, err := netip.ParseAddr(c.PublicIPv4); err != nil {
 			return errors.New("public_ipv4 is not an IP address")
 		}
+	}
+	if c.EnrollKey != "" && !enrollKeyPattern.MatchString(c.EnrollKey) {
+		return errors.New("enroll_key must be 16-64 letters, digits, - or _")
 	}
 	return nil
 }

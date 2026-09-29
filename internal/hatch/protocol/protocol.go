@@ -90,7 +90,14 @@ type Hello struct {
 	AgentVersion    string   `json:"agent_version"`
 	Hostname        string   `json:"hostname"`
 	Runtimes        []string `json:"runtimes"`
+	// EnrollKey, from the install command, lists an agent whose token no
+	// node uses yet as waiting to be added by that account (or the platform).
+	EnrollKey string `json:"enroll_key,omitempty"`
 }
+
+// EnrollHeader carries the enroll key on the connect request, so the
+// gateway can admit an enrolling agent before reading its hello.
+const EnrollHeader = "X-Hatch-Enroll"
 
 type Heartbeat struct {
 	Time      time.Time `json:"time"`

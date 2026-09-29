@@ -54,7 +54,7 @@ func NewHandler(deps Dependencies) (http.Handler, error) {
 		return nil, errors.New("settings manager is required")
 	}
 	auth := newAuthenticator(deps.Config, authStore, secretBox, deps.Settings)
-	admin := newAdminCatalog(catalogStore, secretBox)
+	admin := newAdminCatalog(catalogStore, secretBox, deps.Settings)
 	billing := newAdminBilling(deps.Settings, billingStore)
 	adminSettings := adminSettings{settings: deps.Settings}
 	automation := newAdminAutomation(provisioningStore)
@@ -164,6 +164,7 @@ func NewHandler(deps Dependencies) (http.Handler, error) {
 	mux.Handle("GET /api/v1/customer/hosting", auth.requireCustomer(http.HandlerFunc(market.hosting)))
 	mux.Handle("POST /api/v1/customer/hosting/nodes", auth.requireVerifiedCustomer(http.HandlerFunc(market.publishNode)))
 	mux.Handle("PUT /api/v1/customer/hosting/nodes/{id}", auth.requireCustomer(http.HandlerFunc(market.updateHostedNode)))
+	mux.Handle("DELETE /api/v1/customer/hosting/agents/{id}", auth.requireCustomer(http.HandlerFunc(market.dismissHostedAgent)))
 	mux.Handle("PUT /api/v1/customer/hosting/nodes/{id}/overcommit", auth.requireCustomer(http.HandlerFunc(market.hostOvercommit)))
 	mux.Handle("POST /api/v1/customer/hosting/nodes/{id}/listing", auth.requireCustomer(http.HandlerFunc(market.setHostedListing)))
 	mux.Handle("POST /api/v1/customer/hosting/nodes/{id}/retire", auth.requireCustomer(http.HandlerFunc(market.retireHostedNode)))
@@ -193,6 +194,8 @@ func NewHandler(deps Dependencies) (http.Handler, error) {
 	mux.Handle("GET /api/v1/customer/chat/rooms/{node}/stream", auth.requireCustomer(http.HandlerFunc(market.customerChatStream)))
 	// Public on purpose: nodes fetch the agent before they hold any credential.
 	mux.HandleFunc("GET /api/v1/agent/download/{file}", agentDownloads(deps.Config.AgentDownloadDir))
+	// Public too: agents behind 1:1 NAT learn their public IPv4 from it.
+	mux.HandleFunc("GET /api/v1/agent/ip", agentIP)
 	if deps.AgentGateway != nil {
 		// Authenticated by the agent bearer token inside the gateway.
 		mux.Handle("GET /api/v1/agent/connect", deps.AgentGateway)
@@ -208,6 +211,12 @@ func NewHandler(deps Dependencies) (http.Handler, error) {
 	mux.Handle("GET /api/v1/admin/hosts/{id}/probe", auth.require("nodes:read", http.HandlerFunc(admin.hostProbe)))
 	mux.Handle("GET /api/v1/admin/overview", auth.require("customers:read", http.HandlerFunc(metrics.overview)))
 	mux.Handle("POST /api/v1/admin/nodes", auth.require("nodes:write", http.HandlerFunc(admin.createNode)))
+	mux.Handle("POST /api/v1/admin/nodes/tls-probe", auth.require("nodes:write", http.HandlerFunc(admin.tlsProbe)))
+	mux.Handle("GET /api/v1/admin/agent-enrollments", auth.require("nodes:read", http.HandlerFunc(admin.listEnrollments)))
+	mux.Handle("DELETE /api/v1/admin/agent-enrollments/{id}", auth.require("nodes:write", http.HandlerFunc(admin.dismissEnrollment)))
+	mux.Handle("GET /api/v1/admin/regions/all", auth.require("nodes:read", http.HandlerFunc(admin.listAllRegions)))
+	mux.Handle("POST /api/v1/admin/regions", auth.require("nodes:write", http.HandlerFunc(admin.createRegion)))
+	mux.Handle("PUT /api/v1/admin/regions/{id}", auth.require("nodes:write", http.HandlerFunc(admin.updateRegion)))
 	mux.Handle("POST /api/v1/admin/nodes/{id}/test", auth.require("nodes:write", http.HandlerFunc(admin.testNode)))
 	mux.Handle("PUT /api/v1/admin/nodes/{id}", auth.require("nodes:write", http.HandlerFunc(admin.updateNode)))
 	mux.Handle("DELETE /api/v1/admin/nodes/{id}", auth.require("nodes:write", http.HandlerFunc(admin.deleteNode)))

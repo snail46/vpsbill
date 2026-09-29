@@ -106,37 +106,35 @@ Podman 不用手动准备：下一步的安装脚本带 `--runtime podman`（或
 
 ```sh
 curl -fsSL http://127.0.0.1:8088/api/v1/agent/download/install.sh | sh -s -- \
-  --server http://127.0.0.1:8088 --runtime incus,podman \
-  --lxd-network hatchbr0 --podman-network hatchpod --podman-disk 20G --public-ip 203.0.113.10
+  --server http://127.0.0.1:8088 --enroll <接入码> \
+  --lxd-network hatchbr0 --podman-network hatchpod --podman-disk 20G
 ```
+
+接入码在后台「节点对接 → 接入教程」的命令里（外部母机直接复制那条命令即可，服务器地址也已填好）。公网 IP 和已安装的 Incus / LXD 自动识别。
 
 - 脚本默认开启 zram（一半内存做压缩交换），小内存母机更稳；不需要时加 `--no-zram`。
 - 母机最低配置：只跑 Podman 时 1 核 / 256 MB 内存可以运行（实测：Agent、Podman 和系统空闲时共用约 30 MB，两台 64 MB 实例同时运行正常；单个实例内存超限只会杀掉该实例内的进程，母机和其他实例不受影响），硬盘建议 10 GB 起（Podman 数据盘、两个基础镜像和系统）。宿主机本身是容器（LXC 等小 NAT 机）时，需要能使用 /dev/fuse 和 loop 设备，否则实例内 `free` 看到的是宿主机内存，且无法建立带配额的 Podman 数据盘；跑 LXD/Incus 建议 1 GB 内存以上，存储池用 btrfs 比 zfs 省内存（ZFS 缓存会占用不少内存）。
 
-- 只用其中一种时，`--runtime` 写 `incus` 或 `podman`；用 LXD snap 时写 `lxd`。
+- 只想用其中一种时，加 `--runtime incus` 或 `--runtime podman`（用 LXD snap 时写 `lxd`）。
 - 母鸡在另一台机器上时，`--server` 必须是 `https://计费域名`，下载地址同理。
 - 同机还有 LXDAPI 等 NAT 面板时，编辑 `/etc/hatch/agent.json` 把 `port_range_start`/`port_range_end` 改为 `20000`/`29999`，然后 `systemctl restart hatch-agent`。
 
-脚本最后会打印一行 64 位令牌，下一步要用。
+装好后约半分钟，母机出现在后台「节点对接」的待接入列表里。
 
 ### 4D. LXDAPI
 
 按 [xkatld/lxdapi-web-server](https://github.com/xkatld/lxdapi-web-server) 的 `Shell/` 目录依次运行 `lxd_install.sh`、`lxdapi_install.sh`、`image_import.sh`。装好后在 LXDAPI 后台：
 
 1. 「NAT 配置」：网卡 IP 填 `10.0.0.5`，显示 IP 填 `203.0.113.10`，网卡填出口网卡（如 `eth0`），端口段 `40000–49999`，开启「自动分配 22 端口」；
-2. 记下 API Hash，并取证书指纹：
-
-   ```sh
-   openssl s_client -connect 127.0.0.1:8444 </dev/null 2>/dev/null | openssl x509 -noout -fingerprint -sha256
-   ```
+2. 记下 API Hash（证书指纹不用手动取，接入时点「自动读取」）；
 
 3. 导入的 `ubuntu-2404-lxc` 镜像默认禁止密码 SSH，按 [母鸡对接层](PROVIDERS.md#lxdapi-说明) 里的命令修正一次。
 
 ## 5. 后台接入节点和上架套餐
 
 1. 「节点对接 → 新增节点对接」：
-   - Hatch：对接方式选 Hatch Agent，填令牌、地域代号（如 `SHA`）和中文名，勾选 LXC / Podman；
-   - LXDAPI：接口地址 `https://203.0.113.10:8444`，填 API Hash、NAT 公网 IPv4、出口网卡、「NAT 网卡 IP」（1:1 NAT 时填 `10.0.0.5`）、端口段、可售镜像别名、可分配的 vCPU / 内存 / 磁盘和证书指纹。
+   - Hatch：在「接入教程 → 待接入的母机」里点「接入」，填名称和地域（下拉选择或直接输入新地域，自动创建），虚拟化类型已按母机运行时预选；
+   - LXDAPI：「接入教程 → LXDAPI → 新增 LXDAPI 节点」，接口地址 `https://203.0.113.10:8444`，填 API Hash、可售镜像别名、可分配的 vCPU / 内存 / 磁盘；公网 IPv4 按接口地址自动填，出口网卡和端口段预填 `eth0`、`40000–49999`，1:1 NAT 时补「NAT 网卡 IP」（`10.0.0.5`），证书指纹点「自动读取」。
    提交时会实时连一次节点，失败会直接提示原因。节点以后可以「编辑」，没有未终止服务时可以「删除」。
 2. 「商品套餐 → 创建新套餐」：选对接方式和虚拟化类型，填配置、各计费周期价格（月付、季付、半年付、年付和一个自定义周期，留空表示不卖该周期）和 NAT 端口映射配额，勾选允许的系统镜像（从在线节点读取），设默认镜像。
 

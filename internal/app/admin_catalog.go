@@ -11,16 +11,18 @@ import (
 
 	"vpsbill/internal/provider"
 	"vpsbill/internal/security"
+	"vpsbill/internal/settings"
 	"vpsbill/internal/store/postgres"
 )
 
 type adminCatalog struct {
-	store *postgres.CatalogStore
-	box   *security.SecretBox
+	store    *postgres.CatalogStore
+	box      *security.SecretBox
+	settings *settings.Manager
 }
 
-func newAdminCatalog(store *postgres.CatalogStore, box *security.SecretBox) *adminCatalog {
-	return &adminCatalog{store: store, box: box}
+func newAdminCatalog(store *postgres.CatalogStore, box *security.SecretBox, runtime *settings.Manager) *adminCatalog {
+	return &adminCatalog{store: store, box: box, settings: runtime}
 }
 
 func (a *adminCatalog) listNodes(w http.ResponseWriter, r *http.Request) {
@@ -44,12 +46,36 @@ func (a *adminCatalog) createNode(w http.ResponseWriter, r *http.Request) {
 		ProviderOptions     map[string]any `json:"provider_options"`
 		ExpiresAt           string         `json:"expires_at"`
 		TrafficQuotaGB      int            `json:"traffic_quota_gb"`
+		// EnrollmentID adds a Hatch agent from the pending list instead of
+		// a pasted token.
+		EnrollmentID string `json:"enrollment_id"`
 	}
 	if !decodeJSON(w, r, &input) {
 		return
 	}
 	if !validNodeBilling(w, &input.ExpiresAt, input.TrafficQuotaGB) {
 		return
+	}
+	if input.EnrollmentID != "" {
+		token, err := enrollmentToken(r.Context(), a.store, a.box, input.EnrollmentID, "")
+		if err != nil {
+			writeJSON(w, http.StatusNotFound, map[string]any{"error": "not_found", "message": "待接入的 Agent 不存在，请刷新后重试"})
+			return
+		}
+		input.ProviderType, input.APIKey = "hatch", token
+	}
+	// A region may be typed by name alone; its code is derived.
+	if strings.TrimSpace(input.RegionCode) == "" && strings.TrimSpace(input.RegionName) != "" {
+		region, err := a.store.EnsureRegion(r.Context(), input.RegionName)
+		if errors.Is(err, postgres.ErrRegionDisabled) {
+			writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "region_disabled", "message": "该地域已停用，请先在地域管理中启用"})
+			return
+		}
+		if err != nil {
+			writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "validation_error", "message": "地域名称需为 1-40 个字符"})
+			return
+		}
+		input.RegionCode, input.RegionName = region.Code, region.Name
 	}
 	input.ProviderType = strings.TrimSpace(input.ProviderType)
 	if input.ProviderType == "" {
@@ -123,6 +149,9 @@ func (a *adminCatalog) createNode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	node.ExpiresAt, node.TrafficQuotaGB = input.ExpiresAt, input.TrafficQuotaGB
+	if descriptor.AgentManaged {
+		_ = a.store.ClearEnrollment(r.Context(), input.BaseURL)
+	}
 	writeJSON(w, http.StatusCreated, map[string]any{"data": node})
 }
 
