@@ -12,8 +12,10 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags=
 # architectures, served at /api/v1/agent/download/.
 COPY deploy/install-hatch-agent.sh /out/hatch-agent/install.sh
 COPY deploy/hatch-agent.service /out/hatch-agent/hatch-agent.service
+# VERSION (the commit, passed by CI) is what the agent reports to the site.
+ARG VERSION=dev
 RUN for arch in amd64 arm64; do \
-      CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath -ldflags="-s -w" -o /out/hatch-agent/hatch-agent-linux-$arch ./cmd/hatch-agent; \
+      CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath -ldflags="-s -w -X main.version=$VERSION" -o /out/hatch-agent/hatch-agent-linux-$arch ./cmd/hatch-agent; \
     done \
     && cd /out/hatch-agent && sha256sum hatch-agent-linux-* > SHA256SUMS
 
