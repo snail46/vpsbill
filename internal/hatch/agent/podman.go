@@ -224,6 +224,9 @@ func (p *Podman) Create(ctx context.Context, spec RuntimeSpec) error {
 		body["mounts"] = mounts
 	}
 	body["sysctl"] = instanceSysctls()
+	if blockIO := podmanBlockIO(spec); blockIO != nil {
+		body["resource_limits"].(map[string]any)["blockIO"] = blockIO
+	}
 	if err := p.request(ctx, http.MethodPost, "/containers/create", body, nil); err != nil {
 		return err
 	}
@@ -236,6 +239,34 @@ func (p *Podman) Create(ctx context.Context, spec RuntimeSpec) error {
 		return err
 	}
 	return nil
+}
+
+// podmanBlockIO is the OCI throttle list for the instance's disk limits.
+func podmanBlockIO(spec RuntimeSpec) map[string]any {
+	limits := map[string]int{
+		"throttleReadBpsDevice": spec.DiskIO.ReadMBps << 20, "throttleWriteBpsDevice": spec.DiskIO.WriteMBps << 20,
+		"throttleReadIOPSDevice": spec.DiskIO.ReadIOPS, "throttleWriteIOPSDevice": spec.DiskIO.WriteIOPS,
+	}
+	result := map[string]any{}
+	for key, rate := range limits {
+		if rate <= 0 {
+			continue
+		}
+		var devices []map[string]int64
+		for _, device := range spec.Devices {
+			var major, minor int64
+			if _, err := fmt.Sscanf(device, "%d:%d", &major, &minor); err == nil {
+				devices = append(devices, map[string]int64{"major": major, "minor": minor, "rate": int64(rate)})
+			}
+		}
+		if len(devices) > 0 {
+			result[key] = devices
+		}
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
 }
 
 func (p *Podman) State(ctx context.Context, name string) (RuntimeState, error) {

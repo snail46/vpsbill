@@ -37,6 +37,8 @@ func checkPlanStock(ctx context.Context, catalog *postgres.CatalogStore, plan po
 	return "", nil
 }
 
+const diskIOInvalid = "磁盘读写上限无效：MB/s 需在 0-100000 之间，IOPS 需在 0-10000000 之间（0 表示不限）"
+
 // validatePriceLimits checks the per-price purchase limits.
 func validatePriceLimits(prices []postgres.Price) string {
 	for _, price := range prices {

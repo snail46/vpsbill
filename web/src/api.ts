@@ -147,6 +147,11 @@ export type PlanRecord = {
   // stock_held counts live instances and units in payable orders.
   stock_limit?: number | null
   stock_held?: number
+  // Per-instance disk limits; 0 is unlimited.
+  disk_read_mbps?: number
+  disk_write_mbps?: number
+  disk_read_iops?: number
+  disk_write_iops?: number
 }
 
 export type StockCapacityRecord = {
@@ -157,6 +162,17 @@ export type StockCapacityRecord = {
   free_disk_gb: number
   free_traffic_gb?: number
   nodes: number
+  // disk_io suggests per-instance disk limits from the weakest machine's
+  // measured disk; absent until a node reports one.
+  disk_io?: {
+    disk_read_mbps: number
+    disk_write_mbps: number
+    disk_read_iops: number
+    disk_write_iops: number
+    host: { read_mbps: number; write_mbps: number; read_iops: number; write_iops: number; measured_at: string }
+    instances: number
+    unsupported?: string[]
+  }
 }
 
 export type AvailableTemplateRecord = {

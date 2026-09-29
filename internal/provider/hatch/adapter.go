@@ -88,6 +88,10 @@ func (d *Driver) HostInfo(ctx context.Context) (provider.HostInfo, error) {
 			result.Health.Disks = append(result.Health.Disks, provider.DiskUsage{Name: disk.Name, TotalGB: disk.TotalGB, UsedGB: disk.UsedGB})
 		}
 	}
+	if perf := info.DiskPerf; perf != nil {
+		result.DiskPerf = &provider.DiskPerf{ReadMBps: perf.ReadMBps, WriteMBps: perf.WriteMBps, ReadIOPS: perf.ReadIOPS, WriteIOPS: perf.WriteIOPS,
+			MeasuredAt: perf.MeasuredAt, IOLimitErrors: info.IOLimitErrors}
+	}
 	return result, nil
 }
 
@@ -114,6 +118,7 @@ func (d *Driver) EnsureInstance(ctx context.Context, spec provider.CreateSpec) (
 		VCPU: spec.VCPU, RAMMB: spec.RAMMB, DiskGB: spec.DiskGB, AssignNAT: spec.AssignNAT,
 		PortMappingCount: spec.PortMappingCount, AssignIPv6: spec.AssignIPv6, Password: password,
 		NetworkDownMbps: spec.NetworkDownMbps, NetworkUpMbps: spec.NetworkUpMbps, MonthlyTrafficGB: spec.MonthlyTrafficGB,
+		DiskIO: protocol.DiskIO{ReadMBps: spec.DiskIO.ReadMBps, WriteMBps: spec.DiskIO.WriteMBps, ReadIOPS: spec.DiskIO.ReadIOPS, WriteIOPS: spec.DiskIO.WriteIOPS},
 	}, &result)
 	if err != nil {
 		return provider.EnsureResult{}, err

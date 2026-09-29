@@ -119,7 +119,31 @@ type HostInfo struct {
 	// QuotaErrors names runtimes that cannot enforce instance disk sizes;
 	// they refuse to create instances until fixed.
 	QuotaErrors map[string]string `json:"quota_errors,omitempty"`
-	Details     map[string]any    `json:"details,omitempty"`
+	// DiskPerf is the measured speed of the disk holding the instances;
+	// nil until the agent's first benchmark finishes.
+	DiskPerf *DiskPerf `json:"disk_perf,omitempty"`
+	// IOLimitErrors names runtimes whose storage cannot enforce instance
+	// disk read/write limits (ZFS pools); instances there run unlimited.
+	IOLimitErrors map[string]string `json:"io_limit_errors,omitempty"`
+	Details       map[string]any    `json:"details,omitempty"`
+}
+
+// DiskPerf is a short benchmark: sequential MB/s with 1 MiB blocks and
+// random IOPS with 4 KiB blocks at queue depth 8, all O_DIRECT.
+type DiskPerf struct {
+	ReadMBps   int       `json:"read_mbps"`
+	WriteMBps  int       `json:"write_mbps"`
+	ReadIOPS   int       `json:"read_iops"`
+	WriteIOPS  int       `json:"write_iops"`
+	MeasuredAt time.Time `json:"measured_at"`
+}
+
+// DiskIO limits an instance's disk; 0 leaves that direction unlimited.
+type DiskIO struct {
+	ReadMBps  int `json:"disk_read_mbps,omitempty"`
+	WriteMBps int `json:"disk_write_mbps,omitempty"`
+	ReadIOPS  int `json:"disk_read_iops,omitempty"`
+	WriteIOPS int `json:"disk_write_iops,omitempty"`
 }
 
 // HostHealth is a point-in-time load sample of the whole host.
@@ -163,6 +187,7 @@ type CreateSpec struct {
 	NetworkDownMbps  int    `json:"network_down_mbps"`
 	NetworkUpMbps    int    `json:"network_up_mbps"`
 	MonthlyTrafficGB int    `json:"monthly_traffic_gb"`
+	DiskIO
 }
 
 type EnsureResult struct {
@@ -187,6 +212,7 @@ type Instance struct {
 	MonthlyTrafficGB int           `json:"monthly_traffic_gb"`
 	NetworkDownMbps  int           `json:"network_down_mbps"`
 	NetworkUpMbps    int           `json:"network_up_mbps"`
+	DiskIO
 	// Password is only set in the EnsureResult of a newly created instance.
 	Password string `json:"password,omitempty"`
 }

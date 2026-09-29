@@ -124,6 +124,21 @@ func TestEnsureRetryTakesCorrectedSpec(t *testing.T) {
 	}
 }
 
+func TestEnsureKeepsDiskLimits(t *testing.T) {
+	runtime := agenttest.NewRuntime("podman")
+	service := newService(t, t.TempDir(), runtime, &agenttest.NAT{})
+	limited := spec
+	limited.Virtualization = "podman"
+	limited.DiskIO = protocol.DiskIO{ReadMBps: 80, WriteMBps: 40, ReadIOPS: 2000, WriteIOPS: 1000}
+	result, err := call[protocol.EnsureResult](t, service, protocol.MethodEnsure, limited)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runtime.Instances[spec.Name].Spec.DiskIO != limited.DiskIO || result.Instance.DiskIO != limited.DiskIO {
+		t.Fatalf("limits lost: runtime %+v, reported %+v", runtime.Instances[spec.Name].Spec.DiskIO, result.Instance.DiskIO)
+	}
+}
+
 func TestUnmanagedInstanceIsNotAdopted(t *testing.T) {
 	runtime := agenttest.NewRuntime("lxc")
 	runtime.Instances["svc-1"] = &agenttest.Instance{Status: "running"}

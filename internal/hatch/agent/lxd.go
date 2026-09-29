@@ -153,6 +153,11 @@ func (l *LXD) Create(ctx context.Context, spec RuntimeSpec) error {
 			"eth0": nic,
 		},
 	}
+	// LXD's own limits.read/limits.write take either bytes or IOPS per
+	// direction, not both, so the cgroup setting is written directly.
+	if raw := lxcIOMax(spec); raw != "" {
+		body["config"].(map[string]string)["raw.lxc"] = raw
+	}
 	if _, err := l.request(ctx, http.MethodPost, "/1.0/instances", body); err != nil {
 		return err
 	}
@@ -327,6 +332,50 @@ func (l *LXD) CheckDiskQuota(ctx context.Context) error {
 	}
 	if !quotaDrivers[pool.Driver] {
 		return fmt.Errorf("存储池 %s 使用 %s 驱动，无法限制实例硬盘；请改用 btrfs、zfs 或 lvm 存储池", l.config.StoragePool, pool.Driver)
+	}
+	return nil
+}
+
+// lxcIOMax renders the instance's disk limits as raw.lxc cgroup lines.
+func lxcIOMax(spec RuntimeSpec) string {
+	var limits []string
+	for _, limit := range []struct {
+		key   string
+		value int
+	}{{"rbps", spec.DiskIO.ReadMBps << 20}, {"wbps", spec.DiskIO.WriteMBps << 20}, {"riops", spec.DiskIO.ReadIOPS}, {"wiops", spec.DiskIO.WriteIOPS}} {
+		if limit.value > 0 {
+			limits = append(limits, limit.key+"="+strconv.Itoa(limit.value))
+		}
+	}
+	if len(limits) == 0 {
+		return ""
+	}
+	var lines []string
+	for _, device := range spec.Devices {
+		lines = append(lines, "lxc.cgroup2.io.max = "+device+" "+strings.Join(limits, " "))
+	}
+	return strings.Join(lines, "\n")
+}
+
+// ioLimitDrivers issue their disk writes from their own kernel threads, so
+// the cgroup of the container never sees them and I/O limits do nothing
+// (measured on ZFS: a 10 MB/s limit left writes at over 40 MB/s).
+var ioLimitDrivers = map[string]bool{"zfs": true, "ceph": true, "cephfs": true}
+
+// CheckIOLimit fails when the pool's driver ignores disk I/O limits.
+func (l *LXD) CheckIOLimit(ctx context.Context) error {
+	metadata, err := l.request(ctx, http.MethodGet, "/1.0/storage-pools/"+url.PathEscape(l.config.StoragePool), nil)
+	if err != nil {
+		return fmt.Errorf("inspect storage pool %s: %w", l.config.StoragePool, err)
+	}
+	var pool struct {
+		Driver string `json:"driver"`
+	}
+	if err := json.Unmarshal(metadata, &pool); err != nil {
+		return err
+	}
+	if ioLimitDrivers[pool.Driver] {
+		return fmt.Errorf("存储池 %s 使用 %s 驱动，实例磁盘读写上限不生效；需要限速请改用 btrfs 或 lvm 存储池", l.config.StoragePool, pool.Driver)
 	}
 	return nil
 }

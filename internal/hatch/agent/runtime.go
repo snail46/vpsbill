@@ -48,6 +48,16 @@ type RuntimeSpec struct {
 	IPv6            netip.Addr
 	NetworkDownMbps int
 	NetworkUpMbps   int
+	// DiskIO caps the instance's disk; Devices are the disks it applies
+	// to, as "major:minor".
+	DiskIO  protocol.DiskIO
+	Devices []string
+}
+
+// IOLimitChecker is a runtime whose storage may not enforce disk I/O
+// limits; CheckIOLimit explains why when it cannot.
+type IOLimitChecker interface {
+	CheckIOLimit(ctx context.Context) error
 }
 
 // TerminalSession is an interactive shell: Read returns output and Write

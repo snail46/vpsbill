@@ -27,3 +27,7 @@ func mountOf(string) (mountEntry, bool) { return mountEntry{}, false }
 func conntrackMax() int { return 0 }
 
 func congestionAvailable(string) bool { return false }
+
+func blockDevices() []string { return nil }
+
+func measureDisk(string) (*protocol.DiskPerf, error) { return nil, errors.ErrUnsupported }

@@ -119,15 +119,19 @@ func (s *CatalogStore) RecordNodeReport(ctx context.Context, id string, info pro
 		return err
 	}
 	since, reason := evaluateHealth(info.Health, previous, time.Now())
+	var diskPerf []byte
+	if info.DiskPerf != nil {
+		diskPerf, _ = json.Marshal(info.DiskPerf)
+	}
 	if _, err := tx.Exec(ctx, `
 		UPDATE nodes SET status='online', capacity=$2, last_seen_at=now(), updated_at=now(),
 		    reported_vcpu=$3, reported_ram_mb=$4, reported_disk_gb=$5, machine_id=nullif($6,''),
 		    health=$7::jsonb, health_mem_since=$8, health_disk_since=$9, health_load_since=$10,
 		    health_hold_since=CASE WHEN nullif($11,'') IS NULL THEN NULL ELSE coalesce(health_hold_since, now()) END,
-		    health_hold_reason=nullif($11,'')
+		    health_hold_reason=nullif($11,''), disk_perf=coalesce($12::jsonb, disk_perf)
 		WHERE id=$1
 	`, id, raw, info.Capacity.VCPU, info.Capacity.RAMMB, info.Capacity.DiskGB, info.MachineID, health,
-		since.Mem, since.Disk, since.Load, reason); err != nil {
+		since.Mem, since.Disk, since.Load, reason, diskPerf); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(ctx, `UPDATE nodes SET `+sellableCapacitySQL+` WHERE id=$1`, id); err != nil {

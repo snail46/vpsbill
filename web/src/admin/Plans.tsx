@@ -5,6 +5,7 @@ import { CouponManager } from '../Coupons'
 import { PageActions, StatusBadge, cycleLabel } from '../shared/ui'
 import { cycleOrder, CyclePriceFields, readCyclePrices } from '../shared/cycles'
 import { readStock, StockField, StockTag } from '../shared/stock'
+import { DiskIOFields, readDiskIO } from '../shared/diskio'
 import type { StockCapacityRecord } from '../api'
 import { virtualizationLabel } from './Nodes'
 
@@ -158,6 +159,7 @@ export function PlanForm({
   const [providerType, setProviderType] = useState(plan?.provider_type || 'clicd')
   const [virtualization, setVirtualization] = useState<'lxc' | 'kvm' | 'podman'>(plan?.virtualization || 'lxc')
   const [allowed, setAllowed] = useState<string[]>(plan?.allowed_template_ids || [])
+  const [capacity, setCapacity] = useState<StockCapacityRecord | null>(null)
   const [defaultTemplate, setDefaultTemplate] = useState(plan?.default_template_id || '')
 
   useEffect(() => {
@@ -229,6 +231,7 @@ export function PlanForm({
         purchase_limit: limits[billing_cycle] ?? null,
       })),
       stock_limit: readStock(data),
+      ...readDiskIO(data),
     }
     try {
       await api(plan ? `/api/v1/admin/plans/${plan.id}` : '/api/v1/admin/plans', {
@@ -341,7 +344,9 @@ export function PlanForm({
               }),
             })
           }}
+          onCapacity={setCapacity}
         />
+        {providerType === 'hatch' && <DiskIOFields plan={plan ?? undefined} capacity={capacity} />}
 
         <fieldset className="wide network-policy">
           <legend>网络策略配置</legend>

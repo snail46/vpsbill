@@ -137,6 +137,7 @@ func run(args []string) error {
 		return err
 	}
 	go service.Meter(ctx, time.Minute)
+	go service.MeasureDisk()
 	attrs := []any{"version", version, "runtimes", config.Runtimes()}
 	if config.LXD != nil {
 		attrs = append(attrs, "lxd_socket", config.LXD.Socket, "lxd_network", config.LXD.Network)

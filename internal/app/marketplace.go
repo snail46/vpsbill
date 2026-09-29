@@ -430,6 +430,8 @@ type hostedPlanInput struct {
 	// PriceLimits caps how many times each cycle's price is sold.
 	StockLimit  *int           `json:"stock_limit"`
 	PriceLimits map[string]int `json:"price_limits"`
+	// DiskIO caps each instance's disk (0 = unlimited).
+	provider.DiskIO
 }
 
 func (in *hostedPlanInput) plan(node postgres.Node) (postgres.Plan, string) {
@@ -449,6 +451,8 @@ func (in *hostedPlanInput) plan(node postgres.Node) (postgres.Plan, string) {
 		return postgres.Plan{}, "单个实例的配置超过了母机的实际资源"
 	case in.TrafficGB < 0 || in.NetworkDownMbps < 0 || in.NetworkUpMbps < 0 || in.NetworkDownMbps > 100000 || in.NetworkUpMbps > 100000:
 		return postgres.Plan{}, "流量或带宽参数无效"
+	case !in.DiskIO.Valid():
+		return postgres.Plan{}, diskIOInvalid
 	case in.PortMappingCount < 1 || in.PortMappingCount > 100:
 		return postgres.Plan{}, "NAT 端口数量需在 1-100 之间"
 	case len(in.AllowedTemplateIDs) == 0 || len(in.AllowedTemplateIDs) > 50 || !containsString(in.AllowedTemplateIDs, in.DefaultTemplateID):
@@ -463,7 +467,7 @@ func (in *hostedPlanInput) plan(node postgres.Node) (postgres.Plan, string) {
 		TrafficGB: in.TrafficGB, NetworkDownMbps: in.NetworkDownMbps, NetworkUpMbps: in.NetworkUpMbps,
 		AssignNAT: true, PortMappingCount: in.PortMappingCount, IPv4Count: 1, IPv6Count: 1,
 		DefaultTemplateID: in.DefaultTemplateID, AllowedTemplateIDs: in.AllowedTemplateIDs, Enabled: in.Enabled,
-		Description: in.Description, PurchaseLimit: in.PurchaseLimit, EarlyRefund: in.EarlyRefund,
+		Description: in.Description, PurchaseLimit: in.PurchaseLimit, EarlyRefund: in.EarlyRefund, DiskIO: in.DiskIO,
 	}
 	// A cycle left empty is not sold. Custom cycles are "d<N>" or "m<N>".
 	cycles := make([]string, 0, len(in.Prices))

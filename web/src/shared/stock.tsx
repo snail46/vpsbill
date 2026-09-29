@@ -18,9 +18,12 @@ export function StockTag({ plan }: { plan: Pick<PlanRecord, 'stock_limit' | 'sto
 export function StockField({
   plan,
   preview,
+  onCapacity,
 }: {
   plan?: Pick<PlanRecord, 'id' | 'stock_limit' | 'stock_held'>
   preview: (form: HTMLFormElement) => Promise<StockCapacityRecord>
+  // onCapacity shares each preview, e.g. for the disk limit suggestion.
+  onCapacity?: (capacity: StockCapacityRecord) => void
 }) {
   const ref = useRef<HTMLDivElement>(null)
   const input = useRef<HTMLInputElement>(null)
@@ -40,6 +43,7 @@ export function StockField({
           .then(value => {
             if (cancelled) return
             setCapacity(value)
+            onCapacity?.(value)
             setError('')
             // A new plan defaults to everything its nodes can hold.
             if (!plan && !touched.current && input.current) input.current.value = String(value.max)

@@ -240,7 +240,7 @@ func buildCreateSpec(value postgres.ProvisionContext) provider.CreateSpec {
 		SSHPassword:  sshPassword,
 		SSHPublicKey: stringValue(value.Configuration, "ssh_public_key"), ExpiresAt: value.ExpiresAt,
 		NetworkDownMbps: value.NetworkDownMbps, NetworkUpMbps: value.NetworkUpMbps,
-		MonthlyTrafficGB: value.TrafficGB, SnapshotLimit: value.SnapshotLimit,
+		MonthlyTrafficGB: value.TrafficGB, SnapshotLimit: value.SnapshotLimit, DiskIO: value.DiskIO,
 	}
 }
 

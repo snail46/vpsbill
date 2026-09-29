@@ -430,6 +430,12 @@ func validatePlan(plan postgres.Plan) string {
 	if !plan.AssignNAT && !plan.AssignIPv4 && !plan.AssignIPv6 {
 		return "套餐至少需要启用一种网络方式"
 	}
+	if !plan.DiskIO.Valid() {
+		return diskIOInvalid
+	}
+	if plan.DiskIO.Limited() && plan.ProviderType != "hatch" {
+		return "磁盘读写上限只对 Hatch 节点生效，其他对接方式请留空"
+	}
 	if plan.PortMappingCount < 0 || plan.PortMappingCount > 64 || plan.IPv4Count < 1 || plan.IPv4Count > 64 || plan.IPv6Count < 1 || plan.IPv6Count > 64 {
 		return "网络数量参数无效"
 	}

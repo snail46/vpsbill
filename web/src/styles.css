@@ -3519,5 +3519,9 @@ td .tag, .tag { white-space: nowrap; }
 .stock-tag { background: var(--success-bg, rgba(16, 185, 129, 0.12)); color: var(--success-text, #047857); }
 .stock-tag.sold-out { background: var(--warning-bg); color: var(--warning-text); }
 .stock-field { display: grid; gap: 6px; align-content: start; }
+.disk-io-field { grid-column: 1 / -1; display: grid; gap: 6px; }
+.disk-io-inputs { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
+.disk-io-field .link-button { color: var(--accent-text); text-decoration: underline; }
+.field-warning { color: var(--warning-text, #b45309); }
 .cycle-price-cell { display: grid; gap: 6px; align-content: start; }
 .cycle-custom-row { grid-template-columns: minmax(0, 110px) 90px minmax(0, 140px) minmax(0, 140px); }

@@ -10,6 +10,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"vpsbill/internal/provider"
 )
 
 var ErrNoCapacity = errors.New("no online node in the region has enough available capacity")
@@ -54,6 +56,7 @@ type ProvisionContext struct {
 	NetworkDownMbps int
 	NetworkUpMbps   int
 	SnapshotLimit   int
+	DiskIO          provider.DiskIO
 	ExpiresAt       *time.Time
 	Configuration   map[string]any
 }
@@ -242,7 +245,7 @@ func (s *ProvisioningStore) ProvisionContext(ctx context.Context, jobID string) 
 	err := s.db.QueryRow(ctx, `
 		SELECT j.id, s.id, s.instance_name, n.id, n.name, n.provider_type, n.base_url, n.api_key_ciphertext,n.provider_options,
 		       p.virtualization, p.vcpu, p.ram_mb, p.disk_gb, p.traffic_gb,
-		       p.network_down_mbps, p.network_up_mbps, p.snapshot_limit, s.expires_at, j.payload
+		       p.network_down_mbps, p.network_up_mbps, p.snapshot_limit, p.disk_io, s.expires_at, j.payload
 		FROM provisioning_jobs j
 		JOIN services s ON s.id=j.service_id
 		JOIN plans p ON p.id=s.plan_id
@@ -251,7 +254,7 @@ func (s *ProvisioningStore) ProvisionContext(ctx context.Context, jobID string) 
 	`, jobID).Scan(&result.JobID, &result.ServiceID, &result.InstanceName, &result.NodeID, &result.NodeName,
 		&result.ProviderType, &result.BaseURL, &result.APIKeyCiphertext, &result.ProviderOptions, &result.Virtualization, &result.VCPU, &result.RAMMB,
 		&result.DiskGB, &result.TrafficGB, &result.NetworkDownMbps, &result.NetworkUpMbps,
-		&result.SnapshotLimit, &result.ExpiresAt, &payload)
+		&result.SnapshotLimit, &result.DiskIO, &result.ExpiresAt, &payload)
 	if err != nil {
 		return ProvisionContext{}, err
 	}

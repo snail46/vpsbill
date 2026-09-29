@@ -7,6 +7,8 @@ import (
 	"math"
 
 	"github.com/jackc/pgx/v5"
+
+	"vpsbill/internal/provider"
 )
 
 // planHeldSQL counts a plan's live instances plus units in orders that can
@@ -33,6 +35,49 @@ type StockCapacity struct {
 	FreeDiskGB    int64  `json:"free_disk_gb"`
 	FreeTrafficGB *int64 `json:"free_traffic_gb,omitempty"`
 	Nodes         int    `json:"nodes"`
+	// DiskIO suggests per-instance disk limits; nil until a node of the
+	// pool has reported its disk speed.
+	DiskIO *DiskIOSuggestion `json:"disk_io,omitempty"`
+}
+
+// DiskIOSuggestion is a disk limit for each instance of a plan, from the
+// weakest machine's measured disk and how many of the plan's instances it
+// holds when full (Instances).
+type DiskIOSuggestion struct {
+	provider.DiskIO
+	Host      provider.DiskPerf `json:"host"`
+	Instances int               `json:"instances"`
+	// Unsupported lists nodes whose storage ignores disk limits.
+	Unsupported []string `json:"unsupported,omitempty"`
+}
+
+// suggestDiskIO shares a disk among the instances likely to be busy at
+// once: a quarter of them, but at least two, so one instance never takes
+// more than half the disk and the rest keep working while it is flat out.
+func suggestDiskIO(perf provider.DiskPerf, instances int) provider.DiskIO {
+	busy := max(2, (instances+3)/4)
+	share := func(total int) int { return roundDown(total / busy) }
+	return provider.DiskIO{ReadMBps: share(perf.ReadMBps), WriteMBps: share(perf.WriteMBps), ReadIOPS: share(perf.ReadIOPS), WriteIOPS: share(perf.WriteIOPS)}
+}
+
+// roundDown keeps two significant digits (1234 -> 1200, 57 -> 55 in steps
+// of 5 below 100) so suggestions read as chosen numbers.
+func roundDown(value int) int {
+	switch {
+	case value >= 1000:
+		step := 1
+		for step*100 <= value {
+			step *= 10
+		}
+		return value / step * step
+	case value >= 100:
+		return value / 10 * 10
+	case value >= 10:
+		return value / 5 * 5
+	case value < 1:
+		return 1
+	}
+	return value
 }
 
 // PlanStockCapacity computes the stock ceiling for plan (which may be a
@@ -50,7 +95,7 @@ func planStockCapacity(ctx context.Context, db queryer, plan Plan, excludeID str
 	var result StockCapacity
 	// The nodes the plan sells on: its own node for a hosted plan, or every
 	// platform node of its provider and virtualization.
-	poolSQL := `SELECT n.id::text, coalesce(n.machine_id, n.id::text), n.capacity_vcpu, n.capacity_ram_mb, n.capacity_disk_gb,
+	poolSQL := `SELECT n.id::text, n.name, n.disk_perf, coalesce(n.machine_id, n.id::text), n.capacity_vcpu, n.capacity_ram_mb, n.capacity_disk_gb,
 		CASE WHEN coalesce(n.traffic_quota_gb,0)=0 THEN NULL ELSE
 		  floor(n.traffic_quota_gb * least(n.overcommit_traffic, coalesce((SELECT max_overcommit_traffic FROM system_settings WHERE singleton=true), n.overcommit_traffic)))::bigint END
 		FROM nodes n WHERE n.retired_at IS NULL AND `
@@ -68,17 +113,26 @@ func planStockCapacity(ctx context.Context, db queryer, plan Plan, excludeID str
 	}
 	type capacity struct{ vcpu, ram, disk int64 }
 	groups := map[string]capacity{}
+	perfs := map[string]provider.DiskPerf{}
+	var unsupported []string
 	var traffic int64
 	trafficLimited := true
 	for rows.Next() {
-		var id, group string
+		var id, name, group string
 		var c capacity
 		var quota *int64
-		if err := rows.Scan(&id, &group, &c.vcpu, &c.ram, &c.disk, &quota); err != nil {
+		var perf *provider.DiskPerf
+		if err := rows.Scan(&id, &name, &perf, &group, &c.vcpu, &c.ram, &c.disk, &quota); err != nil {
 			rows.Close()
 			return result, err
 		}
 		result.Nodes++
+		if perf != nil && perf.WriteMBps > 0 {
+			perfs[group] = *perf
+			if reason := perf.IOLimitErrors[plan.Virtualization]; reason != "" {
+				unsupported = append(unsupported, name+"："+reason)
+			}
+		}
 		// Nodes on one machine share its hardware; count it once.
 		g := groups[group]
 		groups[group] = capacity{max(g.vcpu, c.vcpu), max(g.ram, c.ram), max(g.disk, c.disk)}
@@ -156,6 +210,28 @@ func planStockCapacity(ctx context.Context, db queryer, plan Plan, excludeID str
 		limit = 0
 	}
 	result.Max = limit
+	// The weakest machine sets the suggestion, sized by how many of this
+	// plan's instances it alone would hold.
+	for group, perf := range perfs {
+		c := groups[group]
+		instances := math.MaxInt
+		for _, pair := range [][2]int64{{c.vcpu, int64(plan.VCPU)}, {c.ram, int64(plan.RAMMB)}, {c.disk, int64(plan.DiskGB)}} {
+			if pair[1] > 0 {
+				instances = min(instances, int(pair[0]/pair[1]))
+			}
+		}
+		if instances == math.MaxInt || instances < 1 {
+			instances = 1
+		}
+		suggestion := suggestDiskIO(perf, instances)
+		if result.DiskIO == nil || suggestion.WriteMBps < result.DiskIO.WriteMBps {
+			result.DiskIO = &DiskIOSuggestion{DiskIO: suggestion, Host: perf, Instances: instances}
+		}
+	}
+	if result.DiskIO != nil {
+		result.DiskIO.Host.IOLimitErrors = nil
+		result.DiskIO.Unsupported = unsupported
+	}
 	return result, nil
 }
 

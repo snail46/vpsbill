@@ -24,6 +24,7 @@ type InstanceRecord struct {
 	NetworkDownMbps  int                    `json:"network_down_mbps"`
 	NetworkUpMbps    int                    `json:"network_up_mbps"`
 	MonthlyTrafficGB int                    `json:"monthly_traffic_gb"`
+	DiskIO           protocol.DiskIO        `json:"disk_io"`
 	PortMappingLimit int                    `json:"port_mapping_limit"`
 	PrivateIPv4      string                 `json:"private_ipv4"`
 	IPv6             string                 `json:"ipv6,omitempty"`
@@ -40,6 +41,7 @@ func (r *InstanceRecord) applySpec(spec protocol.CreateSpec) {
 	r.Virtualization, r.Template = spec.Virtualization, spec.TemplateID
 	r.VCPU, r.RAMMB, r.DiskGB = spec.VCPU, spec.RAMMB, spec.DiskGB
 	r.NetworkDownMbps, r.NetworkUpMbps, r.MonthlyTrafficGB = spec.NetworkDownMbps, spec.NetworkUpMbps, spec.MonthlyTrafficGB
+	r.DiskIO = spec.DiskIO
 	r.PortMappingLimit = 0
 	if spec.AssignNAT {
 		r.PortMappingLimit = max(spec.PortMappingCount, 1)

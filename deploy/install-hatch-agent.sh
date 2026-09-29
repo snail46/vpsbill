@@ -382,7 +382,8 @@ if [ "$USE_LXC" = 1 ]; then
     command -v "$cli" >/dev/null 2>&1 || continue
     DRIVER=$("$cli" storage show default 2>/dev/null | awk '$1 == "driver:" { print $2 }')
     case "$DRIVER" in
-      ""|zfs|btrfs|lvm|lvmcluster|ceph) ;;
+      zfs|ceph) echo "note: $cli storage pool 'default' uses the $DRIVER driver, which ignores disk read/write limits; use btrfs or lvm if plans set them" >&2 ;;
+      ""|btrfs|lvm|lvmcluster) ;;
       *) echo "warning: $cli storage pool 'default' uses the $DRIVER driver, which cannot limit instance disks; create a btrfs, zfs or lvm pool" >&2 ;;
     esac
     break

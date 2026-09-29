@@ -25,6 +25,7 @@ import { walletMoney } from './Wallet'
 import { formatDate, formatTime } from './shared/time'
 import { cycleName, cycleOrder, CyclePriceFields, priceLeft, readCyclePrices } from './shared/cycles'
 import { readStock, stockLeft, StockField, StockTag } from './shared/stock'
+import { DiskIOFields, diskIOText, readDiskIO } from './shared/diskio'
 import { OvercommitDialog, SupplyDetails, overcommitText } from './Supply'
 
 type Tab = 'market' | 'mine' | 'coupons' | 'tickets' | 'chat'
@@ -96,6 +97,7 @@ function PlanSpecs({ plan }: { plan: PlanRecord }) {
       <span>{plan.disk_gb} GB 磁盘</span>
       <span>{plan.traffic_gb ? `${plan.traffic_gb} GB 流量` : '不限流量'}</span>
       <span>{plan.network_down_mbps ? `${plan.network_down_mbps}/${plan.network_up_mbps} Mbps` : '不限带宽'}</span>
+      {diskIOText(plan) && <span>{diskIOText(plan)}</span>}
       <span>NAT × {plan.port_mapping_count}</span>
     </div>
   )
@@ -826,6 +828,7 @@ function HostedPlanForm({ node, plan, onClose, onSaved }: { node: HostedNodeReco
   const [allowed, setAllowed] = useState<string[]>(plan?.allowed_template_ids || [])
   const [fallback, setFallback] = useState(plan?.default_template_id || '')
   const [limited, setLimited] = useState(!!plan?.purchase_limit)
+  const [capacity, setCapacity] = useState<StockCapacityRecord | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
 
@@ -860,6 +863,7 @@ function HostedPlanForm({ node, plan, onClose, onSaved }: { node: HostedNodeReco
       prices,
       price_limits: limits,
       stock_limit: readStock(form),
+      ...readDiskIO(form),
       enabled: form.get('enabled') === 'on',
       description: String(form.get('description') || ''),
       purchase_limit: limited ? Number(form.get('purchase_limit') || 0) : 0,
@@ -928,7 +932,9 @@ function HostedPlanForm({ node, plan, onClose, onSaved }: { node: HostedNodeReco
               }),
             })
           }}
+          onCapacity={setCapacity}
         />
+        <DiskIOFields plan={plan} capacity={capacity} />
         <CyclePriceFields
           prices={plan?.prices ?? []}
           hint="留空表示不支持该计费周期，至少填写一个。母机到期日早于周期结束时，买家按剩余时间折算付款（例如季付 ¥30、母机只剩 2 个月，买家付 ¥20），实例到期日与母机到期日相同。"

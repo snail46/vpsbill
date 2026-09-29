@@ -147,6 +147,8 @@ type HostInfo struct {
 	MachineID string
 	// Health is the host's load, when the backend reports it.
 	Health *HostHealth
+	// DiskPerf is the host's measured disk speed, when the backend reports it.
+	DiskPerf *DiskPerf
 }
 
 // HostHealth is a load sample of the whole host.
@@ -198,6 +200,38 @@ type CreateSpec struct {
 	NetworkUpMbps    int
 	MonthlyTrafficGB int
 	SnapshotLimit    int
+	DiskIO           DiskIO
+}
+
+// DiskIO limits an instance's disk; 0 leaves that direction unlimited.
+// Only Hatch nodes enforce it.
+type DiskIO struct {
+	ReadMBps  int `json:"disk_read_mbps"`
+	WriteMBps int `json:"disk_write_mbps"`
+	ReadIOPS  int `json:"disk_read_iops"`
+	WriteIOPS int `json:"disk_write_iops"`
+}
+
+// Limited reports whether any direction is capped.
+func (d DiskIO) Limited() bool {
+	return d.ReadMBps > 0 || d.WriteMBps > 0 || d.ReadIOPS > 0 || d.WriteIOPS > 0
+}
+
+// Valid rejects negative values and values beyond any real disk.
+func (d DiskIO) Valid() bool {
+	return d.ReadMBps >= 0 && d.WriteMBps >= 0 && d.ReadIOPS >= 0 && d.WriteIOPS >= 0 &&
+		d.ReadMBps <= 100000 && d.WriteMBps <= 100000 && d.ReadIOPS <= 10000000 && d.WriteIOPS <= 10000000
+}
+
+// DiskPerf is a node's measured disk speed (sequential MB/s, random 4 KiB
+// IOPS) and the runtimes on it that cannot enforce DiskIO limits.
+type DiskPerf struct {
+	ReadMBps      int               `json:"read_mbps"`
+	WriteMBps     int               `json:"write_mbps"`
+	ReadIOPS      int               `json:"read_iops"`
+	WriteIOPS     int               `json:"write_iops"`
+	MeasuredAt    time.Time         `json:"measured_at"`
+	IOLimitErrors map[string]string `json:"io_limit_errors,omitempty"`
 }
 
 type ReinstallSpec struct {

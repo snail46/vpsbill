@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"vpsbill/internal/provider"
 )
 
 // TestPlanStockIntegration covers stock ceilings, sold-out plans, per-price
@@ -74,6 +76,37 @@ func TestPlanStockIntegration(t *testing.T) {
 	// Its own ceiling ignores its own stock: 4 cores fit 4 small plans.
 	if own, err := catalog.PlanStockCapacity(ctx, small, small.ID); err != nil || own.Max != 4 {
 		t.Fatalf("own capacity = %+v err=%v", own, err)
+	}
+
+	// Disk limits: a plan keeps them, and once a node reports its disk the
+	// ceiling suggests them. The machine holds 4 small instances (by cores),
+	// so 2 busy at once share it; n1's ZFS pool is flagged.
+	if _, err = db.Exec(ctx, `UPDATE nodes SET disk_perf=$2::jsonb WHERE name=$1`, "n1",
+		`{"read_mbps":400,"write_mbps":200,"read_iops":20000,"write_iops":9000,"io_limit_errors":{"lxc":"zfs pool"}}`); err != nil {
+		t.Fatal(err)
+	}
+	limited := Plan{Code: "DISKIO", Name: "diskio", ProviderType: "hatch", Virtualization: "podman", VCPU: 1, RAMMB: 64, DiskGB: 1, AssignNAT: true, PortMappingCount: 1,
+		DefaultTemplateID: "debian12", AllowedTemplateIDs: []string{"debian12"}, DiskIO: provider.DiskIO{ReadMBps: 80, WriteMBps: 40, WriteIOPS: 900}}
+	if limited, err = catalog.CreatePlan(ctx, limited); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := catalog.ListPlans(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, plan := range saved {
+		if plan.ID == limited.ID && plan.DiskIO != limited.DiskIO {
+			t.Fatalf("disk limits saved as %+v, want %+v", plan.DiskIO, limited.DiskIO)
+		}
+	}
+	if _, err = db.Exec(ctx, `DELETE FROM plans WHERE id=$1`, limited.ID); err != nil {
+		t.Fatal(err)
+	}
+	suggested, err := catalog.PlanStockCapacity(ctx, small, small.ID)
+	want := provider.DiskIO{ReadMBps: 200, WriteMBps: 100, ReadIOPS: 10000, WriteIOPS: 4500}
+	if err != nil || suggested.DiskIO == nil || suggested.DiskIO.DiskIO != want || suggested.DiskIO.Instances != 4 ||
+		len(suggested.DiskIO.Unsupported) != 1 || !strings.HasPrefix(suggested.DiskIO.Unsupported[0], "n1") {
+		t.Fatalf("disk suggestion = %+v err=%v", suggested.DiskIO, err)
 	}
 
 	order := func(cycle string, quantity int) (Order, error) {

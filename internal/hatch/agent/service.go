@@ -10,10 +10,12 @@ import (
 	"math/big"
 	"net/netip"
 	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"vpsbill/internal/clock"
@@ -43,6 +45,8 @@ type Service struct {
 
 	samplesMu sync.Mutex
 	samples   map[string]sample
+
+	diskPerf atomic.Pointer[protocol.DiskPerf]
 }
 
 type sample struct {
@@ -205,7 +209,7 @@ func (s *Service) hostInfo(ctx context.Context) (protocol.HostInfo, error) {
 	// Instances live in each runtime's own storage, so together those make
 	// up the disk capacity.
 	var storageTotal int64
-	var quotaErrors map[string]string
+	var quotaErrors, ioErrors map[string]string
 	for _, kind := range sortedKeys(s.runtimes) {
 		reporter, ok := s.runtimes[kind].(StorageReporter)
 		if !ok {
@@ -220,6 +224,16 @@ func (s *Service) hostInfo(ctx context.Context) (protocol.HostInfo, error) {
 				quotaErrors = map[string]string{}
 			}
 			quotaErrors[kind] = err.Error()
+		}
+	}
+	for _, kind := range sortedKeys(s.runtimes) {
+		if checker, ok := s.runtimes[kind].(IOLimitChecker); ok {
+			if err := checker.CheckIOLimit(ctx); err != nil {
+				if ioErrors == nil {
+					ioErrors = map[string]string{}
+				}
+				ioErrors[kind] = err.Error()
+			}
 		}
 	}
 	health.Disks = append(health.Disks, hostDisks()...)
@@ -240,8 +254,34 @@ func (s *Service) hostInfo(ctx context.Context) (protocol.HostInfo, error) {
 	return protocol.HostInfo{
 		Hostname: hostname, AgentVersion: s.version, Runtimes: s.config.Runtimes(), PublicIPv4: s.config.PublicIPv4,
 		Capacity: lowerCapacity(detected, s.config.Capacity), Detected: detected, MachineID: machineID(),
-		Health: health, QuotaErrors: quotaErrors, Details: details,
+		Health: health, QuotaErrors: quotaErrors, DiskPerf: s.diskPerf.Load(), IOLimitErrors: ioErrors, Details: details,
 	}, nil
+}
+
+// diskPerfMaxAge is how long a disk benchmark is trusted before the agent
+// measures again at its next start.
+const diskPerfMaxAge = 30 * 24 * time.Hour
+
+// MeasureDisk loads the saved disk benchmark or, when there is none or it
+// is old, runs one in the state directory (the disk the instances use) and
+// saves it. Plan settings suggest disk limits from it.
+func (s *Service) MeasureDisk() {
+	path := filepath.Join(s.config.StateDir, "disk-perf.json")
+	var saved protocol.DiskPerf
+	if data, err := os.ReadFile(path); err == nil && json.Unmarshal(data, &saved) == nil && s.now().Sub(saved.MeasuredAt) < diskPerfMaxAge {
+		s.diskPerf.Store(&saved)
+		return
+	}
+	perf, err := measureDisk(s.config.StateDir)
+	if err != nil {
+		s.logger.Warn("disk benchmark failed", "error", err)
+		return
+	}
+	s.diskPerf.Store(perf)
+	s.logger.Info("disk benchmark", "read_mbps", perf.ReadMBps, "write_mbps", perf.WriteMBps, "read_iops", perf.ReadIOPS, "write_iops", perf.WriteIOPS)
+	if data, err := json.Marshal(perf); err == nil {
+		_ = os.WriteFile(path, data, 0o600)
+	}
 }
 
 func (s *Service) images(ctx context.Context) ([]protocol.Image, error) {
@@ -455,6 +495,7 @@ func runtimeSpec(record InstanceRecord) RuntimeSpec {
 	return RuntimeSpec{
 		Name: record.Name, Image: record.Template, VCPU: record.VCPU, RAMMB: record.RAMMB, DiskGB: record.DiskGB,
 		IPv4: address, IPv6: ipv6, NetworkDownMbps: record.NetworkDownMbps, NetworkUpMbps: record.NetworkUpMbps,
+		DiskIO: record.DiskIO, Devices: blockDevices(),
 	}
 }
 
@@ -533,6 +574,7 @@ func (s *Service) get(ctx context.Context, name string) (protocol.Instance, erro
 		PrivateIPv4: record.PrivateIPv4, PublicIPv4: s.config.PublicIPv4, IPv6: record.IPv6, VCPU: record.VCPU, RAMMB: record.RAMMB,
 		DiskGB: record.DiskGB, PortMappings: record.Mappings, PortMappingLimit: record.PortMappingLimit,
 		MonthlyTrafficGB: record.MonthlyTrafficGB, NetworkDownMbps: record.NetworkDownMbps, NetworkUpMbps: record.NetworkUpMbps,
+		DiskIO: record.DiskIO,
 	}
 	for _, mapping := range record.Mappings {
 		if mapping.ContainerPort == 22 {
