@@ -43,13 +43,14 @@ func AgentEnroller(catalog *postgres.CatalogStore, box *security.SecretBox, logg
 }
 
 // agentIP tells an agent the address it connects from, which is its public
-// IPv4 when the host itself only has a private one (1:1 NAT). An agent on
-// the billing server's own machine connects over loopback; it shares the
+// IPv4 when the host itself only has a private one (1:1 NAT). An agent that
+// reaches the site over a private address (the billing server's own
+// machine, seen through the Docker bridge, or the same LAN) shares the
 // site's public address, taken from the public URL.
 func agentIP(runtime *settings.Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		address := remoteIP(r)
-		if ip := net.ParseIP(address); ip != nil && ip.IsLoopback() {
+		if ip := net.ParseIP(address); ip == nil || ip.IsLoopback() || ip.IsPrivate() || cgnat.Contains(ip) {
 			address = ""
 			if site, err := url.Parse(runtime.Current().PublicURL); err == nil {
 				if ip := net.ParseIP(site.Hostname()); ip != nil {
@@ -64,6 +65,9 @@ func agentIP(runtime *settings.Manager) http.HandlerFunc {
 		_, _ = w.Write([]byte(address))
 	}
 }
+
+// cgnat is the carrier-grade NAT range, private in practice.
+var cgnat = &net.IPNet{IP: net.IPv4(100, 64, 0, 0), Mask: net.CIDRMask(10, 32)}
 
 // installCommand is the one command every host of an owner runs.
 func installCommand(publicURL, key string) string {
