@@ -102,7 +102,7 @@ func setEnroll(args []string) error {
 	path := flags.String("config", agent.DefaultConfigPath, "config file")
 	_ = flags.Parse(args)
 	if flags.NArg() != 1 {
-		return errors.New("usage: hatch-agent enroll [--config PATH] KEY")
+		return errors.New("usage: hatch-agent enroll [--config PATH] [--] KEY")
 	}
 	config, err := agent.LoadConfig(*path)
 	if err != nil {

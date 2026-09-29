@@ -437,7 +437,7 @@ if [ ! -f /etc/hatch/agent.json ]; then
 else
   echo "Keeping existing /etc/hatch/agent.json; token:"
   /usr/local/bin/hatch-agent token --config /etc/hatch/agent.json
-  [ -z "$ENROLL" ] || /usr/local/bin/hatch-agent enroll --config /etc/hatch/agent.json "$ENROLL"
+  [ -z "$ENROLL" ] || /usr/local/bin/hatch-agent enroll --config /etc/hatch/agent.json -- "$ENROLL"
 fi
 
 # The unit file sits next to this script in the repository; when the script

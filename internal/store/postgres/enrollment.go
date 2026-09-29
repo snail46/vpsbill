@@ -41,7 +41,8 @@ func (s *CatalogStore) EnrollKey(ctx context.Context, accountID string) (string,
 	if err != nil {
 		return "", err
 	}
-	token = token[:32]
+	// A leading - would read as a flag on the agent command line.
+	token = "k" + strings.TrimLeft(token, "-_")[:31]
 	var key string
 	if accountID == "" {
 		err = s.db.QueryRow(ctx, `UPDATE system_settings SET agent_enroll_key=coalesce(agent_enroll_key,$1) WHERE singleton RETURNING agent_enroll_key`, token).Scan(&key)
