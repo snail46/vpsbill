@@ -431,10 +431,12 @@ fi
 [ "$BINARY" -ef /usr/local/bin/hatch-agent ] || install -m 0755 "$BINARY" /usr/local/bin/hatch-agent
 install -d -m 0700 /etc/hatch /var/lib/hatch
 
+UPGRADE=0
 if [ ! -f /etc/hatch/agent.json ]; then
   /usr/local/bin/hatch-agent init --config /etc/hatch/agent.json \
     --server "$SERVER" --runtime "$RUNTIME" --public-ip "$PUBLIC_IP" --enroll "$ENROLL" $EXTRA
 else
+  UPGRADE=1
   echo "Keeping existing /etc/hatch/agent.json; token:"
   /usr/local/bin/hatch-agent token --config /etc/hatch/agent.json
   [ -z "$ENROLL" ] || /usr/local/bin/hatch-agent enroll --config /etc/hatch/agent.json -- "$ENROLL"
@@ -456,7 +458,11 @@ systemctl --no-pager --lines=5 status hatch-agent || true
 if [ "$USE_PODMAN" = 1 ] && [ "$PODMAN_IMAGES" != "skip" ]; then
   echo "Podman templates: localhost/hatch-debian12:latest and localhost/hatch-alpine:latest"
 fi
-if [ -n "$ENROLL" ]; then
+if [ "$UPGRADE" = 1 ]; then
+  echo
+  echo "升级完成：Agent 已更新并重启，配置和实例保持不变。已接入的母机无需任何操作；还没接入的母机会出现在计费站的待接入列表。"
+  echo "Upgraded: the agent was updated and restarted with its existing configuration."
+elif [ -n "$ENROLL" ]; then
   echo
   echo "安装完成：这台母机已出现在计费站的待接入列表（托管中心「我的母机」或后台「节点对接」），在网页上点「接入」即可，无需复制令牌。"
   echo "Done: this host is now listed on the billing site as waiting to be added."
