@@ -119,7 +119,7 @@ fib daddr type local tcp dport 20022 dnat to 10.20.30.254:22
 
 套餐可以给每台实例设磁盘读、写 MB/s 和读、写 IOPS 上限（留空不限）。Agent 把上限写到宿主机上每块磁盘（实例存储可能在 loop 文件、LVM 或第二块盘上）：Podman 通过创建参数里的 `blockIO`，LXC 通过 `raw.lxc` 里的 `lxc.cgroup2.io.max`（LXD 自带的 `limits.read`/`limits.write` 每个方向只能在 MB/s 和 IOPS 里选一个）。上限对新开通和重装的实例生效，已有实例不变。
 
-**ZFS 存储池上不生效。** ZFS 由自己的内核线程写盘，cgroup 看不到是哪个容器写的：测试机上 Incus ZFS 池的实例限速 10 MB/s 后写入仍是 41.6 MB/s（不限时 43 MB/s）。btrfs 池上同样的设置实测写 143 → 9.8 MB/s、读限 20 MB/s 实测 20.8 MB/s。Agent 发现存储池是 zfs 或 ceph 时会上报，设置套餐时页面会提示；需要磁盘限速的母机请用 btrfs 或 lvm 存储池。Podman（overlay + XFS）不受影响。
+**ZFS 存储池上不生效。** ZFS 由自己的内核线程写盘，cgroup 看不到是哪个容器写的：测试机上 Incus ZFS 池的实例限速 10 MB/s 后写入仍是 41.6 MB/s（不限时 43 MB/s）。测试机把 Incus 和 LXD 的存储池都换成 btrfs 后，由平台开通、套餐设读 20 MB/s、写 10 MB/s、读 500 IOPS 的实例实测：Incus 写 10.2 MB/s、读 20.2 MB/s、4 KiB 直读约 504 IOPS；LXD 写 8.1 MB/s、读 20.3 MB/s、约 500 IOPS（同池不限速的实例：写 60 MB/s、读 307 MB/s、约 2700 IOPS）。Agent 发现存储池是 zfs 或 ceph 时会上报，设置套餐时页面会提示；需要磁盘限速的母机请用 btrfs 或 lvm 存储池。Podman（overlay + XFS）不受影响。
 
 IOPS 上限按磁盘实际收到的请求计，文件系统的元数据和日志也算在内：btrfs 上带 `dsync` 的 4 KiB 写入，每次约产生 13 个磁盘请求，限 100 IOPS 时实例里只能做约 8 次/秒。小内存实例的顺序写入同样受 IOPS 上限约束：内存小，写回时每次只刷几 KB。测试机上 64 MB 的 Podman 实例限 10 MB/s、300 写 IOPS 时，写 40 MB 只有 2.3 MB/s；去掉 IOPS 上限后写 100 MB 为 8.0 MB/s（接近 10 MB/s 的上限，也没有触发 OOM）。IOPS 上限宜宽松，主要用来防止单台实例把磁盘打满。
 
