@@ -28,7 +28,19 @@ func NewReconciler(store *postgres.ProvisioningStore, catalog *postgres.CatalogS
 	return &Reconciler{store: store, catalog: catalog, box: box, logger: logger, interval: interval}
 }
 
+// agentGrace is how long a freshly started API waits before its first
+// check: Hatch agents reconnect within seconds, and checking before they
+// have would mark their nodes offline until the next round.
+const agentGrace = 30 * time.Second
+
 func (r *Reconciler) Run(ctx context.Context) {
+	grace := time.NewTimer(agentGrace)
+	select {
+	case <-ctx.Done():
+		grace.Stop()
+		return
+	case <-grace.C:
+	}
 	r.reconcile(ctx)
 	for {
 		interval := r.interval

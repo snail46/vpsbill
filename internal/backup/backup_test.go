@@ -249,3 +249,15 @@ func TestPgToolPrefersMatchingMajor(t *testing.T) {
 		}
 	}
 }
+
+func TestFreeNameSkipsTakenNames(t *testing.T) {
+	s := &Service{dir: t.TempDir()}
+	at := time.Date(2026, 9, 29, 23, 18, 56, 0, clock.Zone)
+	first := s.freeName(at, "upload")
+	if err := os.WriteFile(filepath.Join(s.dir, first), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if second := s.freeName(at, "upload"); second == first || second != "vpsbill-20260929-231857-upload.tar" {
+		t.Fatalf("second name %q after %q", second, first)
+	}
+}

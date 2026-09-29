@@ -382,7 +382,7 @@ func (s *Service) SaveUpload(body io.Reader) (LocalFile, error) {
 	if err != nil {
 		return LocalFile{}, invalid("%s", err.Error())
 	}
-	name := fileName(s.now().In(clock.Zone), "upload")
+	name := s.freeName(s.now().In(clock.Zone), "upload")
 	if err := os.Rename(temp.Name(), filepath.Join(s.dir, name)); err != nil {
 		return LocalFile{}, err
 	}
@@ -500,7 +500,7 @@ func (s *Service) backup(ctx context.Context, trigger, actorID string, upload bo
 
 func (s *Service) createLocal(ctx context.Context, trigger string) (string, int64, error) {
 	now := s.now().In(clock.Zone)
-	name := fileName(now, trigger)
+	name := s.freeName(now, trigger)
 	dumpPath := filepath.Join(s.dir, ".tmp-"+name+".dump")
 	tarPath := filepath.Join(s.dir, ".tmp-"+name)
 	defer os.Remove(dumpPath)
@@ -532,6 +532,18 @@ func (s *Service) createLocal(ctx context.Context, trigger string) (string, int6
 		return "", 0, err
 	}
 	return name, info.Size(), nil
+}
+
+// freeName names a new backup, a second later while the name is taken
+// (two uploads, or a backup right after another, in the same second).
+func (s *Service) freeName(at time.Time, trigger string) string {
+	for {
+		name := fileName(at, trigger)
+		if _, err := os.Stat(filepath.Join(s.dir, name)); errors.Is(err, os.ErrNotExist) {
+			return name
+		}
+		at = at.Add(time.Second)
+	}
 }
 
 // keep lists what retention keeps: the newest rotating backups.

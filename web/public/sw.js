@@ -30,12 +30,14 @@ self.addEventListener('fetch', event => {
   if (request.method !== 'GET') return
   const url = new URL(request.url)
   if (url.origin !== self.location.origin) return
+  // Whatever goes wrong here (a full or broken cache storage), the page
+  // still loads from the network.
   if (url.pathname.startsWith('/assets/')) {
-    event.respondWith(asset(request))
+    event.respondWith(asset(request).catch(() => fetch(request)))
     return
   }
   if (request.mode === 'navigate' && !url.pathname.startsWith('/api/') && !url.pathname.startsWith('/health/')) {
-    event.respondWith(page(event, url))
+    event.respondWith(page(event, url).catch(() => fetch(request)))
   }
 })
 
@@ -45,7 +47,7 @@ async function asset(request) {
   const stored = await cache.match(request)
   if (stored) return stored
   const response = await fetch(request)
-  if (response.ok) await cache.put(request, response.clone())
+  if (response.ok) await cache.put(request, response.clone()).catch(() => undefined)
   return response
 }
 
@@ -55,24 +57,31 @@ function pageKey(url) {
   return url.pathname === '/admin' || url.pathname.startsWith('/admin/') ? '/__page/admin' : '/__page/portal'
 }
 
-async function page(event, url) {
-  const cache = await caches.open(PAGES)
+function page(event, url) {
   const key = pageKey(url)
-  const network = fetch(event.request).then(async response => {
-    // Only a page served for this address is kept; redirects (the admin
-    // side answers / with one) and errors are passed through.
-    const type = response.headers.get('content-type') || ''
-    if (response.ok && response.type === 'basic' && !response.redirected && type.includes('text/html')) {
-      const previous = await cache.match(key)
-      await cache.put(key, response.clone())
-      await pruneAssets(previous, response.clone())
-    }
+  let saved = Promise.resolve()
+  const network = fetch(event.request).then(response => {
+    saved = remember(key, response.clone()).catch(() => undefined)
     return response
   })
-  const stored = await cache.match(key)
-  if (!stored) return network
-  event.waitUntil(network.catch(() => undefined))
-  return markStale(stored)
+  // Keeping the fresh copy may outlast the response served now.
+  event.waitUntil(network.then(() => saved).catch(() => undefined))
+  return caches
+    .open(PAGES)
+    .then(cache => cache.match(key))
+    .catch(() => undefined)
+    .then(stored => (stored ? markStale(stored) : network))
+}
+
+// Only a page served for its own address is kept; redirects (the admin side
+// answers / with one) and errors are not.
+async function remember(key, response) {
+  const type = response.headers.get('content-type') || ''
+  if (!response.ok || response.type !== 'basic' || response.redirected || !type.includes('text/html')) return
+  const cache = await caches.open(PAGES)
+  const previous = await cache.match(key)
+  await cache.put(key, response.clone())
+  await pruneAssets(previous, response)
 }
 
 // The stored page's boot data may be out of date (a sign-out elsewhere, an
