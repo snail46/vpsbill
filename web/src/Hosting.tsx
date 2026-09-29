@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from 'react'
+import { FormEvent, useEffect, useRef, useState } from 'react'
 import { MapPin, MessagesSquare, Plus, RefreshCw, Server, Store, Ticket, TicketPercent, X } from 'lucide-react'
 import {
   api,
@@ -20,7 +20,7 @@ import {
 import ChatRoom from './ChatRoom'
 import { CouponField, CouponManager } from './Coupons'
 import { ReportDialog } from './Reports'
-import { StatusBadge, TicketConversation, ticketStatusLabel } from './shared/ui'
+import { StatusBadge, TicketConversation, ticketStatusLabel, useReveal } from './shared/ui'
 import { ticketRequestBody, useAttachmentLimit } from './TicketAttachments'
 import { walletMoney } from './Wallet'
 import { formatDate, formatTime } from './shared/time'
@@ -577,6 +577,8 @@ function PublishForm({ data, agent, onClose, onPublished }: { data: HostingRecor
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const all = agreed.every(Boolean)
+  const panel = useRef<HTMLFormElement>(null)
+  useReveal(panel)
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -603,7 +605,7 @@ function PublishForm({ data, agent, onClose, onPublished }: { data: HostingRecor
   }
 
   return (
-    <form className="panel" onSubmit={submit}>
+    <form className="panel" onSubmit={submit} ref={panel}>
       <div className="panel-heading">
         <h3>{agent ? `发布母机 ${agent.hostname}` : "手动发布托管母机"}</h3>
         <button type="button" className="icon-button" aria-label="关闭" onClick={onClose}>

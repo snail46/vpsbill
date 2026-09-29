@@ -3681,3 +3681,23 @@ td .text-button { white-space: nowrap; }
   td .row-actions { flex-wrap: wrap; }
 }
 .badge-pair { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+
+/* A form that just opened flashes once so the eye finds it. */
+.reveal-flash {
+  scroll-margin-top: 16px;
+  animation: reveal-flash 1.6s ease-out;
+}
+
+@media (max-width: 640px) {
+  /* Clear the sticky menu bar. */
+  .reveal-flash { scroll-margin-top: 80px; }
+}
+
+@keyframes reveal-flash {
+  0%, 30% { box-shadow: 0 0 0 3px var(--border-highlight), var(--shadow-md); }
+  100% { box-shadow: var(--shadow-md); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal-flash { animation: none; }
+}

@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from 'react'
+import { FormEvent, RefObject, useEffect, useState } from 'react'
 import { Plus, Send, ShieldCheck } from 'lucide-react'
 import { api, TicketDetailRecord } from '../api'
 import { AttachmentGallery, AttachmentPicker } from '../TicketAttachments'
@@ -13,6 +13,24 @@ export type Meta = {
   surface?: 'portal' | 'admin' | ''
   admin_url?: string
   public_url?: string
+}
+
+// useReveal brings a form that just opened into view, flashes it and puts
+// the cursor in its first empty field, so a button far down the page that
+// opens it visibly does something.
+// It waits until ready, for forms whose fields arrive after a load.
+export function useReveal(ref: RefObject<HTMLElement | null>, ready = true) {
+  useEffect(() => {
+    const element = ref.current
+    if (!element || !ready) return
+    const smooth = !window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    element.classList.add('reveal-flash')
+    element.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto', block: 'start' })
+    const field = [...element.querySelectorAll<HTMLInputElement>('input:not([type=hidden]):not([type=checkbox]):not([disabled])')].find(input => !input.value)
+    field?.focus({ preventScroll: true })
+    const timer = window.setTimeout(() => element.classList.remove('reveal-flash'), 1600)
+    return () => window.clearTimeout(timer)
+  }, [ref, ready])
 }
 
 export function SessionLoading({ portal }: { portal: 'admin' | 'customer' }) {

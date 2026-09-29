@@ -1,8 +1,8 @@
-import { FormEvent, useEffect, useState } from 'react'
+import { FormEvent, useEffect, useRef, useState } from 'react'
 import { ChevronRight, RefreshCw, ShieldCheck, X } from 'lucide-react'
 import { api, HostProbeRecord, NodeRecord, Overcommit, PendingAgentRecord, ProviderTypeRecord, RegionAdminRecord } from '../api'
 import { OvercommitDialog, overcommitText } from '../Supply'
-import { PageActions, StatusBadge, formatBytes, NodeExpiry, CapacityBar } from '../shared/ui'
+import { PageActions, StatusBadge, formatBytes, NodeExpiry, CapacityBar, useReveal } from '../shared/ui'
 import { formatTime } from '../shared/time'
 import { ConnectSteps, PendingAgents } from '../shared/agents'
 
@@ -15,6 +15,7 @@ export function NodesView() {
   const [nodes, setNodes] = useState<NodeRecord[]>([])
   const [form, setForm] = useState<FormTarget | null>(null)
   const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
   const [testing, setTesting] = useState('')
   const [overselling, setOverselling] = useState<NodeRecord | null>(null)
   const [limits, setLimits] = useState<Overcommit>()
@@ -85,6 +86,7 @@ export function NodesView() {
       />
 
       {error && <div className="form-error" role="alert">{error}</div>}
+      {notice && <div className="form-success" role="status">{notice}</div>}
 
       {form && (
         <NodeForm
@@ -92,7 +94,8 @@ export function NodesView() {
           target={form}
           regions={regions}
           onClose={() => setForm(null)}
-          onCreated={() => {
+          onCreated={name => {
+            setNotice('node' in form ? `节点 ${name} 已保存。` : `节点 ${name} 已接入，现在可以在「套餐」里为它创建套餐。`)
             setForm(null)
             void load()
             void loadEnrollments()
@@ -101,7 +104,10 @@ export function NodesView() {
         />
       )}
 
-      <ConnectGuide enrollments={enrollments} onAdd={agent => setForm({ agent })} onDismiss={agent => void dismiss(agent)} onManual={type => setForm({ type })} />
+      <ConnectGuide enrollments={enrollments} onAdd={agent => {
+          setNotice('')
+          setForm({ agent })
+        }} onDismiss={agent => void dismiss(agent)} onManual={type => setForm({ type })} />
 
       <div className="section-heading">
         <h3>已接入节点</h3>
@@ -377,7 +383,7 @@ export function NodeForm({
   target: FormTarget
   regions: RegionAdminRecord[]
   onClose: () => void
-  onCreated: () => void
+  onCreated: (name: string) => void
 }) {
   const node = 'node' in target ? target.node : undefined
   const agent = 'agent' in target ? target.agent : undefined
@@ -402,6 +408,8 @@ export function NodeForm({
 
   const descriptor = types.find(item => item.type === selected)
   const options = descriptor?.options ?? []
+  const panel = useRef<HTMLDivElement>(null)
+  useReveal(panel, types.length > 0)
 
   // readCertificate pins the node's certificate: the server reads it, the
   // administrator sees what was pinned.
@@ -465,7 +473,7 @@ export function NodeForm({
           traffic_quota_gb: Number(data.get('traffic_quota_gb')) || 0,
         }),
       })
-      onCreated()
+      onCreated(String(data.get('name') ?? ''))
     } catch (err) {
       setError(err instanceof Error ? err.message : '节点接入验证失败')
     } finally {
@@ -476,7 +484,7 @@ export function NodeForm({
   const heading = editing ? `编辑节点 ${node?.name}` : agent ? `接入母机 ${agent.hostname || ''}` : `新增 ${descriptor?.name ?? ''} 节点`
   const virtualizationDefaults = agent ? agentVirtualization(agent) : node?.virtualization_types
   return (
-    <div className="inline-form">
+    <div className="inline-form" ref={panel}>
       <div className="inline-form-heading">
         <div>
           <h3>{heading}</h3>
