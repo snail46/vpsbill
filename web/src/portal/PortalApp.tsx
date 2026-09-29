@@ -9,7 +9,7 @@ import TradeMarket from '../Trade'
 import { ThemeToggle } from '../ThemeToggle'
 import { EmailVerifyBanner } from '../EmailVerify'
 import { Meta, SessionLoading, Field, BrandMark } from '../shared/ui'
-import { Boot, inlineBoot, loadBoot } from '../shared/boot'
+import { Boot, freshBoot, inlineBoot, loadBoot } from '../shared/boot'
 import { CustomerAnnouncements, CustomerOverview } from './Overview'
 import { navigatePortal } from '../shared/nav'
 import { CustomerShop } from './Shop'
@@ -74,6 +74,24 @@ export function CustomerPortalApp() {
       })
       .catch(() => setScreen('login'))
   }, [screen])
+
+  useEffect(() => {
+    const inline = inlineBoot()
+    if (!inline) return
+    // A stored copy of the page (service worker): correct it if the
+    // session changed since.
+    void freshBoot()
+      .then(boot => {
+        if (!boot) return
+        setMeta(boot.meta)
+        if ((boot.customer?.id ?? '') !== (inline.customer?.id ?? '') || boot.install_required !== inline.install_required) {
+          clearCached()
+          setCustomer(boot.customer)
+          setScreen(portalScreen(boot))
+        }
+      })
+      .catch(() => undefined)
+  }, [])
 
   if (screen === 'loading' || screen === 'install') return <SessionLoading portal="customer" />
   if (screen === 'uninstalled') {

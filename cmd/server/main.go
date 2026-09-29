@@ -13,6 +13,7 @@ import (
 
 	"vpsbill/internal/app"
 	"vpsbill/internal/automation"
+	"vpsbill/internal/backup"
 	"vpsbill/internal/billing"
 	"vpsbill/internal/chat"
 	"vpsbill/internal/config"
@@ -27,6 +28,9 @@ import (
 	"vpsbill/internal/settings"
 	"vpsbill/internal/store/postgres"
 )
+
+// version is the commit the image was built from (see Dockerfile).
+var version = "dev"
 
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
@@ -60,6 +64,10 @@ func main() {
 		logger.Error("load runtime settings", "error", err)
 		os.Exit(1)
 	}
+	// Background work runs on its own context so a restore can stop it
+	// before replacing the data it works on.
+	workCtx, stopWork := context.WithCancel(ctx)
+	defer stopWork()
 	provisioningStore := postgres.NewProvisioningStore(db)
 	catalogStore := postgres.NewCatalogStore(db)
 	hostname, _ := os.Hostname()
@@ -83,27 +91,39 @@ func main() {
 	}
 	worker := automation.NewDynamicWorker(provisioningStore, secretBox, logger, workerID, func() time.Duration { return runtime.Current().WorkerPollInterval })
 	reconciler := automation.NewDynamicReconciler(provisioningStore, catalogStore, secretBox, logger, func() time.Duration { return runtime.Current().ReconcileInterval })
-	go worker.Run(ctx)
-	go reconciler.Run(ctx)
+	go worker.Run(workCtx)
+	go reconciler.Run(workCtx)
 	lifecycleWorker := billing.NewDynamicWorker(postgres.NewLifecycleStore(db), logger, func() (time.Duration, time.Duration, time.Duration, time.Duration) {
 		current := runtime.Current()
 		return current.LifecycleInterval, current.RenewalLeadTime, current.OverdueGracePeriod, current.TerminationRetention
 	})
-	go lifecycleWorker.Run(ctx)
+	go lifecycleWorker.Run(workCtx)
 	notificationWorker := notifications.NewDynamicWorker(postgres.NewOutboxStore(db), logger, workerID+":notifications", func() (string, string, time.Duration) {
 		current := runtime.Current()
 		return current.NotificationWebhookURL, current.NotificationWebhookSecret, current.WorkerPollInterval
 	})
-	go notificationWorker.Run(ctx)
+	go notificationWorker.Run(workCtx)
 	mailNotifier := notify.New(postgres.NewMailStore(db), runtime, secretBox, logger)
-	go mailNotifier.RunSender(ctx)
-	go mailNotifier.RunScanner(ctx)
+	go mailNotifier.RunSender(workCtx)
+	go mailNotifier.RunScanner(workCtx)
 	marketStore := postgres.NewMarketplaceStore(db)
 	// Escrow release and clearance are idempotent, so every replica may run it.
 	marketService := marketplace.New(marketStore, catalogStore, secretBox, runtime, mailNotifier, logger)
-	go marketService.Run(ctx)
+	go marketService.Run(workCtx)
 	chatHub := chat.NewHub(db, marketStore, logger)
-	go chatHub.Run(ctx)
+	go chatHub.Run(workCtx)
+
+	backups := backup.New(db, cfg.DatabaseURL, cfg.BackupDir, secretBox, cfg.EncryptionKey, version, logger)
+	backups.SetHooks(backup.Hooks{
+		StopWork: stopWork,
+		// Docker (restart: unless-stopped) or systemd starts it again on
+		// the restored data.
+		Exit: func() {
+			logger.Info("restarting after restore")
+			os.Exit(0)
+		},
+	})
+	go backups.RunScheduler(workCtx)
 
 	handler, err := app.NewHandler(app.Dependencies{
 		Config:        cfg,
@@ -115,6 +135,7 @@ func main() {
 		Notifier:      mailNotifier,
 		Marketplace:   marketService,
 		ChatHub:       chatHub,
+		Backups:       backups,
 	})
 	if err != nil {
 		logger.Error("initialize application", "error", err)
@@ -130,7 +151,7 @@ func main() {
 	}
 
 	go func() {
-		logger.Info("api server started", "addr", cfg.HTTPAddr, "environment", cfg.Environment)
+		logger.Info("api server started", "addr", cfg.HTTPAddr, "environment", cfg.Environment, "version", version)
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			logger.Error("api server stopped unexpectedly", "error", err)
 			stop()

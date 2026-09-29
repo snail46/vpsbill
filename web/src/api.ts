@@ -438,7 +438,7 @@ type Envelope<T> = { data: T; message?: string; error?: string }
 
 // Staff and customer sessions use separate cookies; staff APIs live under
 // /api/v1/admin and /api/v1/auth.
-function csrfToken(path: string) {
+export function csrfToken(path: string) {
   const name = /^\/api\/v1\/(admin|auth)\//.test(path) ? 'cb_admin_csrf=' : 'cb_csrf='
   const row = document.cookie
     .split('; ')
@@ -502,6 +502,8 @@ export function cached<T>(path: string): T | undefined {
 // it is.
 export function clearCached() {
   responses.clear()
+  // The service worker's stored pages carry who was signed in.
+  navigator.serviceWorker?.controller?.postMessage('forget-pages')
   owner = ''
   clearStored()
 }

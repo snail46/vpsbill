@@ -18,6 +18,7 @@ export function surfaceFromPath(): Surface {
 }
 
 let inline: Boot | null | undefined
+let inlineStale = false
 let pending: Promise<Boot> | null = null
 
 // inlineBoot is the boot data nginx put into index.html (see
@@ -28,8 +29,12 @@ export function inlineBoot(): Boot | null {
   if (inline !== undefined) return inline
   inline = null
   try {
-    const parsed = JSON.parse(document.getElementById('vpsbill-boot')?.textContent || 'null') as { data?: Boot } | null
+    const element = document.getElementById('vpsbill-boot')
+    const parsed = JSON.parse(element?.textContent || 'null') as { data?: Boot } | null
     if (parsed?.data?.meta) inline = parsed.data
+    // The service worker served a stored copy of the page (public/sw.js):
+    // render with it, then check it (freshBoot).
+    inlineStale = element?.dataset.stale === '1'
   } catch {
     // an SSI error or an old HTML file; fetch it instead
   }
@@ -43,24 +48,33 @@ export function inlineBoot(): Boot | null {
 export function loadBoot(): Promise<Boot> {
   if (!pending) {
     const data = inlineBoot()
-    pending = data
-      ? Promise.resolve(data)
-      : fetch(`/api/v1/boot?surface=${surfaceFromPath()}`, { credentials: 'same-origin', headers: { Accept: 'application/json' } })
-          .then(response => {
-            if (response.status === 404) return { data: null }
-            return response.ok ? response.json() : Promise.reject(new Error('boot failed'))
-          })
-          .then(async (payload: { data: Boot | null }) => {
-            const boot = payload.data ?? (await legacyBoot())
-            applyBoot(boot)
-            return boot
-          })
+    pending = data ? Promise.resolve(data) : fetchBoot()
     // A failed request may be retried by the next caller.
     pending.catch(() => {
       pending = null
     })
   }
   return pending
+}
+
+function fetchBoot(): Promise<Boot> {
+  return fetch(`/api/v1/boot?surface=${surfaceFromPath()}`, { credentials: 'same-origin', headers: { Accept: 'application/json' }, cache: 'no-store' })
+    .then(response => {
+      if (response.status === 404) return { data: null }
+      return response.ok ? response.json() : Promise.reject(new Error('boot failed'))
+    })
+    .then(async (payload: { data: Boot | null }) => {
+      const boot = payload.data ?? (await legacyBoot())
+      applyBoot(boot)
+      return boot
+    })
+}
+
+// freshBoot asks the API again when the page was a stored copy, whose boot
+// data may be out of date; it resolves null when there is nothing to check.
+export function freshBoot(): Promise<Boot | null> {
+  inlineBoot()
+  return inlineStale ? fetchBoot() : Promise.resolve(null)
 }
 
 // legacyBoot asks an API from before /api/v1/boot, for the moments of an

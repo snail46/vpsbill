@@ -31,7 +31,9 @@ type Config struct {
 	// uses this host's first private IPv4 and the HTTP port.
 	InternalURL string
 	// AgentDownloadDir holds the Hatch agent release bundled with the image.
-	AgentDownloadDir     string
+	AgentDownloadDir string
+	// BackupDir keeps the local copies of backups; mount a volume there.
+	BackupDir            string
 	WorkerPollInterval   time.Duration
 	ReconcileInterval    time.Duration
 	LifecycleInterval    time.Duration
@@ -57,6 +59,7 @@ func Load() (Config, error) {
 		PublicURL:                 env("PUBLIC_URL", "http://localhost:8080"),
 		InternalURL:               strings.TrimSpace(os.Getenv("INTERNAL_URL")),
 		AgentDownloadDir:          env("AGENT_DOWNLOAD_DIR", "/app/hatch-agent"),
+		BackupDir:                 env("BACKUP_DIR", "/var/lib/vpsbill/backups"),
 	}
 	var err error
 	cfg.WorkerPollInterval, err = durationEnv("WORKER_POLL_INTERVAL", 3*time.Second)

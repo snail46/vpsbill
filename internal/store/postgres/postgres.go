@@ -85,3 +85,19 @@ func Migrate(ctx context.Context, db *pgxpool.Pool) error {
 	}
 	return nil
 }
+
+// LatestMigration is the newest migration this build knows, so a backup
+// from a newer release can be told apart.
+func LatestMigration() string {
+	entries, err := migrations.ReadDir("migrations")
+	if err != nil {
+		return ""
+	}
+	latest := ""
+	for _, entry := range entries {
+		if !entry.IsDir() && entry.Name() > latest {
+			latest = entry.Name()
+		}
+	}
+	return latest
+}

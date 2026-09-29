@@ -41,6 +41,9 @@ services:
       TERMINATION_RETENTION: ${TERMINATION_RETENTION:-168h}
       PUBLIC_URL: ${PUBLIC_URL:-http://localhost:8080}
       INTERNAL_URL: ${INTERNAL_URL:-}
+    volumes:
+      # Local copies of the backups made from the admin console.
+      - backups:/var/lib/vpsbill/backups
     depends_on:
       postgres:
         condition: service_healthy
@@ -114,6 +117,7 @@ configs:
       }
 
 volumes:
+  backups:
   postgres_data:
   caddy_data:
   caddy_config:

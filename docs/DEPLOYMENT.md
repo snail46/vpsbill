@@ -155,15 +155,16 @@ curl -fsSL http://127.0.0.1:8088/api/v1/agent/download/install.sh | sh -s -- \
 
 ```sh
 cd /opt/vpsbill
+curl -fsSL -o docker-compose.yml https://raw.githubusercontent.com/snail46/vpsbill/main/deploy/docker-compose.image.yml
 docker compose up -d --pull always
 curl -fsSL http://127.0.0.1:8088/api/v1/agent/download/install.sh | sh -s -- --server http://127.0.0.1:8088
 ```
 
-第二条命令用来同步升级 Hatch Agent，已有配置会保留。
+第一条命令更新编排文件（新版本可能增加了卷，例如数据备份用的 `backups`），`.env` 不受影响；最后一条同步升级 Hatch Agent，已有配置会保留。
 
 改用域名 HTTPS、Cloudflare Tunnel 或自己的反向代理：见 [访问方式](ACCESS.md)。改完后到后台「站点设置」更新公开访问地址和后台访问地址。
 
-备份、恢复和主密钥轮换见 [运维手册](OPERATIONS.md)。
+数据备份：后台「数据备份」可以设置定时备份（本地 + WebDAV），也可以从本地、上传的文件或 WebDAV 还原，详见 [运维手册](OPERATIONS.md)。主密钥轮换也在那里。
 
 ## 客户找回密码
 

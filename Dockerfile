@@ -6,14 +6,14 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY cmd ./cmd
 COPY internal ./internal
-RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w" -o /out/vpsbill ./cmd/server \
+# VERSION (the commit, passed by CI) is what the site and the agent report.
+ARG VERSION=dev
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w -X main.version=$VERSION" -o /out/vpsbill ./cmd/server \
     && CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w" -o /out/keyrotate ./cmd/keyrotate
 # Every API image carries the matching Hatch agent for both node
 # architectures, served at /api/v1/agent/download/.
 COPY deploy/install-hatch-agent.sh /out/hatch-agent/install.sh
 COPY deploy/hatch-agent.service /out/hatch-agent/hatch-agent.service
-# VERSION (the commit, passed by CI) is what the agent reports to the site.
-ARG VERSION=dev
 RUN for arch in amd64 arm64; do \
       CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath -ldflags="-s -w -X main.version=$VERSION" -o /out/hatch-agent/hatch-agent-linux-$arch ./cmd/hatch-agent; \
     done \
@@ -23,9 +23,12 @@ FROM alpine:3.23
 # Keep trust roots and timezone data on the security patch level shipped by the
 # selected Alpine base instead of pinning repository revisions that disappear.
 # hadolint ignore=DL3018
-RUN apk add --no-cache ca-certificates tzdata \
+# The PostgreSQL clients make and restore backups; several majors are there
+# so the one matching the database server is used.
+RUN apk add --no-cache ca-certificates tzdata postgresql16-client postgresql17-client postgresql18-client \
     && addgroup -S -g 10001 app \
-    && adduser -S -D -H -u 10001 -G app app
+    && adduser -S -D -H -u 10001 -G app app \
+    && install -d -m 0700 -o app -g app /var/lib/vpsbill/backups
 WORKDIR /app
 COPY --from=build /out/vpsbill /app/vpsbill
 COPY --from=build /out/keyrotate /app/keyrotate

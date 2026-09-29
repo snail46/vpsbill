@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react'
-import { ArrowLeftRight, Boxes, CheckCircle2, ChevronRight, CircleDollarSign, Cpu, CreditCard, Headphones, LayoutDashboard, Megaphone, LogOut, Menu, X, PackageOpen, ReceiptText, ScrollText, ServerCog, Settings, SlidersHorizontal, ShieldCheck, Store, Users } from 'lucide-react'
+import { ArrowLeftRight, Boxes, DatabaseBackup, CheckCircle2, ChevronRight, CircleDollarSign, Cpu, CreditCard, Headphones, LayoutDashboard, Megaphone, LogOut, Menu, X, PackageOpen, ReceiptText, ScrollText, ServerCog, Settings, SlidersHorizontal, ShieldCheck, Store, Users } from 'lucide-react'
 import { adoptCache, api, clearCached, StaffUser } from '../api'
 import { prefetchPage, usePrefetch } from '../shared/prefetch'
 import HostDetailPanel from '../HostDetail'
@@ -7,11 +7,12 @@ import AdminMarketplace from '../AdminMarketplace'
 import { AdminTradeListings } from '../Trade'
 import { ThemeToggle } from '../ThemeToggle'
 import { Meta, SessionLoading, Field, SecuritySettings, BrandMark } from '../shared/ui'
-import { Boot, inlineBoot, loadBoot } from '../shared/boot'
+import { Boot, freshBoot, inlineBoot, loadBoot } from '../shared/boot'
 import { Overview } from './Overview'
 import { CustomersView } from './Customers'
 import { OrdersView, BillingView } from './Orders'
 import { PaymentSettingsView, SiteSettingsView } from './Settings'
+import { BackupsView } from './Backups'
 import { ServicesView } from './Services'
 import { NodesView, HostsView } from './Nodes'
 import { PlansView } from './Plans'
@@ -34,6 +35,7 @@ export type View =
   | 'audit'
   | 'announcements'
   | 'settings'
+  | 'backups'
   | 'security'
 
 export type AuthScreen = 'loading' | 'install' | 'login' | 'ready'
@@ -54,6 +56,7 @@ export const navItems: Array<{ id: View; label: string; icon: typeof LayoutDashb
   { id: 'audit', label: '审计日志', icon: ScrollText },
   { id: 'announcements', label: '平台公告', icon: Megaphone },
   { id: 'settings', label: '站点设置', icon: SlidersHorizontal },
+  { id: 'backups', label: '数据备份', icon: DatabaseBackup },
   { id: 'security', label: '安全中心', icon: Settings },
 ]
 
@@ -73,6 +76,7 @@ export const adminViews: View[] = [
   'audit',
   'announcements',
   'settings',
+  'backups',
   'security',
 ]
 
@@ -93,6 +97,7 @@ const adminPageData: Record<string, string[]> = {
   audit: ['/api/v1/admin/audit-logs'],
   announcements: ['/api/v1/admin/announcements'],
   settings: ['/api/v1/admin/settings/site'],
+  backups: ['/api/v1/admin/backups'],
 }
 
 export type AdminRoute = { view: View; hostID?: string }
@@ -121,7 +126,23 @@ export function AdminApp() {
   const [user, setUser] = useState<StaffUser | null>(() => inlineBoot()?.staff ?? null)
 
   useEffect(() => {
-    if (inlineBoot()) return
+    const inline = inlineBoot()
+    if (inline) {
+      // A stored copy of the page (service worker): correct it if the
+      // session changed since.
+      void freshBoot()
+        .then(boot => {
+          if (!boot) return
+          setMeta(boot.meta)
+          if ((boot.staff?.id ?? '') !== (inline.staff?.id ?? '') || boot.install_required !== inline.install_required) {
+            clearCached()
+            setUser(boot.staff)
+            setAuthScreen(adminScreen(boot))
+          }
+        })
+        .catch(() => undefined)
+      return
+    }
     loadBoot()
       .then(boot => {
         setMeta(boot.meta)
@@ -488,6 +509,7 @@ export function AdminShell({ meta, user, onLogout }: { meta: Meta | null; user: 
         {view === 'billing' && <BillingView />}
         {view === 'payment' && <PaymentSettingsView />}
         {view === 'settings' && <SiteSettingsView />}
+        {view === 'backups' && <BackupsView />}
         {view === 'services' && <ServicesView />}
         {view === 'nodes' && <NodesView />}
         {view === 'hosts' &&
@@ -526,6 +548,7 @@ export function viewTitle(view: View) {
       audit: '安全审计日志',
       announcements: '平台公告',
       settings: '站点设置',
+      backups: '数据备份与还原',
       security: '账户安全设置',
     } as Record<View, string>)[view]
   )

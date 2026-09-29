@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"vpsbill/internal/backup"
 	"vpsbill/internal/chat"
 	"vpsbill/internal/config"
 	"vpsbill/internal/marketplace"
@@ -33,6 +34,8 @@ type Dependencies struct {
 	Notifier *notify.Notifier
 	// Marketplace settles hosted-node clearances; nil builds one.
 	Marketplace *marketplace.Service
+	// Backups makes and restores backups; nil hides the backup pages.
+	Backups *backup.Service
 	// ChatHub pushes hosted-node chat messages; nil disables live updates
 	// (messages still load over HTTP).
 	ChatHub *chat.Hub
@@ -228,6 +231,20 @@ func NewHandler(deps Dependencies) (http.Handler, error) {
 	mux.Handle("PUT /api/v1/admin/settings/payment", auth.require("billing:write", http.HandlerFunc(adminSettings.updatePayment)))
 	mux.Handle("GET /api/v1/admin/settings/site", auth.require("settings:read", http.HandlerFunc(adminSettings.site)))
 	mux.Handle("PUT /api/v1/admin/settings/site", auth.require("settings:write", http.HandlerFunc(adminSettings.updateSite)))
+	if deps.Backups != nil {
+		backups := &backupAPI{service: deps.Backups, db: deps.DB, dir: deps.Config.BackupDir}
+		manage := func(handler http.HandlerFunc) http.Handler { return auth.require("backups:manage", handler) }
+		mux.Handle("GET /api/v1/admin/backups", manage(backups.overview))
+		mux.Handle("PUT /api/v1/admin/backups/settings", manage(backups.saveSettings))
+		mux.Handle("POST /api/v1/admin/backups/test-webdav", manage(backups.testWebDAV))
+		mux.Handle("POST /api/v1/admin/backups/run", manage(backups.run))
+		mux.Handle("POST /api/v1/admin/backups/upload", manage(backups.upload))
+		mux.Handle("GET /api/v1/admin/backups/remote", manage(backups.remote))
+		mux.Handle("POST /api/v1/admin/backups/remote/{name}/fetch", manage(backups.fetch))
+		mux.Handle("GET /api/v1/admin/backups/local/{name}/download", manage(backups.download))
+		mux.Handle("DELETE /api/v1/admin/backups/local/{name}", manage(backups.deleteLocal))
+		mux.Handle("POST /api/v1/admin/backups/local/{name}/restore", manage(backups.restore))
+	}
 	mux.Handle("POST /api/v1/admin/settings/logo", auth.require("settings:write", http.HandlerFunc(adminSettings.uploadLogo)))
 	mux.Handle("PUT /api/v1/admin/settings/logo", auth.require("settings:write", http.HandlerFunc(adminSettings.linkLogo)))
 	mux.Handle("POST /api/v1/admin/settings/site/test-mail", auth.require("settings:write", http.HandlerFunc(adminSettings.testMail)))
@@ -269,7 +286,7 @@ func NewHandler(deps Dependencies) (http.Handler, error) {
 	mux.HandleFunc("POST /api/v1/webhooks/payments/epay", billing.epayWebhook)
 	mux.HandleFunc("POST /api/v1/webhooks/payments/alipay", billing.alipayWebhook)
 
-	return requestLog(deps.Logger, securityHeaders(surfaceGate(installationGate(deps.Settings, mux)))), nil
+	return requestLog(deps.Logger, securityHeaders(maintenance(deps.Backups, surfaceGate(installationGate(deps.Settings, mux))))), nil
 }
 
 func installationGate(runtime *settings.Manager, next http.Handler) http.Handler {
