@@ -280,3 +280,20 @@ func TestSuspendAndResumeAreIdempotent(t *testing.T) {
 		t.Fatalf("status after resume = %q", instance.Status)
 	}
 }
+
+func TestEnsureTunesLXCNetwork(t *testing.T) {
+	runtime, nat := agenttest.NewRuntime("lxc"), &agenttest.NAT{}
+	service := newService(t, t.TempDir(), runtime, nat)
+	result, err := call[protocol.EnsureResult](t, service, protocol.MethodEnsure, spec)
+	if err != nil || result.Instance.Password == "" {
+		t.Fatalf("ensure: %+v %v", result, err)
+	}
+	// One script sets the password, one writes the network settings; the
+	// second must not clear the password.
+	if execs := runtime.Instances[spec.Name].Execs; execs != 2 {
+		t.Fatalf("execs = %d, want password and network tuning", execs)
+	}
+	if runtime.Instances[spec.Name].Password != result.Instance.Password {
+		t.Fatal("network tuning overwrote the password")
+	}
+}

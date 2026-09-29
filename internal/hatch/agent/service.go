@@ -11,6 +11,7 @@ import (
 	"net/netip"
 	"os"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -317,6 +318,7 @@ func (s *Service) ensure(ctx context.Context, spec protocol.CreateSpec) (protoco
 		if err := s.setPassword(ctx, runtime, spec.Name, password, 5); err != nil {
 			return protocol.EnsureResult{}, err
 		}
+		s.tuneNetwork(ctx, runtime, spec.Name)
 		if err := s.store.Update(spec.Name, func(current *InstanceRecord) (*InstanceRecord, error) {
 			current.PasswordSet = true
 			return current, nil
@@ -469,6 +471,30 @@ func (s *Service) setPassword(ctx context.Context, runtime Runtime, name, passwo
 	return fmt.Errorf("set root password: %w", err)
 }
 
+// tuneNetwork writes instanceSysctls into an LXC instance and applies them.
+// LXD refuses them as linux.sysctl.* config, but they belong to the
+// instance's own network namespace, so its root may set them; the file
+// keeps them across reboots and the customer can change it. Podman gets
+// them at creation. A failure only costs the tuning, never the instance.
+func (s *Service) tuneNetwork(ctx context.Context, runtime Runtime, name string) {
+	if runtime.Virtualization() != "lxc" {
+		return
+	}
+	keys := make([]string, 0, 2)
+	sysctls := instanceSysctls()
+	for key := range sysctls {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	var lines strings.Builder
+	for _, key := range keys {
+		fmt.Fprintf(&lines, "%s = %s\n", key, sysctls[key])
+	}
+	if err := runtime.Exec(ctx, name, netTuneScript, map[string]string{"HATCH_SYSCTL": lines.String()}); err != nil {
+		s.logger.Warn("instance network tuning failed", "name", name, "error", err)
+	}
+}
+
 func (s *Service) ensureSSHMapping(ctx context.Context, name string) error {
 	record, _ := s.store.Get(name)
 	for _, mapping := range record.Mappings {
@@ -592,6 +618,7 @@ func (s *Service) reinstall(ctx context.Context, params protocol.ReinstallParams
 		if err := s.setPassword(ctx, runtime, params.Name, params.Password, 5); err != nil {
 			return err
 		}
+		s.tuneNetwork(ctx, runtime, params.Name)
 		return s.store.Update(params.Name, func(current *InstanceRecord) (*InstanceRecord, error) {
 			current.PasswordSet = true
 			return current, nil

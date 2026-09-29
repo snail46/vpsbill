@@ -146,10 +146,6 @@ func (l *LXD) Create(ctx context.Context, spec RuntimeSpec) error {
 			"eth0": nic,
 		},
 	}
-	config := body["config"].(map[string]string)
-	for key, value := range instanceSysctls() {
-		config["linux.sysctl."+key] = value
-	}
 	if _, err := l.request(ctx, http.MethodPost, "/1.0/instances", body); err != nil {
 		return err
 	}

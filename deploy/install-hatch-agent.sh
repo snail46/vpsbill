@@ -20,8 +20,8 @@
 #   --podman-images MODE    build (default) the Debian 12 and Alpine images
 #                           that run in 64 MB, or skip
 #   --no-zram               do not set up compressed swap in RAM
-#   --no-tune               leave kernel network, conntrack, disk scheduler and
-#                           OOM settings as they are (see "Host tuning")
+#   --no-tune               leave kernel network, conntrack and OOM settings as
+#                           they are (see "Host tuning")
 #   --download-from URL     fetch the agent from another billing address than
 #                           --server (e.g. the public one while the agent uses
 #                           a loopback URL)
@@ -202,30 +202,18 @@ EOF
   fi
 
   # fq on the uplink shares it fairly between connections and paces BBR.
-  # Default queueing is reset so it picks fq up; a custom one is left alone.
+  # The default queueing is replaced (the kernel cannot delete it): a
+  # multi-queue NIC gets a new mq whose queues pick fq up, others fq itself.
+  # A custom one is left alone.
   UPLINK=$(ip -4 route show default 2>/dev/null | awk '{ for (i = 1; i < NF; i++) if ($i == "dev") { print $(i + 1); exit } }')
   if [ -n "$UPLINK" ]; then
     ROOT=$(tc qdisc show dev "$UPLINK" root 2>/dev/null | awk 'NR == 1 { print $2 }')
     case "$ROOT" in
-      mq|fq_codel|pfifo_fast|pfifo) tc qdisc del dev "$UPLINK" root 2>/dev/null || true ;;
+      mq) tc qdisc replace dev "$UPLINK" root handle 1: mq 2>/dev/null || true ;;
+      fq_codel|pfifo_fast|pfifo) tc qdisc replace dev "$UPLINK" root fq 2>/dev/null || true ;;
       fq|noqueue|'') ;;
       *) echo "note: $UPLINK uses $ROOT queueing; leaving it as it is" ;;
     esac
-  fi
-
-  # BFQ shares the disk fairly between instances: one of them writing flat
-  # out no longer stalls every other one (and the host's own services).
-  DISK_SOURCE=$(findmnt -no SOURCE -T /var/lib 2>/dev/null || true)
-  DISK=$(lsblk -no PKNAME "$DISK_SOURCE" 2>/dev/null | head -n 1)
-  [ -n "$DISK" ] || DISK=$(basename "${DISK_SOURCE:-none}" 2>/dev/null || true)
-  SCHED=/sys/block/$DISK/queue/scheduler
-  if [ -n "$DISK" ] && [ -w "$SCHED" ]; then
-    grep -qw bfq "$SCHED" || modprobe bfq 2>/dev/null || true
-    if grep -qw bfq "$SCHED"; then
-      echo bfq > "$SCHED" 2>/dev/null || true
-      echo bfq >> /etc/modules-load.d/hatch.conf
-      printf 'ACTION=="add|change", KERNEL=="%s", ATTR{queue/scheduler}="bfq"\n' "$DISK" > /etc/udev/rules.d/60-hatch-iosched.rules
-    fi
   fi
 
   # Under memory pressure the kernel should kill instance processes, not
@@ -255,7 +243,7 @@ EOF
     fi
   fi
 
-  echo "Host tuning: congestion $CC, fq, conntrack $(sysctl -n net.netfilter.nf_conntrack_max 2>/dev/null), disk scheduler $(sed -n 's/.*\[\(.*\)\].*/\1/p' "$SCHED" 2>/dev/null)"
+  echo "Host tuning: congestion $CC, fq, conntrack $(sysctl -n net.netfilter.nf_conntrack_max 2>/dev/null)"
 }
 
 PODMAN_MOUNT=/var/lib/hatch-podman

@@ -89,6 +89,12 @@ type RuntimeState struct {
 // default route; when that fails the password still works on the console.
 // sshd keeps the first value it reads, so the drop-in sorts before cloud
 // images' 60-cloudimg-settings.conf (PasswordAuthentication no).
+// netTuneScript stores $HATCH_SYSCTL as a sysctl.d file (applied at every
+// boot by systemd or OpenRC) and applies it now.
+const netTuneScript = `mkdir -p /etc/sysctl.d
+printf '%s' "$HATCH_SYSCTL" > /etc/sysctl.d/60-hatch-net.conf
+sysctl -p /etc/sysctl.d/60-hatch-net.conf >/dev/null 2>&1 || true`
+
 const passwordScript = `set -e
 printf 'root:%s\n' "$HATCH_PASSWORD" | chpasswd
 if [ ! -x /usr/sbin/sshd ] && ! command -v sshd >/dev/null 2>&1; then

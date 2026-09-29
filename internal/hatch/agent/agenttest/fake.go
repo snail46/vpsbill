@@ -16,8 +16,10 @@ type Instance struct {
 	Spec     agent.RuntimeSpec
 	Status   string
 	Password string
-	RXBytes  int64
-	TXBytes  int64
+	// Execs counts scripts run in the instance.
+	Execs   int
+	RXBytes int64
+	TXBytes int64
 }
 
 // Runtime is an in-memory agent.Runtime.
@@ -120,7 +122,10 @@ func (r *Runtime) Exec(_ context.Context, name, _ string, env map[string]string)
 		r.FailExec--
 		return errors.New("instance still booting")
 	}
-	instance.Password = env["HATCH_PASSWORD"]
+	if password, ok := env["HATCH_PASSWORD"]; ok {
+		instance.Password = password
+	}
+	instance.Execs++
 	return nil
 }
 
