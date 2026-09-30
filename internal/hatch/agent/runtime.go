@@ -105,6 +105,35 @@ const netTuneScript = `mkdir -p /etc/sysctl.d
 printf '%s' "$HATCH_SYSCTL" > /etc/sysctl.d/60-hatch-net.conf
 sysctl -p /etc/sysctl.d/60-hatch-net.conf >/dev/null 2>&1 || true`
 
+// packagesScript installs the everyday tools customers expect (bash, curl,
+// wget and friends) when the image lacks them; stock LXC images ship
+// without curl and wget, and Alpine without bash. It waits for the network
+// like passwordScript, only installs what is missing, and gives up quietly.
+const packagesScript = `missing=""
+for tool in bash curl wget nano less tar unzip; do
+  command -v "$tool" >/dev/null 2>&1 || missing="$missing $tool"
+done
+[ -e /etc/ssl/certs/ca-certificates.crt ] || [ -e /etc/pki/tls/certs/ca-bundle.crt ] || missing="$missing ca-certificates"
+[ -n "$missing" ] || exit 0
+i=0
+while [ $i -lt 30 ] && ! awk '$2 == "00000000" { found = 1 } END { exit !found }' /proc/net/route 2>/dev/null; do
+  sleep 1; i=$((i + 1))
+done
+if command -v apt-get >/dev/null 2>&1; then
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get -o DPkg::Lock::Timeout=120 -qq update >/dev/null 2>&1 || true
+  apt-get -o DPkg::Lock::Timeout=120 -qq install -y --no-install-recommends $missing >/dev/null 2>&1 || true
+  apt-get clean >/dev/null 2>&1 || true
+elif command -v dnf >/dev/null 2>&1; then
+  dnf -q install -y $missing >/dev/null 2>&1 || true
+elif command -v yum >/dev/null 2>&1; then
+  yum -q install -y $missing >/dev/null 2>&1 || true
+elif command -v apk >/dev/null 2>&1; then
+  apk add -q $missing >/dev/null 2>&1 || true
+fi
+exit 0
+`
+
 const passwordScript = `set -e
 printf 'root:%s\n' "$HATCH_PASSWORD" | chpasswd
 if [ ! -x /usr/sbin/sshd ] && ! command -v sshd >/dev/null 2>&1; then

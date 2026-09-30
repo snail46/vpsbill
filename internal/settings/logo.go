@@ -74,6 +74,15 @@ func (m *Manager) SetLogoURL(ctx context.Context, raw, actorID string) error {
 	return m.updateLogo(ctx, `logo_url=$1,logo_image=NULL,logo_content_type='',logo_version=''`, "site_logo.linked", actorID, value)
 }
 
+// SetLogoMode sets how the logo sits beside the site name: auto, icon or
+// wordmark (see SiteInput.LogoMode).
+func (m *Manager) SetLogoMode(ctx context.Context, mode, actorID string) error {
+	if mode != "auto" && mode != "icon" && mode != "wordmark" {
+		return fmt.Errorf("%w: Logo 显示方式无效", ErrInvalidSettings)
+	}
+	return m.updateLogo(ctx, `logo_mode=$1`, "site_logo.mode_changed", actorID, mode)
+}
+
 func (m *Manager) updateLogo(ctx context.Context, assignments, action, actorID string, args ...any) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

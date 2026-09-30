@@ -22,15 +22,18 @@ import {
   Trash2,
   X,
 } from 'lucide-react'
-import { api, cached, imageLabel, serviceUsable, CustomerServiceRecord, PortMappingRecord, RefundQuoteRecord, ServiceCredentialRecord, ServiceRuntimeRecord } from './api'
+import { api, cached, serviceUsable, CustomerServiceRecord, PortMappingRecord, ReinstallRecord, RefundQuoteRecord, ServiceCredentialRecord, ServiceRuntimeRecord } from './api'
 import { walletMoney } from './Wallet'
-import { ListServiceDialog, tradeEligibleAt } from './Trade'
+import { ListServiceDialog, tradeEligibleAt, tradeHoldDays } from './Trade'
 import { formatDate, formatTime, platformMonth } from './shared/time'
-import { navigatePortal, osLabel, portalPathPart } from './shared/nav'
+import { navigatePortal, osLabel, osOptions, portalPathPart } from './shared/nav'
 import { cycleUnit } from './shared/cycles'
 import ChatRoom from './ChatRoom'
 
-const ServiceConsole = lazy(() => import('./ServiceConsole').then(module => ({ default: module.ServiceConsole })))
+// The console (xterm.js and noVNC) is loaded on demand; the detail page
+// fetches it in the background so the first click opens it at once.
+const loadConsole = () => import('./ServiceConsole')
+const ServiceConsole = lazy(() => loadConsole().then(module => ({ default: module.ServiceConsole })))
 
 const bytes = (value = 0) => {
   if (value >= 1024 ** 3) return `${(value / 1024 ** 3).toFixed(2)} GB`
@@ -88,7 +91,10 @@ function ServiceManager({ service, onReload }: { service: CustomerServiceRecord;
   // the card tracks it until it has seen the instance leave and return to
   // running (or a minute passes).
   const [restart, setRestart] = useState<{ until: number; sawDown: boolean } | null>(null)
-  const busy = Boolean(service.desired_runtime_status) || restart !== null
+  // The latest reinstall: it runs in the background and the card follows it.
+  const [reinstall, setReinstall] = useState<ReinstallRecord | null>(null)
+  const reinstalling = reinstall?.status === 'running'
+  const busy = Boolean(service.desired_runtime_status) || restart !== null || reinstalling
 
   const load = (brief = true) =>
     api<ServiceRuntimeRecord>(`/api/v1/customer/services/${service.id}/runtime${brief ? '?brief=1' : ''}`)
@@ -125,6 +131,39 @@ function ServiceManager({ service, onReload }: { service: CustomerServiceRecord;
     }, busy ? 3000 : 10000)
     return () => window.clearInterval(timer)
   }, [service.id, usable, busy])
+
+  useEffect(() => {
+    if (!usable) return
+    const idle = window.requestIdleCallback ?? ((callback: () => void) => window.setTimeout(callback, 1500))
+    idle(() => void loadConsole().catch(() => {}))
+  }, [usable])
+
+  // Pick up a reinstall started earlier (another tab, or before a reload),
+  // then follow the running one until it ends.
+  useEffect(() => {
+    if (!usable) return
+    void api<ReinstallRecord | null>(`/api/v1/customer/services/${service.id}/reinstall`)
+      .then(value => setReinstall(current => current ?? (value?.status === 'running' ? value : null)))
+      .catch(() => {})
+  }, [service.id, usable])
+
+  useEffect(() => {
+    if (!reinstalling) return
+    const timer = window.setInterval(() => {
+      void api<ReinstallRecord | null>(`/api/v1/customer/services/${service.id}/reinstall`)
+        .then(value => {
+          if (!value || value.status === 'running') return
+          setReinstall(value)
+          if (value.status === 'succeeded') {
+            onReload()
+            void load(false)
+            void api<ServiceCredentialRecord>(`/api/v1/customer/services/${service.id}/credential`).then(setCredential).catch(() => {})
+          }
+        })
+        .catch(() => {})
+    }, 3000)
+    return () => window.clearInterval(timer)
+  }, [service.id, reinstalling])
 
   useEffect(() => {
     if (usable) {
@@ -327,7 +366,8 @@ function ServiceManager({ service, onReload }: { service: CustomerServiceRecord;
         )}
       </div>
 
-      {busy && (
+      {reinstall && <ReinstallProgress state={reinstall} virtualization={service.virtualization} onDismiss={() => setReinstall(null)} />}
+      {busy && !reinstalling && (
         <div className="pending-action">
           <RefreshCw size={14} />
           {restart ? '正在重启…' : `正在切换至 ${service.desired_runtime_status === 'running' ? '运行' : '关机'} 状态…`}
@@ -402,7 +442,7 @@ function ServiceManager({ service, onReload }: { service: CustomerServiceRecord;
       </>)}
 
       {consoleKind && (
-        <Suspense fallback={<div className="modal-backdrop"><div className="session-loading"><div className="spinner" /><strong>正在加载控制台…</strong></div></div>}>
+        <Suspense fallback={<div className="modal-backdrop"><div className="console-loading"><div className="spinner" />正在打开控制台…</div></div>}>
           <ServiceConsole serviceID={service.id} name={service.instance_name} kind={consoleKind} onClose={() => setConsoleKind(null)} />
         </Suspense>
       )}
@@ -413,6 +453,7 @@ function ServiceManager({ service, onReload }: { service: CustomerServiceRecord;
           service={service}
           runtime={runtime}
           onClose={() => setDialog(null)}
+          onReinstall={setReinstall}
           onChanged={async () => {
             await load(false)
             setCredential(await api(`/api/v1/customer/services/${service.id}/credential`))
@@ -423,19 +464,79 @@ function ServiceManager({ service, onReload }: { service: CustomerServiceRecord;
   )
 }
 
+// reinstallSeconds is about how long a reinstall takes, for the progress
+// bar; the node does not report its steps.
+const reinstallSeconds: Record<string, number> = { podman: 40, lxc: 90, kvm: 300 }
+
+const reinstallSteps: [number, string][] = [
+  [0, '正在删除旧系统'],
+  [0.2, '正在创建新系统'],
+  [0.6, '正在设置 root 密码和网络'],
+  [0.85, '正在启动并完成收尾'],
+]
+
+// ReinstallProgress follows a background reinstall: an estimated progress
+// bar while it runs, then how it ended.
+function ReinstallProgress({ state, virtualization, onDismiss }: { state: ReinstallRecord; virtualization: string; onDismiss: () => void }) {
+  const [now, setNow] = useState(Date.now())
+  const running = state.status === 'running'
+  useEffect(() => {
+    if (!running) return
+    const timer = window.setInterval(() => setNow(Date.now()), 500)
+    return () => window.clearInterval(timer)
+  }, [running])
+  const elapsed = Math.max(0, (now - new Date(state.started_at).getTime()) / 1000)
+  const expected = reinstallSeconds[virtualization] ?? 120
+  // Approaches but never reaches the end until the node says it is done.
+  const share = running ? 0.95 * (1 - Math.exp(-elapsed / (expected * 0.6))) : 1
+  const step = [...reinstallSteps].reverse().find(([from]) => share >= from)?.[1] ?? reinstallSteps[0][1]
+  const minutes = Math.floor(elapsed / 60)
+  const clock = minutes ? `${minutes} 分 ${Math.floor(elapsed % 60)} 秒` : `${Math.floor(elapsed)} 秒`
+  if (state.status === 'failed') {
+    return (
+      <div className="reinstall-progress failed" role="alert">
+        <div><strong>重装失败</strong><button type="button" className="icon-button" onClick={onDismiss} title="关闭"><X size={14} /></button></div>
+        <p>{state.error || '节点未能完成重装，请稍后重试或联系客服。'}</p>
+      </div>
+    )
+  }
+  if (state.status === 'succeeded') {
+    return (
+      <div className="reinstall-progress done" role="status">
+        <div><strong>重装完成</strong><button type="button" className="icon-button" onClick={onDismiss} title="关闭"><X size={14} /></button></div>
+        <p>新系统 {osLabel(state.template_id)} 已就绪，可以用 root 密码登录。</p>
+        <i><b style={{ width: '100%' }} /></i>
+      </div>
+    )
+  }
+  return (
+    <div className="reinstall-progress" role="status" aria-live="polite">
+      <div>
+        <strong><RefreshCw size={14} />重装已发起：{osLabel(state.template_id)}</strong>
+        <span>{Math.round(share * 100)}% · 已用 {clock}</span>
+      </div>
+      <i><b style={{ width: `${share * 100}%` }} /></i>
+      <p>{step}…通常需要 {expected < 60 ? `${expected} 秒` : `${Math.round(expected / 60)} 分钟`}左右，可以离开此页面，重装会在后台继续。</p>
+    </div>
+  )
+}
+
 function ServiceDialog({
   kind,
   service,
   runtime,
   onClose,
   onChanged,
+  onReinstall,
 }: {
   kind: 'password' | 'reinstall' | 'ports'
   service: CustomerServiceRecord
   runtime: ServiceRuntimeRecord | null
   onClose: () => void
   onChanged: () => Promise<void>
+  onReinstall: (state: ReinstallRecord) => void
 }) {
+  const [confirmed, setConfirmed] = useState(false)
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
   const [mappings, setMappings] = useState<PortMappingRecord[]>(runtime?.container.port_mappings || [])
@@ -456,18 +557,21 @@ function ServiceDialog({
           body: JSON.stringify({ password: data.get('password') }),
         })
       } else if (kind === 'reinstall') {
-        if (data.get('confirm') !== service.instance_name) {
-          throw new Error('请输入实例名称以确认重装')
-        }
-        await api(`/api/v1/customer/services/${service.id}/reinstall`, {
+        if (!confirmed) throw new Error('请先勾选确认：重装会清除所有数据')
+        // The reinstall runs in the background; the card shows its progress.
+        const state = await api<ReinstallRecord>(`/api/v1/customer/services/${service.id}/reinstall`, {
           method: 'POST',
           body: JSON.stringify({ template_id: data.get('template_id'), password: data.get('password') }),
         })
+        onReinstall(state)
+        onClose()
+        return
       } else {
         const next = await api<PortMappingRecord[]>(`/api/v1/customer/services/${service.id}/port-mappings`, {
           method: 'POST',
           body: JSON.stringify({
             container_port: Number(data.get('container_port')),
+            public_port: Number(data.get('public_port')) || 0,
             protocol: data.get('protocol'),
             description: data.get('description'),
           }),
@@ -558,18 +662,18 @@ function ServiceDialog({
                 <span>目标操作系统镜像</span>
                 <select name="template_id" required defaultValue="">
                   <option value="" disabled>请选择系统镜像</option>
-                  {runtime?.templates.map(t => (
-                    <option value={t.id} key={t.id}>{imageLabel(t)}</option>
+                  {osOptions(runtime?.templates.map(t => t.id) ?? []).map(t => (
+                    <option value={t.id} key={t.id}>{t.label}</option>
                   ))}
                 </select>
               </label>
               <label>
-                <span>新 root 密码</span>
-                <input name="password" type="password" required placeholder="8-64 位，包含字母与数字" />
+                <span>新 root 密码（留空沿用当前密码）</span>
+                <input name="password" type="password" autoComplete="new-password" placeholder="8-64 位，包含字母与数字" />
               </label>
-              <label>
-                <span>输入实例名称确认操作</span>
-                <input name="confirm" required placeholder={service.instance_name} />
+              <label className="confirm-check">
+                <input type="checkbox" checked={confirmed} onChange={event => setConfirmed(event.target.checked)} />
+                <span>重装系统会清除所有数据。我已完成备份，确认重装</span>
               </label>
             </>
           )}
@@ -579,6 +683,10 @@ function ServiceDialog({
               <label>
                 <span>内部端口</span>
                 <input name="container_port" type="number" min="1" max="65535" placeholder="80" required />
+              </label>
+              <label>
+                <span>公网端口</span>
+                <input name="public_port" type="number" min="1" max="65535" placeholder="留空自动分配" />
               </label>
               <label>
                 <span>协议</span>
@@ -598,7 +706,7 @@ function ServiceDialog({
             <button type="button" className="secondary-button" onClick={onClose}>取消</button>
             <button
               className={kind === 'reinstall' ? 'danger-button' : 'primary-button'}
-              disabled={saving}
+              disabled={saving || (kind === 'reinstall' && !confirmed)}
             >
               {saving ? '处理中…' : kind === 'ports' ? '添加映射' : '确认执行'}
             </button>
@@ -935,7 +1043,7 @@ function TradeAction({ service, onDone }: { service: CustomerServiceRecord; onDo
   if (eligibleAt.getTime() > Date.now()) {
     return (
       <div className="service-refund">
-        <small className="muted-text">持有满 31 天后可在交易市场挂售（{formatDate(eligibleAt)} 起）</small>
+        <small className="muted-text">持有满 {tradeHoldDays()} 天后可在交易市场挂售（{formatDate(eligibleAt)} 起）</small>
       </div>
     )
   }

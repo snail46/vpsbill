@@ -1,8 +1,8 @@
 import { ChangeEvent, FormEvent, useEffect, useState } from 'react'
 import { api, cached, PaymentSettingsRecord } from '../api'
 import { ImageUp, RotateCcw } from 'lucide-react'
-import { setSiteLogo } from '../shared/boot'
-import { StatusBadge } from '../shared/ui'
+import { setSiteLogo, type LogoMode } from '../shared/boot'
+import { Brand, StatusBadge } from '../shared/ui'
 
 export function PaymentSettingsView() {
   const [settings, setSettings] = useState<PaymentSettingsRecord | null>(null)
@@ -253,6 +253,9 @@ export type SiteSettingsRecord = {
   // from another site rather than uploaded.
   logo_url: string
   logo_external_url: string
+  logo_mode: LogoMode
+  // proxy_warning explains a reverse proxy that hides visitors' addresses.
+  proxy_warning?: string
 }
 
 export type MarketplaceSettings = {
@@ -260,6 +263,7 @@ export type MarketplaceSettings = {
   fee_percent: number
   offline_hours: number
   trade_fee_percent: number
+  trade_hold_days: number
   max_overcommit_cpu: number
   max_overcommit_ram: number
   max_overcommit_disk: number
@@ -318,7 +322,7 @@ export function SiteSettingsView() {
   const [notifications, setNotifications] = useState<MailNotificationSettings>(defaultMailNotifications)
   const [attachmentMB, setAttachmentMB] = useState('5')
   const [marketplace, setMarketplace] = useState<MarketplaceSettings>({
-    enabled: true, fee_percent: 20, offline_hours: 24, trade_fee_percent: 20,
+    enabled: true, fee_percent: 20, offline_hours: 24, trade_fee_percent: 20, trade_hold_days: 31,
     max_overcommit_cpu: 4, max_overcommit_ram: 1.5, max_overcommit_disk: 2, max_overcommit_traffic: 3,
   })
   const [saving, setSaving] = useState(false)
@@ -352,7 +356,7 @@ export function SiteSettingsView() {
     setClearPassword(false)
     setNotifications({ ...defaultMailNotifications, ...value.mail_notifications })
     setAttachmentMB(String(value.ticket_attachment_max_mb || 5))
-    if (value.marketplace) setMarketplace(value.marketplace)
+    if (value.marketplace) setMarketplace(current => ({ ...current, ...value.marketplace }))
   }
 
   useEffect(() => {
@@ -422,7 +426,8 @@ export function SiteSettingsView() {
       {error && <div className="form-error">{error}</div>}
       {notice && <div className="success-note">{notice}</div>}
 
-      {settings && <LogoSettings key={settings.logo_url} current={settings.logo_url} external={settings.logo_external_url} />}
+      {settings?.proxy_warning && <div className="note-banner warn" role="alert">{settings.proxy_warning}</div>}
+      {settings && <LogoSettings key={settings.logo_url} current={settings.logo_url} external={settings.logo_external_url} mode={settings.logo_mode || 'auto'} siteName={settings.app_name} />}
 
       <form className="panel site-settings" onSubmit={submit}>
         <div className="form-grid">
@@ -650,6 +655,10 @@ export function SiteSettingsView() {
             <span>交易市场每笔成交手续费（%，0–90，卖家承担）</span>
             <input type="number" min={0} max={90} step={0.5} value={marketplace.trade_fee_percent} onChange={event => setMarketplace(current => ({ ...current, trade_fee_percent: Number(event.target.value) }))} />
           </label>
+          <label>
+            <span>持有满多少天后可在交易市场挂售（0–365，0 为不限）</span>
+            <input type="number" min={0} max={365} step={1} value={marketplace.trade_hold_days} onChange={event => setMarketplace(current => ({ ...current, trade_hold_days: Number(event.target.value) }))} />
+          </label>
 
           <fieldset className="wide">
             <legend>超售倍数上限（所有母机，含平台自营）</legend>
@@ -689,14 +698,15 @@ export function SiteSettingsView() {
 
 // LogoSettings changes the logo in the top-left corner on its own, apart
 // from the site settings form: upload an image or link one.
-function LogoSettings({ current, external }: { current: string; external: string }) {
+function LogoSettings({ current, external, mode: savedMode, siteName }: { current: string; external: string; mode: LogoMode; siteName: string }) {
   const [logo, setLogo] = useState(current)
   const [link, setLink] = useState(external)
+  const [mode, setMode] = useState<LogoMode>(savedMode)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
 
-  async function save(request: Promise<{ logo_url: string; logo_external_url: string }>, message: string) {
+  async function save(request: Promise<{ logo_url: string; logo_external_url: string; logo_mode?: LogoMode }>, message: string) {
     setBusy(true)
     setError('')
     setNotice('')
@@ -704,7 +714,8 @@ function LogoSettings({ current, external }: { current: string; external: string
       const result = await request
       setLogo(result.logo_url)
       setLink(result.logo_external_url)
-      setSiteLogo(result.logo_url)
+      if (result.logo_mode) setMode(result.logo_mode)
+      setSiteLogo(result.logo_url, result.logo_mode)
       setNotice(message)
     } catch (err) {
       setError(err instanceof Error ? err.message : '保存失败')
@@ -729,17 +740,20 @@ function LogoSettings({ current, external }: { current: string; external: string
   const linkLogo = (url: string, message: string) =>
     save(api('/api/v1/admin/settings/logo', { method: 'PUT', body: JSON.stringify({ url }) }), message)
 
+  const changeMode = (value: LogoMode) =>
+    save(api('/api/v1/admin/settings/logo/mode', { method: 'PUT', body: JSON.stringify({ mode: value }) }), '显示方式已保存，前台和后台立即生效。')
+
   return (
     <section className="panel logo-settings">
       <div className="panel-heading">
         <h3>站点 Logo</h3>
       </div>
       <div className="logo-settings-body">
-        <div className="logo-preview" aria-label="当前 Logo">
-          {logo ? <img src={logo} alt="当前 Logo" /> : <div className="brand-mark">VB</div>}
+        <div className="logo-preview" aria-label="左上角预览">
+          <Brand name={siteName || 'VPSBill'} subtitle="商家控制中心" />
         </div>
         <div className="logo-settings-actions">
-          <p className="muted-text">显示在前台和后台左上角、登录页和浏览器标签上。支持 SVG、PNG、JPG、WebP、GIF、ICO，不超过 512 KB；按 36 像素高显示，正方形或横向图片效果最好。</p>
+          <p className="muted-text">显示在前台和后台左上角、登录页和浏览器标签上。支持 SVG、PNG、JPG、WebP、GIF、ICO，不超过 512 KB；按 36 像素高显示。自带品牌名的横向 Logo 会放在站点名称的位置，见下方「显示方式」。</p>
           <div className="form-actions">
             <label className={busy ? 'primary-button disabled' : 'primary-button'}>
               <ImageUp size={15} />
@@ -763,6 +777,22 @@ function LogoSettings({ current, external }: { current: string; external: string
             <input type="url" value={link} onChange={event => setLink(event.target.value)} placeholder="或填写图片地址，例如 https://cdn.example.com/logo.svg" aria-label="Logo 图片地址" />
             <button className="secondary-button compact" disabled={busy || !link.trim()}>使用此地址</button>
           </form>
+          <fieldset className="logo-mode" disabled={busy}>
+            <legend>显示方式</legend>
+            {([
+              ['auto', '自动识别', '横向的长条 Logo 当作已含品牌名，方形 Logo 旁边显示站点名称'],
+              ['icon', '图标 + 站点名称', 'Logo 是图标，旁边照常显示站点名称'],
+              ['wordmark', 'Logo 已含品牌名', 'Logo 放在站点名称的位置，不再重复显示名称'],
+            ] as [LogoMode, string, string][]).map(([value, label, help]) => (
+              <label key={value} className="radio-option">
+                <input type="radio" name="logo_mode" value={value} checked={mode === value} onChange={() => void changeMode(value)} />
+                <span>
+                  <strong>{label}</strong>
+                  <small>{help}</small>
+                </span>
+              </label>
+            ))}
+          </fieldset>
           {error && <div className="form-error">{error}</div>}
           {notice && <div className="success-note">{notice}</div>}
         </div>

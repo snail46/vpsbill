@@ -4,10 +4,15 @@ import { api, cached, type CustomerServiceRecord, type TradeListingRecord, type 
 import { walletMoney } from './Wallet'
 import { formatDate, formatTime } from './shared/time'
 import { cycleName } from './shared/cycles'
+import { siteMeta } from './shared/boot'
 
 const statusNames: Record<TradeListingRecord['status'], string> = { listed: '挂售中', sold: '已售出', cancelled: '已下架' }
 
-export const TRADE_HOLD_DAYS = 31
+// tradeHoldDays is how long an instance must be held before it may be
+// listed, set in the site settings.
+export function tradeHoldDays() {
+  return siteMeta()?.trade_hold_days ?? 31
+}
 
 export function formatBytes(value = 0) {
   if (value >= 1024 ** 4) return `${(value / 1024 ** 4).toFixed(2)} TB`
@@ -32,7 +37,7 @@ function daysLeft(value: string | null) {
 // current owner got it.
 export function tradeEligibleAt(service: CustomerServiceRecord) {
   const since = new Date(service.acquired_at || Date.now())
-  return new Date(since.getTime() + TRADE_HOLD_DAYS * 86400000)
+  return new Date(since.getTime() + tradeHoldDays() * 86400000)
 }
 
 function RiskBanner() {
@@ -122,7 +127,7 @@ export default function TradeMarket() {
           <p className="eyebrow">TRADING MARKET</p>
           <h2>交易市场</h2>
           <p>
-            用户之间转让实例，用账户余额成交。持有满 {data?.hold_days ?? TRADE_HOLD_DAYS} 天的实例可以在「我的 VPS」挂售；挂售期间实例停机、卖家不能使用，到期时间照常计算，
+            用户之间转让实例，用账户余额成交。持有满 {data?.hold_days ?? tradeHoldDays()} 天的实例可以在「我的 VPS」挂售；挂售期间实例停机、卖家不能使用，到期时间照常计算，
             距到期不足 {data?.min_remaining_days ?? 3} 天自动下架。平台收取成交价 {data?.fee_percent ?? 20}% 的手续费，由卖家承担。
           </p>
         </div>

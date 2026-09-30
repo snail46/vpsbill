@@ -337,6 +337,16 @@ export type CustomerOverviewRecord = {
 export const serviceUsable = (status: string) => status === 'active' || status === 'overdue'
 
 export type PortMappingRecord = { container_port: number; host_port: number; host_ip?: string; protocol: string; description: string }
+// ReinstallRecord is a service's latest reinstall, which runs in the
+// background.
+export type ReinstallRecord = {
+  template_id: string
+  status: 'running' | 'succeeded' | 'failed'
+  error?: string
+  started_at: string
+  finished_at?: string
+}
+
 export type ServiceRuntimeRecord = {
   container: {
     id: string; name: string; virtualization: string; status: string; template: string; ip: string; ipv6: string

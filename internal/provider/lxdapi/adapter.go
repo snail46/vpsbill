@@ -331,8 +331,9 @@ func (d *Driver) AddPortMapping(ctx context.Context, name string, mapping provid
 	return d.listMappings(ctx, name)
 }
 
-// UpdatePortMapping releases the old rule and allocates the new one on the
-// same public port. If the new rule is rejected the old one is restored.
+// UpdatePortMapping releases the old rule and allocates the new one, on the
+// same public port unless another is asked for. If the new rule is
+// rejected the old one is restored.
 func (d *Driver) UpdatePortMapping(ctx context.Context, name string, index int, mapping provider.PortMapping) ([]provider.PortMapping, error) {
 	existing, err := d.mappingAt(ctx, name, index)
 	if err != nil {
@@ -341,7 +342,9 @@ func (d *Driver) UpdatePortMapping(ctx context.Context, name string, index int, 
 	if err := d.release(ctx, existing.ID); err != nil {
 		return nil, err
 	}
-	mapping.HostPort = existing.PublicPort
+	if mapping.HostPort == 0 {
+		mapping.HostPort = existing.PublicPort
+	}
 	if err := d.allocate(ctx, name, mapping); err != nil {
 		if restoreErr := d.allocate(ctx, name, d.toPortMapping(existing)); restoreErr != nil {
 			return nil, fmt.Errorf("%w; restoring the previous mapping also failed: %v", err, restoreErr)

@@ -340,7 +340,8 @@ FROM docker.io/library/debian:12-slim
 ENV container=podman
 RUN apt-get update \
  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-      systemd systemd-sysv openssh-server iproute2 iputils-ping procps ca-certificates curl nano less \
+      systemd systemd-sysv openssh-server iproute2 iputils-ping procps ca-certificates \
+      bash curl wget nano less tar gzip unzip xz-utils \
  && apt-get clean && rm -rf /var/lib/apt/lists/* /var/log/*.log \
  && rm -f /etc/ssh/ssh_host_* \
  && printf '[Unit]\nDescription=Generate SSH host keys\nBefore=ssh.service\nConditionPathExists=!/etc/ssh/ssh_host_ed25519_key\n[Service]\nType=oneshot\nExecStart=/usr/bin/ssh-keygen -A\n[Install]\nWantedBy=multi-user.target\n' > /etc/systemd/system/ssh-hostkeys.service \
@@ -355,7 +356,8 @@ CMD ["/sbin/init"]
 EOF
   cat > "$DIR/alpine/Containerfile" <<'EOF'
 FROM docker.io/library/alpine:3.22
-RUN apk add --no-cache openrc openssh iproute2 procps-ng ca-certificates curl nano \
+RUN apk add --no-cache openrc openssh iproute2 procps-ng ca-certificates \
+      bash curl wget nano less tar unzip xz \
  && sed -i 's/^tty/#tty/' /etc/inittab \
  && sed -i -e 's/^#\?rc_sys=.*/rc_sys="docker"/' -e 's/^#\?rc_provide=.*/rc_provide="loopback net"/' /etc/rc.conf \
  && rm -f /etc/ssh/ssh_host_* \
@@ -371,6 +373,9 @@ EOF
       exit 1
     }
   done
+  # A second name carrying the version, so customers see "Alpine 3.22"
+  # rather than "Alpine" when a plan offers it.
+  podman tag localhost/hatch-alpine:latest localhost/hatch-alpine3.22:latest
 }
 
 WORK=$(mktemp -d)
@@ -456,7 +461,7 @@ systemctl enable hatch-agent
 systemctl restart hatch-agent
 systemctl --no-pager --lines=5 status hatch-agent || true
 if [ "$USE_PODMAN" = 1 ] && [ "$PODMAN_IMAGES" != "skip" ]; then
-  echo "Podman templates: localhost/hatch-debian12:latest and localhost/hatch-alpine:latest"
+  echo "Podman templates: localhost/hatch-debian12:latest and localhost/hatch-alpine3.22:latest (also tagged localhost/hatch-alpine:latest)"
 fi
 if [ "$UPGRADE" = 1 ]; then
   echo

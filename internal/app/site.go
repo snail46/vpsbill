@@ -21,11 +21,13 @@ func siteMeta(cfg config.Config, runtime *settings.Manager, r *http.Request) map
 		"public_url":               current.PublicURL,
 		"name":                     current.AppName,
 		"logo_url":                 current.Logo(),
+		"logo_mode":                current.LogoMode,
 		"environment":              cfg.Environment,
 		"installed":                current.Installed,
 		"password_reset_mail":      current.SMTP.Configured(),
 		"ticket_attachment_max_mb": current.TicketAttachmentMaxMB,
 		"marketplace_enabled":      current.Marketplace.Enabled,
+		"trade_hold_days":          current.Marketplace.TradeHoldDays,
 		"capabilities": []string{
 			"accounts", "catalog", "billing", "provisioning", "clicd", "support", "audit", "notifications", "wallet", "marketplace",
 		},
@@ -142,6 +144,16 @@ func (a adminSettings) linkLogo(w http.ResponseWriter, r *http.Request) {
 	a.logoResult(w, a.settings.SetLogoURL(r.Context(), input.URL, principalFromContext(r.Context()).UserID))
 }
 
+func (a adminSettings) logoMode(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		Mode string `json:"mode"`
+	}
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	a.logoResult(w, a.settings.SetLogoMode(r.Context(), input.Mode, principalFromContext(r.Context()).UserID))
+}
+
 func (a adminSettings) logoResult(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, settings.ErrInvalidSettings):
@@ -150,6 +162,6 @@ func (a adminSettings) logoResult(w http.ResponseWriter, err error) {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "settings_update_failed"})
 	default:
 		current := a.settings.Current()
-		writeJSON(w, http.StatusOK, map[string]any{"data": map[string]string{"logo_url": current.Logo(), "logo_external_url": current.LogoURL}})
+		writeJSON(w, http.StatusOK, map[string]any{"data": map[string]string{"logo_url": current.Logo(), "logo_external_url": current.LogoURL, "logo_mode": current.LogoMode}})
 	}
 }

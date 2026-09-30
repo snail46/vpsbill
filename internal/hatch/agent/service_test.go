@@ -196,6 +196,16 @@ func TestPortMappingLimitsAndRollback(t *testing.T) {
 	if err != nil || mappings[1].PublicPort != free[0] || mappings[1].ContainerPort != 8080 {
 		t.Fatalf("update must keep the public port: %v %v", mappings, err)
 	}
+	update := func(port int) ([]protocol.PortMapping, error) {
+		return call[[]protocol.PortMapping](t, service, protocol.MethodUpdatePortMapping, protocol.PortMappingParams{Name: "svc-1", Index: 1, Mapping: protocol.PortMapping{PublicPort: port, ContainerPort: 8080, Protocol: "tcp"}})
+	}
+	if _, err := update(free[2]); err == nil {
+		t.Fatal("moving onto another rule's public port must be rejected")
+	}
+	mappings, err = update(free[4])
+	if err != nil || mappings[1].PublicPort != free[4] || !strings.Contains(nat.Last(), fmt.Sprintf("tcp dport %d", free[4])) {
+		t.Fatalf("update must move the public port: %v %v\n%s", mappings, err, nat.Last())
+	}
 }
 
 func TestDeleteRemovesInstanceAndRules(t *testing.T) {
@@ -320,10 +330,11 @@ func TestEnsureTunesLXCNetwork(t *testing.T) {
 	if err != nil || result.Instance.Password == "" {
 		t.Fatalf("ensure: %+v %v", result, err)
 	}
-	// One script sets the password, one writes the network settings; the
-	// second must not clear the password.
-	if execs := runtime.Instances[spec.Name].Execs; execs != 2 {
-		t.Fatalf("execs = %d, want password and network tuning", execs)
+	agent.WaitBackground(service)
+	// One script sets the password, one writes the network settings, one
+	// installs missing common packages; none may clear the password.
+	if execs := runtime.Instances[spec.Name].Execs; execs != 3 {
+		t.Fatalf("execs = %d, want password, network tuning and packages", execs)
 	}
 	if runtime.Instances[spec.Name].Password != result.Instance.Password {
 		t.Fatal("network tuning overwrote the password")

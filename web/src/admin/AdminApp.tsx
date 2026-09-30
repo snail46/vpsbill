@@ -6,7 +6,7 @@ import HostDetailPanel from '../HostDetail'
 import AdminMarketplace from '../AdminMarketplace'
 import { AdminTradeListings } from '../Trade'
 import { ThemeToggle } from '../ThemeToggle'
-import { Meta, SessionLoading, Field, SecuritySettings, BrandMark } from '../shared/ui'
+import { Meta, SessionLoading, Field, SecuritySettings, Brand, BrandMark } from '../shared/ui'
 import { Boot, freshBoot, inlineBoot, loadBoot } from '../shared/boot'
 import { Overview } from './Overview'
 import { CustomersView } from './Customers'
@@ -240,13 +240,7 @@ export function AuthPage({
     <main className="auth-page">
       <div className="auth-theme"><ThemeToggle /></div>
       <section className="auth-brand-panel">
-        <div className="brand auth-brand">
-          <BrandMark />
-          <div>
-            <strong>{appName}</strong>
-            <span>VPS 商业运营控制平面</span>
-          </div>
-        </div>
+        <Brand className="auth-brand" name={appName} subtitle="VPS 商业运营控制平面" />
         <div>
           <p className="eyebrow">SECURE INFRASTRUCTURE</p>
           <h1>账务、客户与自动化虚拟化，在一个可信边界内运行。</h1>
@@ -327,13 +321,7 @@ export function InstallPage({ onInstalled }: { onInstalled: (user: StaffUser, ap
     return (
       <main className="installer-page">
         <section className="installer-card installer-complete">
-          <div className="brand">
-            <BrandMark />
-            <div>
-              <strong>{form.app_name}</strong>
-              <span>首次初始化已完成</span>
-            </div>
-          </div>
+          <Brand name={form.app_name} subtitle="首次初始化已完成" />
           <CheckCircle2 size={48} />
           <h1>系统初始化成功</h1>
           <p>数据库结构、基础参数与超级管理员已原子写入。以下自动生成的安全密钥仅显示一次，请妥善保存至密码管理器。</p>
@@ -452,13 +440,7 @@ export function AdminShell({ meta, user, onLogout }: { meta: Meta | null; user: 
   return (
     <div className="app-shell">
       <aside className={menuOpen ? 'sidebar menu-open' : 'sidebar'}>
-        <div className="brand">
-          <BrandMark />
-          <div>
-            <strong>{meta?.name ?? 'VPSBill'}</strong>
-            <span>商家控制中心</span>
-          </div>
-        </div>
+        <Brand name={meta?.name ?? 'VPSBill'} subtitle="商家控制中心" />
         <button type="button" className="menu-toggle" aria-label={menuOpen ? '关闭菜单' : '打开菜单'} aria-expanded={menuOpen} onClick={() => setMenuOpen(open => !open)}>
           {menuOpen ? <X size={20} /> : <Menu size={20} />}
           <span>{navItems.find(item => item.id === view)?.label ?? '菜单'}</span>

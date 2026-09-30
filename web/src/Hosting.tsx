@@ -18,6 +18,7 @@ import {
   type TicketRecord,
   type WalletRecord,
 } from './api'
+import { osOptions } from './shared/nav'
 import ChatRoom from './ChatRoom'
 import { CouponField, CouponManager } from './Coupons'
 import { ReportDialog } from './Reports'
@@ -343,8 +344,8 @@ function BuyDialog({
             <label>
               <span>系统镜像</span>
               <select value={template} onChange={event => setTemplate(event.target.value)}>
-                {plan.allowed_template_ids.map(item => (
-                  <option key={item} value={item}>{item}</option>
+                {osOptions(plan.allowed_template_ids).map(item => (
+                  <option key={item.id} value={item.id}>{item.label}</option>
                 ))}
               </select>
             </label>
@@ -797,7 +798,7 @@ function HostedNodeCard({
               <tr key={plan.id}>
                 <td>
                   <strong>{plan.name}</strong>
-                  <small className="block">{virtNames[plan.virtualization]} · {plan.allowed_template_ids.join('、')}</small>
+                  <small className="block">{virtNames[plan.virtualization]} · {osOptions(plan.allowed_template_ids).map(item => item.label).join('、')}</small>
                   <small className="block">
                     {plan.purchase_limit ? `每人限购 ${plan.purchase_limit} 台` : '不限购'} · {plan.early_refund ? '允许早期全额退款' : '按比例退款'}
                   </small>

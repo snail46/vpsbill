@@ -50,6 +50,10 @@ type Service struct {
 	samples   map[string]sample
 
 	diskPerf atomic.Pointer[protocol.DiskPerf]
+
+	// background tracks work left running after a reply, such as
+	// installing packages; tests wait for it.
+	background sync.WaitGroup
 }
 
 type sample struct {
@@ -377,6 +381,7 @@ func (s *Service) ensure(ctx context.Context, spec protocol.CreateSpec) (protoco
 			return protocol.EnsureResult{}, err
 		}
 		s.tuneNetwork(ctx, runtime, spec.Name)
+		s.installPackages(ctx, runtime, spec.Name)
 		if err := s.store.Update(spec.Name, func(current *InstanceRecord) (*InstanceRecord, error) {
 			current.PasswordSet = true
 			return current, nil
@@ -548,6 +553,22 @@ func (s *Service) tuneNetwork(ctx context.Context, runtime Runtime, name string)
 	}
 }
 
+// installPackages adds the everyday tools an image lacks (packagesScript)
+// in the background: downloading them must not hold up the reply, and the
+// instance is usable meanwhile. A failure, such as an instance without
+// internet access, only costs the tools, never the instance.
+func (s *Service) installPackages(_ context.Context, runtime Runtime, name string) {
+	s.background.Add(1)
+	go func() {
+		defer s.background.Done()
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		if err := runtime.Exec(ctx, name, packagesScript, nil); err != nil {
+			s.logger.Warn("installing common packages failed", "name", name, "error", err)
+		}
+	}()
+}
+
 func (s *Service) ensureSSHMapping(ctx context.Context, name string) error {
 	record, _ := s.store.Get(name)
 	for _, mapping := range record.Mappings {
@@ -673,6 +694,7 @@ func (s *Service) reinstall(ctx context.Context, params protocol.ReinstallParams
 			return err
 		}
 		s.tuneNetwork(ctx, runtime, params.Name)
+		s.installPackages(ctx, runtime, params.Name)
 		return s.store.Update(params.Name, func(current *InstanceRecord) (*InstanceRecord, error) {
 			current.PasswordSet = true
 			return current, nil
@@ -724,7 +746,7 @@ func (s *Service) mutateLocked(ctx context.Context, method string, params protoc
 	switch method {
 	case protocol.MethodAddPortMapping:
 		if previous.PortMappingLimit > 0 && len(previous.Mappings) >= previous.PortMappingLimit {
-			return nil, errorf(protocol.CodeConflict, "port mapping limit %d reached", previous.PortMappingLimit)
+			return nil, errorf(protocol.CodeConflict, "端口映射已达上限 %d 条", previous.PortMappingLimit)
 		}
 		if mapping.PublicPort == 0 {
 			port, err := s.freePort()
@@ -743,7 +765,12 @@ func (s *Service) mutateLocked(ctx context.Context, method string, params protoc
 		if method == protocol.MethodDeletePortMapping {
 			next.Mappings = append(next.Mappings[:params.Index], next.Mappings[params.Index+1:]...)
 		} else {
-			mapping.PublicPort = next.Mappings[params.Index].PublicPort
+			// A new public port may be asked for; 0 keeps the current one.
+			if current := next.Mappings[params.Index].PublicPort; mapping.PublicPort == 0 || mapping.PublicPort == current {
+				mapping.PublicPort = current
+			} else if err := s.checkPublicPort(mapping.PublicPort); err != nil {
+				return nil, err
+			}
 			next.Mappings[params.Index] = mapping
 		}
 	}
@@ -770,10 +797,10 @@ func (s *Service) usedPorts() map[int]bool {
 
 func (s *Service) checkPublicPort(port int) error {
 	if port < s.config.PortRangeStart || port > s.config.PortRangeEnd {
-		return errorf(protocol.CodeInvalid, "public port must be within %d-%d", s.config.PortRangeStart, s.config.PortRangeEnd)
+		return errorf(protocol.CodeInvalid, "公网端口需在 %d-%d 之间", s.config.PortRangeStart, s.config.PortRangeEnd)
 	}
 	if s.usedPorts()[port] {
-		return errorf(protocol.CodeConflict, "public port %d is already mapped", port)
+		return errorf(protocol.CodeConflict, "公网端口 %d 已被占用，请换一个", port)
 	}
 	return nil
 }
@@ -792,7 +819,7 @@ func (s *Service) freePort() (int, error) {
 			return port, nil
 		}
 	}
-	return 0, errorf(protocol.CodeConflict, "no free public port in %d-%d", start, end)
+	return 0, errorf(protocol.CodeConflict, "%d-%d 之间已没有空闲的公网端口", start, end)
 }
 
 func (s *Service) applyNAT(ctx context.Context) error {

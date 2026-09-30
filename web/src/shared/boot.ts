@@ -106,31 +106,60 @@ function applyBoot(boot: Boot) {
   applyMeta(boot.meta)
 }
 
-// applyMeta shows the site name in the browser tab and the site logo.
-function applyMeta(meta: Meta) {
-  if (meta.name) document.title = meta.name
-  setSiteLogo(meta.logo_url ?? '')
+let meta: Meta | null = null
+
+// siteMeta is the site facts from the last boot, for settings a page reads
+// once (such as the trading market's holding period).
+export function siteMeta() {
+  return meta
 }
+
+// applyMeta shows the site name in the browser tab and the site logo.
+function applyMeta(value: Meta) {
+  meta = value
+  if (value.name) document.title = value.name
+  setSiteLogo(value.logo_url ?? '', value.logo_mode)
+}
+
+// LogoMode is how the logo sits beside the site name: auto decides by the
+// image's shape, icon keeps the name beside it, wordmark (a logo that
+// already carries the brand name) takes the name's place.
+export type LogoMode = 'auto' | 'icon' | 'wordmark'
 
 // The site logo is a small store so changing it in the settings updates
 // every mark on the page at once.
 let logo = ''
+let logoMode: LogoMode = 'auto'
+let brand: { logo: string; mode: LogoMode } = { logo, mode: logoMode }
 const listeners = new Set<() => void>()
 
-export function setSiteLogo(url: string) {
-  if (url === logo) return
+export function setSiteLogo(url: string, mode?: LogoMode) {
+  const nextMode = mode ?? logoMode
+  if (url === logo && nextMode === logoMode) return
+  logoMode = nextMode
+  brand = { logo: url, mode: nextMode }
+  if (url === logo) {
+    listeners.forEach(listener => listener())
+    return
+  }
   logo = url
   const icon = document.querySelector<HTMLLinkElement>('link[rel="icon"]')
   if (icon) icon.href = url || icon.dataset.default || ''
   listeners.forEach(listener => listener())
 }
 
+function subscribe(listener: () => void) {
+  listeners.add(listener)
+  return () => {
+    listeners.delete(listener)
+  }
+}
+
 export function useSiteLogo() {
-  return useSyncExternalStore(
-    listener => {
-      listeners.add(listener)
-      return () => listeners.delete(listener)
-    },
-    () => logo,
-  )
+  return useSyncExternalStore(subscribe, () => logo)
+}
+
+// useSiteBrand is the logo with how to show it.
+export function useSiteBrand() {
+  return useSyncExternalStore(subscribe, () => brand)
 }

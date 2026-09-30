@@ -13,9 +13,19 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// TradeHoldDays is how long an owner must have held an instance before
-// listing it in the trading market.
-const TradeHoldDays = 31
+// DefaultTradeHoldDays is how long an owner must have held an instance
+// before listing it in the trading market, unless the site settings say
+// otherwise (system_settings.trade_hold_days).
+const DefaultTradeHoldDays = 31
+
+// TradeHoldDays reads the holding period from the site settings.
+func TradeHoldDays(ctx context.Context, db interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+}) int {
+	days := DefaultTradeHoldDays
+	_ = db.QueryRow(ctx, `SELECT trade_hold_days FROM system_settings WHERE singleton=true`).Scan(&days)
+	return days
+}
 
 // TradeMinRemainingDays is how much paid time an instance must have left to
 // stay listed; listings closer to expiry are withdrawn.
@@ -211,8 +221,9 @@ func (s *TradeStore) CreateListing(ctx context.Context, seller, userID, serviceI
 	if status != "active" || refunded != nil {
 		return "", &TradeError{"只有正常运行中的实例可以挂售"}
 	}
-	if wait := time.Until(acquired.AddDate(0, 0, TradeHoldDays)); wait > 0 {
-		return "", &TradeError{fmt.Sprintf("持有满 %d 天的实例才能挂售，这台实例还需 %d 天", TradeHoldDays, int(math.Ceil(wait.Hours()/24)))}
+	holdDays := TradeHoldDays(ctx, tx)
+	if wait := time.Until(acquired.AddDate(0, 0, holdDays)); wait > 0 {
+		return "", &TradeError{fmt.Sprintf("持有满 %d 天的实例才能挂售，这台实例还需 %d 天", holdDays, int(math.Ceil(wait.Hours()/24)))}
 	}
 	switch {
 	case nextDue == nil || time.Until(*nextDue) < TradeMinRemainingDays*24*time.Hour:

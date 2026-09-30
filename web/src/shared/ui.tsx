@@ -3,7 +3,7 @@ import { Plus, Send, ShieldCheck } from 'lucide-react'
 import { api, TicketDetailRecord } from '../api'
 import { AttachmentGallery, AttachmentPicker } from '../TicketAttachments'
 import { formatTime, startOfDay } from './time'
-import { useSiteLogo } from './boot'
+import { useSiteBrand, useSiteLogo } from './boot'
 
 export type Meta = {
   name: string
@@ -16,6 +16,8 @@ export type Meta = {
   public_url?: string
   // logo_url is the site logo; empty shows the default mark.
   logo_url?: string
+  logo_mode?: 'auto' | 'icon' | 'wordmark'
+  trade_hold_days?: number
   ticket_attachment_max_mb?: number
   marketplace_enabled?: boolean
 }
@@ -45,6 +47,67 @@ export function BrandMark() {
   const [failed, setFailed] = useState('')
   if (logo && failed !== logo) return <img className="brand-logo" src={logo} alt="" onError={() => setFailed(logo)} />
   return <div className="brand-mark">VB</div>
+}
+
+// A logo at least this much wider than tall is taken for a word mark (one
+// that carries the brand name) when the logo mode is auto.
+const wordmarkRatio = 1.8
+
+function readShape(url: string): boolean | null {
+  try {
+    const value = localStorage.getItem('vpsbill-logo-shape')
+    const [key, wide] = (value ?? '').split('|')
+    return key === url ? wide === '1' : null
+  } catch {
+    return null
+  }
+}
+
+function saveShape(url: string, wide: boolean) {
+  try {
+    localStorage.setItem('vpsbill-logo-shape', `${url}|${wide ? '1' : '0'}`)
+  } catch {
+    // private mode: the shape is measured again next time
+  }
+}
+
+// Brand is the logo with the site name and a subtitle, as in the top-left
+// corner. A logo that already carries the brand name (a word mark) takes
+// the name's place instead of repeating it beside the logo.
+export function Brand({ name, subtitle, className = '' }: { name: string; subtitle: string; className?: string }) {
+  const { logo, mode } = useSiteBrand()
+  const [failed, setFailed] = useState('')
+  const [measured, setMeasured] = useState<{ url: string; wide: boolean } | null>(null)
+  const shown = logo && failed !== logo ? logo : ''
+  const wide = measured?.url === shown ? measured.wide : shown ? readShape(shown) : null
+  const wordmark = Boolean(shown) && (mode === 'wordmark' || (mode !== 'icon' && wide === true))
+  const measure = (image: HTMLImageElement) => {
+    if (!image.naturalWidth || !image.naturalHeight) return
+    const value = image.naturalWidth / image.naturalHeight >= wordmarkRatio
+    saveShape(shown, value)
+    setMeasured({ url: shown, wide: value })
+  }
+  if (wordmark) {
+    return (
+      <div className={`brand brand-wordmark ${className}`.trim()}>
+        <img className="brand-wordmark-logo" src={shown} alt={name} title={name} onLoad={event => measure(event.currentTarget)} onError={() => setFailed(shown)} />
+        {subtitle && <span>{subtitle}</span>}
+      </div>
+    )
+  }
+  return (
+    <div className={`brand ${className}`.trim()}>
+      {shown ? (
+        <img className="brand-logo" src={shown} alt="" onLoad={event => measure(event.currentTarget)} onError={() => setFailed(shown)} />
+      ) : (
+        <div className="brand-mark">VB</div>
+      )}
+      <div>
+        <strong>{name}</strong>
+        <span>{subtitle}</span>
+      </div>
+    </div>
+  )
 }
 
 // SessionLoading shows only when loading takes a while (see styles.css),

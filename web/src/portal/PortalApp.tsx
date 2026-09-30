@@ -8,7 +8,7 @@ import HostingCenter from '../Hosting'
 import TradeMarket from '../Trade'
 import { ThemeToggle } from '../ThemeToggle'
 import { EmailVerifyBanner } from '../EmailVerify'
-import { Meta, SessionLoading, Field, BrandMark } from '../shared/ui'
+import { Meta, SessionLoading, Field, Brand, BrandMark } from '../shared/ui'
 import { Boot, freshBoot, inlineBoot, loadBoot } from '../shared/boot'
 import { CustomerAnnouncements, CustomerOverview } from './Overview'
 import { navigatePortal } from '../shared/nav'
@@ -221,13 +221,7 @@ export function CustomerAuthPage({
   return (
     <main className="auth-page customer-auth-page">
       <section className="auth-brand-panel customer-brand-panel">
-        <div className="brand auth-brand">
-          <BrandMark />
-          <div>
-            <strong>{siteName}</strong>
-            <span>客户服务中心</span>
-          </div>
-        </div>
+        <Brand className="auth-brand" name={siteName} subtitle="客户服务中心" />
         <div>
           <p className="eyebrow">YOUR CLOUD, UNDER CONTROL</p>
           <h1>随心挑选、配置与管理你的 VPS 实例。</h1>
@@ -347,13 +341,7 @@ export function CustomerShell({ customer, siteName, onLogout }: { customer: Cust
   return (
     <div className="app-shell customer-shell">
       <aside className={menuOpen ? 'sidebar menu-open' : 'sidebar'}>
-        <div className="brand">
-          <BrandMark />
-          <div>
-            <strong>{siteName || '客户中心'}</strong>
-            <span>客户中心</span>
-          </div>
-        </div>
+        <Brand name={siteName || '客户中心'} subtitle="客户中心" />
         <button type="button" className="menu-toggle" aria-label={menuOpen ? '关闭菜单' : '打开菜单'} aria-expanded={menuOpen} onClick={() => setMenuOpen(open => !open)}>
           {menuOpen ? <X size={20} /> : <Menu size={20} />}
           <span>{titles[view]}</span>

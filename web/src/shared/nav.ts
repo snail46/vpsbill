@@ -17,26 +17,52 @@ const codenames: Record<string, string> = {
   noble: 'Ubuntu 24.04', jammy: 'Ubuntu 22.04', focal: 'Ubuntu 20.04',
 }
 
+// osOptions names the images a customer may pick by system and version
+// only (osLabel), without the image references' prefixes. Two images that
+// read the same are told apart by what their ids add (such as "cloud").
+export function osOptions(ids: string[]) {
+  const labels = ids.map(id => osLabel(id))
+  return ids.map((id, index) => {
+    const label = labels[index]
+    if (labels.indexOf(label) === labels.lastIndexOf(label)) return { id, label }
+    const extra = (id.split('/').pop() ?? id)
+      .split(':')[0]
+      .split(/[-_.]/)
+      .filter(part => /^[a-z]{3,}$/i.test(part) && !label.toLowerCase().includes(part.toLowerCase()) && !['hatch', 'localhost', 'latest', 'lxc', 'amd64', 'all'].includes(part.toLowerCase()))
+      .join(' ')
+    const sameBefore = labels.slice(0, index).filter(other => other === label).length
+    return { id, label: extra ? `${label}（${extra}）` : `${label}（${sameBefore + 1}）` }
+  })
+}
+
 // osLabel turns a template id (an image alias or reference such as
 // localhost/hatch-debian12:latest or ubuntu-2404-lxc) into a readable
-// system name, falling back to the id itself.
+// system name, falling back to the bare image name.
 export function osLabel(id: string) {
   if (!id) return '—'
-  const name = (id.split('/').pop() ?? id).split(':')[0].toLowerCase()
-  for (const [codename, label] of Object.entries(codenames)) if (name.includes(codename)) return label
+  // The whole reference without its tag: some name the system in the path
+  // (images:rockylinux/9).
+  const reference = id.toLowerCase().replace(/:[^/:]*$/, '')
+  const name = reference.split('/').pop() || reference
+  for (const [codename, label] of Object.entries(codenames)) if (reference.includes(codename)) return label
   const rules: [RegExp, (match: RegExpMatchArray) => string][] = [
     [/ubuntu[-_ ]?(\d{2})\.?(\d{2})/, m => `Ubuntu ${m[1]}.${m[2]}`],
+    [/ubuntu[-_ ]?(\d{2})(?!\d)/, m => `Ubuntu ${m[1]}.04`],
     [/debian[-_ ]?(\d{1,2})(?!\d)/, m => `Debian ${m[1]}`],
-    [/alpine[-_ ]?(\d+\.\d+)?/, m => (m[1] ? `Alpine ${m[1]}` : 'Alpine')],
-    [/(rocky|almalinux|centos|fedora|opensuse|arch|oracle)[-_ ]?(\d+(?:\.\d+)?)?/, m => {
+    [/alpine[-_ ]?(\d+\.\d+)/, m => `Alpine ${m[1]}`],
+    [/alpine[-_ ]?(\d)(\d{2})(?!\d)/, m => `Alpine ${m[1]}.${m[2]}`],
+    [/alpine/, () => 'Alpine'],
+    [/(rocky|almalinux|centos|fedora|opensuse|arch|oracle)(?:linux)?[-_ /]?(\d+(?:\.\d+)?)?/, m => {
       const names: Record<string, string> = { rocky: 'Rocky Linux', almalinux: 'AlmaLinux', centos: 'CentOS', fedora: 'Fedora', opensuse: 'openSUSE', arch: 'Arch Linux', oracle: 'Oracle Linux' }
       return m[2] ? `${names[m[1]]} ${m[2]}` : names[m[1]]
     }],
   ]
   for (const [pattern, format] of rules) {
-    const match = name.match(pattern)
+    const match = reference.match(pattern)
     if (match) return format(match)
   }
-  return id
+  // Other systems: at least drop the registry path, the tag and the
+  // image-name prefix.
+  return name.replace(/^hatch-/, '') || id
 }
 

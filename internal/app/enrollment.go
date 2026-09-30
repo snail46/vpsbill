@@ -43,27 +43,40 @@ func AgentEnroller(catalog *postgres.CatalogStore, box *security.SecretBox, logg
 }
 
 // agentIP tells an agent the address it connects from, which is its public
-// IPv4 when the host itself only has a private one (1:1 NAT). An agent that
-// reaches the site over a private address (the billing server's own
-// machine, seen through the Docker bridge, or the same LAN) shares the
-// site's public address, taken from the public URL.
+// IPv4 when the host itself only has a private one (1:1 NAT). It answers
+// nothing when it cannot tell, and the agent then asks the internet (see
+// agent.DetectPublicIPv4).
+//
+// A Cloudflare Tunnel pointed at a direct port reaches nginx from a private
+// address, with the agent's address in CF-Connecting-IP; the header is used
+// here only, since an agent can gain nothing by lying about itself. The
+// site's domain is never resolved for this: behind a CDN or a tunnel it
+// names the CDN's anycast address, not the host.
 func agentIP(runtime *settings.Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		address := remoteIP(r)
-		if ip := net.ParseIP(address); ip == nil || ip.IsLoopback() || ip.IsPrivate() || cgnat.Contains(ip) {
-			address = ""
-			if site, err := url.Parse(runtime.Current().PublicURL); err == nil {
-				if ip := net.ParseIP(site.Hostname()); ip != nil {
-					address = ip.String()
-				} else if ips, err := net.DefaultResolver.LookupIP(r.Context(), "ip4", site.Hostname()); err == nil && len(ips) > 0 {
-					address = ips[0].String()
-				}
+		address := ""
+		for _, candidate := range []string{remoteIP(r), r.Header.Get("CF-Connecting-IP")} {
+			if ip := net.ParseIP(strings.TrimSpace(candidate)); publicIPv4(ip) {
+				address = ip.String()
+				break
+			}
+		}
+		// The billing server's own machine: its public URL may name it by
+		// address.
+		if site, err := url.Parse(runtime.Current().PublicURL); address == "" && err == nil {
+			if ip := net.ParseIP(site.Hostname()); publicIPv4(ip) {
+				address = ip.String()
 			}
 		}
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-store")
 		_, _ = w.Write([]byte(address))
 	}
+}
+
+// publicIPv4 reports whether ip is an IPv4 address the internet can reach.
+func publicIPv4(ip net.IP) bool {
+	return ip != nil && ip.To4() != nil && ip.IsGlobalUnicast() && !ip.IsPrivate() && !cgnat.Contains(ip)
 }
 
 // cgnat is the carrier-grade NAT range, private in practice.

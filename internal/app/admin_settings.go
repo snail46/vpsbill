@@ -40,7 +40,9 @@ func (a adminSettings) updatePayment(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a adminSettings) site(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"data": a.settings.SiteView()})
+	view := a.settings.SiteView()
+	view.ProxyWarning = proxyWarning()
+	writeJSON(w, http.StatusOK, map[string]any{"data": view})
 }
 
 func (a adminSettings) updateSite(w http.ResponseWriter, r *http.Request) {

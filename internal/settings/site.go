@@ -41,6 +41,10 @@ type SiteView struct {
 	// it comes from another site.
 	Logo            string `json:"logo_url"`
 	LogoExternalURL string `json:"logo_external_url"`
+	LogoMode        string `json:"logo_mode"`
+	// ProxyWarning describes a reverse proxy set up so that visitors' real
+	// addresses are lost; the HTTP layer fills it in.
+	ProxyWarning string `json:"proxy_warning,omitempty"`
 }
 
 // SiteInput updates the site settings. Empty secrets keep the stored value;
@@ -68,6 +72,10 @@ type SiteInput struct {
 	MailNotifications         MailNotifications   `json:"mail_notifications"`
 	TicketAttachmentMaxMB     int                 `json:"ticket_attachment_max_mb"`
 	Marketplace               MarketplaceSettings `json:"marketplace"`
+	// LogoMode is auto (decided by the image's shape), icon (the site
+	// name stays beside the logo) or wordmark (the logo already carries
+	// the brand name and takes its place); empty keeps the current one.
+	LogoMode string `json:"logo_mode"`
 }
 
 func (m *Manager) SiteView() SiteView {
@@ -81,7 +89,7 @@ func (m *Manager) SiteView() SiteView {
 		SMTPHost: c.SMTP.Host, SMTPPort: c.SMTP.Port, SMTPUsername: c.SMTP.Username, SMTPPasswordConfigured: c.SMTP.Password != "",
 		SMTPFrom: c.SMTP.From, SMTPSecurity: c.SMTP.Security, PasswordResetMailEnabled: c.SMTP.Configured(),
 		MailNotifications: c.MailNotifications, TicketAttachmentMaxMB: c.TicketAttachmentMaxMB, Marketplace: c.Marketplace,
-		Logo: c.Logo(), LogoExternalURL: c.LogoURL,
+		Logo: c.Logo(), LogoExternalURL: c.LogoURL, LogoMode: c.LogoMode,
 	}
 }
 
@@ -183,6 +191,16 @@ func (m *Manager) UpdateSite(ctx context.Context, in SiteInput, actorID string) 
 	if in.Marketplace.TradeFeePercent < 0 || in.Marketplace.TradeFeePercent > 90 {
 		return invalid("交易市场手续费比例必须在 0–90% 之间")
 	}
+	if in.Marketplace.TradeHoldDays < 0 || in.Marketplace.TradeHoldDays > 365 {
+		return invalid("交易市场挂售门槛必须在 0–365 天之间")
+	}
+	logoMode := strings.TrimSpace(in.LogoMode)
+	if logoMode == "" {
+		logoMode = current.LogoMode
+	}
+	if logoMode != "auto" && logoMode != "icon" && logoMode != "wordmark" {
+		return invalid("Logo 显示方式无效")
+	}
 	for _, ratio := range []float64{in.Marketplace.MaxOvercommitCPU, in.Marketplace.MaxOvercommitRAM, in.Marketplace.MaxOvercommitDisk, in.Marketplace.MaxOvercommitTraffic} {
 		if ratio < 1 || ratio > 20 {
 			return invalid("超售倍数上限必须在 1–20 之间")
@@ -216,14 +234,15 @@ func (m *Manager) UpdateSite(ctx context.Context, in SiteInput, actorID string) 
 		    smtp_host=$12,smtp_port=$13,smtp_username=$14,smtp_password_encrypted=$15,smtp_from=$16,smtp_security=$17,
 		    mail_notifications=$18,ticket_attachment_max_mb=$19,
 		    marketplace_enabled=$20,marketplace_fee_percent=$21,marketplace_offline_hours=$22,trade_fee_percent=$23,admin_url=$24,
-		    max_overcommit_cpu=$25,max_overcommit_ram=$26,max_overcommit_disk=$27,max_overcommit_traffic=$28,updated_at=now()
+		    max_overcommit_cpu=$25,max_overcommit_ram=$26,max_overcommit_disk=$27,max_overcommit_traffic=$28,trade_hold_days=$29,logo_mode=$30,updated_at=now()
 		WHERE singleton=true
 	`, appName, publicURL, timezone,
 		seconds(*durations[0].target), seconds(*durations[1].target), seconds(*durations[2].target),
 		seconds(*durations[3].target), seconds(*durations[4].target), seconds(*durations[5].target),
 		notificationURL, notificationEnc, smtp.Host, smtp.Port, smtp.Username, smtpPasswordEnc, smtp.From, smtp.Security, notificationsJSON, in.TicketAttachmentMaxMB,
 		in.Marketplace.Enabled, in.Marketplace.FeePercent, in.Marketplace.OfflineHours, in.Marketplace.TradeFeePercent, adminURL,
-		in.Marketplace.MaxOvercommitCPU, in.Marketplace.MaxOvercommitRAM, in.Marketplace.MaxOvercommitDisk, in.Marketplace.MaxOvercommitTraffic)
+		in.Marketplace.MaxOvercommitCPU, in.Marketplace.MaxOvercommitRAM, in.Marketplace.MaxOvercommitDisk, in.Marketplace.MaxOvercommitTraffic,
+		in.Marketplace.TradeHoldDays, logoMode)
 	if err != nil {
 		return SiteView{}, err
 	}

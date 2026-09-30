@@ -3,8 +3,10 @@ package hatchprovider
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
+	"net/netip"
 
 	"vpsbill/internal/hatch/gateway"
 	"vpsbill/internal/hatch/protocol"
@@ -19,17 +21,41 @@ func Register(hub *gateway.Hub) {
 	provider.Register(provider.Descriptor{
 		Type: Type, Name: "Hatch Agent", CredentialLabel: "Agent 令牌",
 		VirtualizationTypes: []string{"lxc", "podman"}, AgentManaged: true,
+		Options: []provider.OptionField{
+			{Key: "public_ipv4", Label: "公网 IPv4（可选）", Kind: "text", Placeholder: "留空使用 Agent 自动检测的地址",
+				Help: "客户看到的 SSH 和端口映射地址。Agent 检测不准时填写，例如母机只有内网地址、经 NAT 或隧道对外"},
+		},
 	}, func(config provider.Config) (provider.Driver, error) {
 		if len(config.Credential) < 32 {
 			return nil, errors.New("Agent 令牌无效")
 		}
-		return &Driver{hub: hub, endpoint: provider.AgentEndpoint(config.Credential)}, nil
+		var options Options
+		if len(config.Options) > 0 {
+			if err := json.Unmarshal(config.Options, &options); err != nil {
+				return nil, errors.New("节点设置无效")
+			}
+		}
+		if options.PublicIPv4 != "" {
+			addr, err := netip.ParseAddr(options.PublicIPv4)
+			if err != nil || !addr.Is4() {
+				return nil, errors.New("公网 IPv4 格式不正确")
+			}
+		}
+		return &Driver{hub: hub, endpoint: provider.AgentEndpoint(config.Credential), publicIPv4: options.PublicIPv4}, nil
 	})
+}
+
+// Options are a node's settings beside what its agent reports.
+type Options struct {
+	// PublicIPv4 replaces the address the agent detected.
+	PublicIPv4 string `json:"public_ipv4"`
 }
 
 type Driver struct {
 	hub      *gateway.Hub
 	endpoint string
+	// publicIPv4 overrides the agent's own public address when set.
+	publicIPv4 string
 }
 
 var (
@@ -74,7 +100,7 @@ func (d *Driver) HostInfo(ctx context.Context) (provider.HostInfo, error) {
 	}
 	raw := map[string]any{
 		"hostname": info.Hostname, "agent_version": info.AgentVersion, "runtimes": info.Runtimes,
-		"public_ipv4": info.PublicIPv4, "details": info.Details, "detected": info.Detected,
+		"public_ipv4": d.publicAddress(info.PublicIPv4), "details": info.Details, "detected": info.Detected,
 	}
 	result := provider.HostInfo{Raw: raw, MachineID: info.MachineID,
 		Capacity: provider.Capacity{VCPU: info.Capacity.VCPU, RAMMB: info.Capacity.RAMMB, DiskGB: info.Capacity.DiskGB}}
@@ -123,7 +149,7 @@ func (d *Driver) EnsureInstance(ctx context.Context, spec provider.CreateSpec) (
 	if err != nil {
 		return provider.EnsureResult{}, err
 	}
-	return provider.EnsureResult{Instance: instance(result.Instance), Created: result.Created}, nil
+	return provider.EnsureResult{Instance: d.instance(result.Instance), Created: result.Created}, nil
 }
 
 func (d *Driver) GetInstance(ctx context.Context, name string) (provider.Instance, error) {
@@ -131,7 +157,7 @@ func (d *Driver) GetInstance(ctx context.Context, name string) (provider.Instanc
 	if err := d.call(ctx, protocol.MethodGet, protocol.NameParams{Name: name}, &value); err != nil {
 		return provider.Instance{}, err
 	}
-	return instance(value), nil
+	return d.instance(value), nil
 }
 
 func (d *Driver) PowerAction(ctx context.Context, name, action string) (string, error) {
@@ -208,7 +234,17 @@ func (d *Driver) InstanceTraffic(ctx context.Context, name string) (any, error) 
 // InstanceHistory is not collected by the agent yet.
 func (d *Driver) InstanceHistory(context.Context, string) (any, error) { return nil, nil }
 
-func instance(value protocol.Instance) provider.Instance {
+// publicAddress is the node's public IPv4: the configured one, else what
+// the agent detected.
+func (d *Driver) publicAddress(detected string) string {
+	if d.publicIPv4 != "" {
+		return d.publicIPv4
+	}
+	return detected
+}
+
+func (d *Driver) instance(value protocol.Instance) provider.Instance {
+	value.PublicIPv4 = d.publicAddress(value.PublicIPv4)
 	ip := value.PublicIPv4
 	if ip == "" {
 		ip = value.PrivateIPv4

@@ -132,6 +132,7 @@ func NewHandler(deps Dependencies) (http.Handler, error) {
 	mux.Handle("GET /api/v1/customer/services/{id}/credential", auth.requireCustomer(http.HandlerFunc(portal.serviceCredential)))
 	mux.Handle("POST /api/v1/customer/services/{id}/reset-password", auth.requireCustomer(http.HandlerFunc(portal.resetServicePassword)))
 	mux.Handle("POST /api/v1/customer/services/{id}/reinstall", auth.requireCustomer(http.HandlerFunc(portal.reinstallService)))
+	mux.Handle("GET /api/v1/customer/services/{id}/reinstall", auth.requireCustomer(http.HandlerFunc(portal.reinstallStatus)))
 	mux.Handle("POST /api/v1/customer/services/{id}/port-mappings", auth.requireCustomer(http.HandlerFunc(portal.addPortMapping)))
 	mux.Handle("PUT /api/v1/customer/services/{id}/port-mappings/{index}", auth.requireCustomer(http.HandlerFunc(portal.updatePortMapping)))
 	mux.Handle("DELETE /api/v1/customer/services/{id}/port-mappings/{index}", auth.requireCustomer(http.HandlerFunc(portal.deletePortMapping)))
@@ -247,6 +248,7 @@ func NewHandler(deps Dependencies) (http.Handler, error) {
 	}
 	mux.Handle("POST /api/v1/admin/settings/logo", auth.require("settings:write", http.HandlerFunc(adminSettings.uploadLogo)))
 	mux.Handle("PUT /api/v1/admin/settings/logo", auth.require("settings:write", http.HandlerFunc(adminSettings.linkLogo)))
+	mux.Handle("PUT /api/v1/admin/settings/logo/mode", auth.require("settings:write", http.HandlerFunc(adminSettings.logoMode)))
 	mux.Handle("POST /api/v1/admin/settings/site/test-mail", auth.require("settings:write", http.HandlerFunc(adminSettings.testMail)))
 	mux.Handle("GET /api/v1/admin/services", auth.require("services:read", http.HandlerFunc(automation.listServices)))
 	mux.Handle("GET /api/v1/admin/jobs", auth.require("services:read", http.HandlerFunc(automation.listJobs)))
@@ -286,7 +288,7 @@ func NewHandler(deps Dependencies) (http.Handler, error) {
 	mux.HandleFunc("POST /api/v1/webhooks/payments/epay", billing.epayWebhook)
 	mux.HandleFunc("POST /api/v1/webhooks/payments/alipay", billing.alipayWebhook)
 
-	return requestLog(deps.Logger, securityHeaders(maintenance(deps.Backups, surfaceGate(installationGate(deps.Settings, mux))))), nil
+	return requestLog(deps.Logger, securityHeaders(watchProxy(maintenance(deps.Backups, surfaceGate(installationGate(deps.Settings, mux)))))), nil
 }
 
 func installationGate(runtime *settings.Manager, next http.Handler) http.Handler {

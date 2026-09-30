@@ -57,7 +57,9 @@ ACCESS_MODE=cloudflare
 CLOUDFLARE_TUNNEL_TOKEN=从 Cloudflare 复制的令牌
 ```
 
-`deploy.sh` 会启动 `cloudflared` 容器，服务器不需要开放任何入站端口。建议在 Cloudflare Access 里给后台域名加一层登录保护。
+`deploy.sh` 会启动 `cloudflared` 容器，服务器不需要开放任何入站端口。
+
+隧道的服务地址必须是 `web:8080` / `web:8081`（或自己装的 cloudflared 指向 `127.0.0.1` 上的可信端口）。如果指向了直连端口（如 `http://localhost:8088`），所有访客都会被识别成 Docker 内网地址：登录限流互相影响，审计日志和登录记录看不到真实 IP。系统检测到这种情况时，会在后台「站点设置」顶部提示。建议在 Cloudflare Access 里给后台域名加一层登录保护。
 
 ### proxy：自己的反向代理
 

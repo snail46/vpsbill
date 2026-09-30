@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react'
 import { api, cached, CustomerCatalogRecord, CustomerIdentity, OrderRecord, PaymentIntentRecord } from '../api'
+import { osOptions } from '../shared/nav'
 import { CouponField } from '../Coupons'
 import { cycleLabel, money } from '../shared/ui'
 import { cycleOrder, priceLeft } from '../shared/cycles'
@@ -181,9 +182,9 @@ export function CustomerShop({ customer }: { customer: CustomerIdentity }) {
             <label>
               <span>操作系统镜像</span>
               <select key={selected.id} name="template_id" defaultValue={selected.default_template_id}>
-                {selected.allowed_template_ids.map(template => (
-                  <option key={template} value={template}>
-                    {template}
+                {osOptions(selected.allowed_template_ids).map(template => (
+                  <option key={template.id} value={template.id}>
+                    {template.label}
                   </option>
                 ))}
               </select>

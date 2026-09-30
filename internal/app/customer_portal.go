@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httputil"
 	"strconv"
@@ -262,6 +263,9 @@ func containsString(values []string, expected string) bool {
 	return false
 }
 
+// reinstallService starts a reinstall and answers at once; it runs in the
+// background, and the page follows it through reinstallStatus. An empty
+// password keeps the instance's stored root password.
 func (p *customerPortal) reinstallService(w http.ResponseWriter, r *http.Request) {
 	var input struct {
 		TemplateID string `json:"template_id"`
@@ -286,34 +290,89 @@ func (p *customerPortal) reinstallService(w http.ResponseWriter, r *http.Request
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "template_not_allowed", "message": "所选系统不在当前套餐允许的模板中"})
 		return
 	}
-	if !validRootPassword(input.Password) {
-		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "invalid_password", "message": "请设置 8-64 位且同时包含字母和数字的新 root 密码"})
+	password, newPassword := input.Password, input.Password != ""
+	if newPassword && !validRootPassword(password) {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "invalid_password", "message": "新 root 密码需为 8-64 位且同时包含字母和数字，或者留空沿用当前密码"})
 		return
 	}
-	// Agent-driven reinstalls finish before replying and can outlast the
-	// server's default write timeout.
-	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(15 * time.Minute))
-	taskID, err := reinstaller.Reinstall(r.Context(), access.InstanceName, provider.ReinstallSpec{TemplateID: input.TemplateID, Password: input.Password})
+	if !newPassword {
+		if len(access.RootPasswordCiphertext) > 0 {
+			password, err = p.box.Open(access.RootPasswordCiphertext)
+		}
+		if err != nil || password == "" {
+			writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "password_required", "message": "这台实例没有留存 root 密码，请设置新的 root 密码"})
+			return
+		}
+	}
+	identity := customerPrincipalFromContext(r.Context())
+	state, err := p.store.StartReinstall(r.Context(), identity.AccountID, access.ServiceID, input.TemplateID)
+	if errors.Is(err, postgres.ErrReinstallRunning) {
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "reinstall_running", "message": "这台实例正在重装，请等待完成"})
+		return
+	}
 	if err != nil {
 		p.writeServiceError(w, err)
 		return
 	}
-	ciphertext, err := p.box.Seal(input.Password)
+	ip, userAgent := remoteIP(r), r.UserAgent()
+	// The reinstall outlives this request.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 15*time.Minute)
+	go func() {
+		defer cancel()
+		failure := ""
+		if err := p.runReinstall(ctx, access, reinstaller, driver, identity, input.TemplateID, password, newPassword, ip, userAgent); err != nil {
+			failure = serviceErrorMessage(err)
+		}
+		if err := p.store.FinishReinstall(context.WithoutCancel(ctx), access.ServiceID, failure); err != nil {
+			slog.Warn("record reinstall result", "service", access.ServiceID, "error", err)
+		}
+	}()
+	writeJSON(w, http.StatusAccepted, map[string]any{"data": state})
+}
+
+func (p *customerPortal) runReinstall(ctx context.Context, access postgres.CustomerServiceAccess, reinstaller provider.Reinstaller, driver provider.Driver,
+	identity postgres.CustomerSessionIdentity, templateID, password string, newPassword bool, ip, userAgent string) error {
+	taskID, err := reinstaller.Reinstall(ctx, access.InstanceName, provider.ReinstallSpec{TemplateID: templateID, Password: password})
+	if err != nil {
+		return err
+	}
+	if newPassword {
+		ciphertext, err := p.box.Seal(password)
+		if err == nil {
+			err = p.store.SaveRootPassword(ctx, identity.AccountID, access.ServiceID, ciphertext)
+		}
+		if err != nil {
+			return customerMessage("系统已重装，但新密码保存失败，请重置密码")
+		}
+	}
+	_ = p.store.SetServiceTemplate(ctx, identity.AccountID, access.ServiceID, templateID)
+	_ = p.store.RecordServiceOperation(ctx, identity.UserID, access.ServiceID, "service.reinstall", ip, userAgent, map[string]any{"template_id": templateID, "external_task_id": taskID})
+	if taskID == "" {
+		return nil
+	}
+	// Backends that queue the work (LXDAPI, CLICD) answer at once; wait
+	// until the instance runs again.
+	for {
+		select {
+		case <-ctx.Done():
+			return customerMessage("节点仍在重装，已超过 15 分钟，请稍后查看实例状态")
+		case <-time.After(5 * time.Second):
+		}
+		if instance, err := driver.GetInstance(ctx, access.InstanceName); err == nil && provider.NormalizeStatus(instance.Status) == "running" {
+			return nil
+		}
+	}
+}
+
+// reinstallStatus reports the service's latest reinstall.
+func (p *customerPortal) reinstallStatus(w http.ResponseWriter, r *http.Request) {
 	identity := customerPrincipalFromContext(r.Context())
-	if err == nil {
-		err = p.store.SaveRootPassword(r.Context(), identity.AccountID, access.ServiceID, ciphertext)
-	}
-	if err == nil {
-		err = p.store.SetServiceTemplate(r.Context(), identity.AccountID, access.ServiceID, input.TemplateID)
-	}
-	if err == nil {
-		err = p.store.RecordServiceOperation(r.Context(), identity.UserID, access.ServiceID, "service.reinstall", remoteIP(r), r.UserAgent(), map[string]any{"template_id": input.TemplateID, "external_task_id": taskID})
-	}
+	state, err := p.store.LatestReinstall(r.Context(), identity.AccountID, r.PathValue("id"))
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "internal_error"})
 		return
 	}
-	writeJSON(w, http.StatusAccepted, map[string]any{"data": map[string]string{"task_id": taskID, "status": "queued"}})
+	writeJSON(w, http.StatusOK, map[string]any{"data": state})
 }
 
 func (p *customerPortal) addPortMapping(w http.ResponseWriter, r *http.Request) {
@@ -355,21 +414,31 @@ func (p *customerPortal) mutatePortMapping(w http.ResponseWriter, r *http.Reques
 		mappings, err = mapper.DeletePortMapping(r.Context(), access.InstanceName, index)
 	} else {
 		var input struct {
-			ContainerPort int    `json:"container_port"`
-			Protocol      string `json:"protocol"`
-			Description   string `json:"description"`
+			ContainerPort int `json:"container_port"`
+			// PublicPort is the port on the node's public address; 0 picks
+			// a free one (new rules) or keeps the current one (changes).
+			PublicPort  int    `json:"public_port"`
+			Protocol    string `json:"protocol"`
+			Description string `json:"description"`
 		}
 		if !decodeJSON(w, r, &input) {
 			return
 		}
 		input.Protocol = strings.ToLower(strings.TrimSpace(input.Protocol))
 		input.Description = strings.TrimSpace(input.Description)
+		if input.PublicPort < 0 || input.PublicPort > 65535 {
+			writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "invalid_mapping", "message": "公网端口需为 1-65535，留空自动分配"})
+			return
+		}
 		if input.ContainerPort < 1 || input.ContainerPort > 65535 || (input.Protocol != "tcp" && input.Protocol != "udp") || len(input.Description) > 80 {
 			writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "invalid_mapping", "message": "端口需为 1-65535，协议仅支持 TCP/UDP，备注最多 80 字符"})
 			return
 		}
 		mapping := provider.PortMapping{ContainerPort: input.ContainerPort, Protocol: input.Protocol, Description: input.Description}
-		if action == "add" {
+		if action == "add" && input.PublicPort > 0 {
+			mapping.HostPort = input.PublicPort
+			mappings, err = mapper.AddPortMapping(r.Context(), access.InstanceName, mapping)
+		} else if action == "add" {
 			mapping.HostPort, err = mapper.FreePort(r.Context(), access.InstanceName)
 			if err == nil && mapping.HostPort == 0 {
 				err = errors.New("节点没有可用的 NAT 端口")
@@ -385,6 +454,9 @@ func (p *customerPortal) mutatePortMapping(w http.ResponseWriter, r *http.Reques
 			}
 			existing := instance.PortMappings[index]
 			mapping.HostPort, mapping.HostIP = existing.HostPort, existing.HostIP
+			if input.PublicPort > 0 {
+				mapping.HostPort = input.PublicPort
+			}
 			if strings.EqualFold(existing.Description, "SSH") {
 				mapping.Protocol, mapping.Description = existing.Protocol, "SSH"
 			}
@@ -497,6 +569,27 @@ func (p *customerPortal) writeServiceError(w http.ResponseWriter, err error) {
 			return
 		}
 		writeJSON(w, http.StatusBadGateway, map[string]any{"error": "node_unavailable", "message": "节点暂时无法完成请求"})
+	}
+}
+
+// customerMessage is an error written for the customer.
+type customerMessage string
+
+func (m customerMessage) Error() string { return string(m) }
+
+// serviceErrorMessage is what writeServiceError would tell the customer
+// about err, for work that ends after the reply.
+func serviceErrorMessage(err error) string {
+	var apiErr *provider.Error
+	switch {
+	case errors.As(err, &apiErr) && apiErr.Message != "":
+		return apiErr.Message
+	case errors.Is(err, context.DeadlineExceeded):
+		return "节点处理超时，请稍后查看实例状态"
+	case errors.As(err, new(customerMessage)):
+		return err.Error()
+	default:
+		return "节点暂时无法完成重装，请稍后重试"
 	}
 }
 
