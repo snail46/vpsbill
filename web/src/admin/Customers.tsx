@@ -4,8 +4,18 @@ import { AccountRecord, api, cached } from '../api'
 import { AdminWalletPanel, walletMoney } from '../Wallet'
 import { PageActions, StatusBadge } from '../shared/ui'
 import { formatTime } from '../shared/time'
+import { AdminLink, FilterBar, SearchFilter, SelectFilter, adminHref, includesText, matchesAny, useUrlFilters, type Option } from './filters'
+
+const customerKinds: Option[] = [['individual', '个人客户'], ['business', '企业客户']]
+const customerStatuses: Option[] = [['active', '正常'], ['suspended', '已暂停'], ['pending', '待激活'], ['closed', '已关闭']]
+const balanceFilters: Option[] = [['positive', '有余额'], ['zero', '余额为零'], ['negative', '欠款（余额为负）']]
+
+function balanceMatches(filter: string, balance: number) {
+  return !filter || (filter === 'positive' ? balance > 0 : filter === 'negative' ? balance < 0 : balance === 0)
+}
 
 export function CustomersView() {
+  const { filters, set, reset, active } = useUrlFilters(['q', 'kind', 'email', 'balance', 'status'] as const)
   const [customers, setCustomers] = useState<AccountRecord[]>(() => cached<AccountRecord[]>('/api/v1/admin/customers') ?? [])
   const [showForm, setShowForm] = useState(false)
   const [error, setError] = useState('')
@@ -40,6 +50,15 @@ export function CustomersView() {
   useEffect(() => {
     void load()
   }, [])
+
+  const shown = customers.filter(
+    customer =>
+      includesText(filters.q, customer.display_name, customer.legal_name, customer.id) &&
+      matchesAny(filters.kind, customer.kind) &&
+      includesText(filters.email, customer.billing_email) &&
+      balanceMatches(filters.balance, customer.balance_minor || 0) &&
+      matchesAny(filters.status, customer.status),
+  )
 
   async function toggleStatus(customer: AccountRecord) {
     const status = customer.status === 'active' ? 'suspended' : 'active'
@@ -110,6 +129,14 @@ export function CustomersView() {
         />
       )}
 
+      <FilterBar shown={shown.length} total={customers.length} active={active} onReset={reset}>
+        <SearchFilter label="客户主体" value={filters.q} onChange={value => set('q', value)} placeholder="名称、企业全称或 ID" />
+        <SelectFilter label="客户类型" value={filters.kind} onChange={value => set('kind', value)} options={customerKinds} />
+        <SearchFilter label="账单邮箱" value={filters.email} onChange={value => set('email', value)} placeholder="邮箱" />
+        <SelectFilter label="账户余额" value={filters.balance} onChange={value => set('balance', value)} options={balanceFilters} />
+        <SelectFilter label="账户状态" value={filters.status} onChange={value => set('status', value)} options={customerStatuses} />
+      </FilterBar>
+
       <div className="table-wrap">
         <table>
           <thead>
@@ -117,15 +144,15 @@ export function CustomersView() {
               <th>客户主体</th>
               <th>客户类型</th>
               <th>账单邮箱</th>
-              <th>计费币种</th>
               <th>账户余额</th>
+              <th>实例 / 订单 / 账单 / 流水</th>
               <th>账户状态</th>
               <th>注册时间</th>
               <th>操作</th>
             </tr>
           </thead>
           <tbody>
-            {customers.map(customer => (
+            {shown.map(customer => (
               <tr key={customer.id}>
                 <td>
                   <strong>{customer.display_name}</strong>
@@ -133,8 +160,13 @@ export function CustomersView() {
                 </td>
                 <td>{customer.kind === 'business' ? '企业客户' : '个人客户'}</td>
                 <td>{customer.billing_email}</td>
-                <td><code>{customer.default_currency}</code></td>
-                <td className={(customer.balance_minor || 0) < 0 ? 'amount-negative' : ''}>{walletMoney(customer.balance_minor || 0, customer.default_currency)}</td>
+                <td className={(customer.balance_minor || 0) < 0 ? 'amount-negative' : ''}>
+                  {walletMoney(customer.balance_minor || 0, customer.default_currency)}
+                  <small>{customer.default_currency}</small>
+                </td>
+                <td>
+                  <CustomerLinks customer={customer} />
+                </td>
                 <td><StatusBadge status={customer.status} /></td>
                 <td>{formatTime(customer.created_at)}</td>
                 <td>
@@ -160,15 +192,37 @@ export function CustomersView() {
                 </td>
               </tr>
             ))}
-            {!customers.length && (
+            {!shown.length && (
               <tr>
-                <td colSpan={8} className="empty-state">尚未创建任何客户账户</td>
+                <td colSpan={8} className="empty-state">{customers.length ? '没有符合筛选条件的客户' : '尚未创建任何客户账户'}</td>
               </tr>
             )}
           </tbody>
         </table>
       </div>
     </section>
+  )
+}
+
+// CustomerLinks opens the customer's instances, orders, invoices and
+// payments: each list page filtered to this customer.
+function CustomerLinks({ customer }: { customer: AccountRecord }) {
+  const counts = customer.counts
+  const links: [string, string, string, string?][] = [
+    ['实例', adminHref('services', { account: customer.id }), counts ? `${counts.active_services}${counts.services > counts.active_services ? `/${counts.services}` : ''}` : '—', counts && counts.services > counts.active_services ? '在用 / 全部（含已删除）' : undefined],
+    ['订单', adminHref('orders', { account: customer.id }), counts ? String(counts.orders) : '—'],
+    ['账单', adminHref('billing', { account: customer.id }), counts ? String(counts.invoices) : '—', counts?.open_invoices ? `${counts.open_invoices} 张未付` : undefined],
+    ['流水', adminHref('billing', { payer: customer.id }, 'transactions'), counts ? String(counts.transactions) : '—'],
+  ]
+  return (
+    <div className="customer-links">
+      {links.map(([label, href, count, hint]) => (
+        <AdminLink key={label} href={href} title={hint ? `${label}：${hint}` : `查看${customer.display_name}的${label}`}>
+          {label} <strong>{count}</strong>
+          {label === '账单' && counts?.open_invoices ? <em>{counts.open_invoices} 未付</em> : null}
+        </AdminLink>
+      ))}
+    </div>
   )
 }
 

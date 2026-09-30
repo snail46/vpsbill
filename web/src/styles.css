@@ -4122,3 +4122,206 @@ td .text-button { white-space: nowrap; }
   gap: 3px;
   color: var(--success-text);
 }
+
+/* List filters (admin/filters.tsx) */
+.filter-bar {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.panel > .filter-bar {
+  margin-top: -4px;
+}
+
+.filter-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+  gap: 10px 12px;
+}
+
+.filter-field {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.filter-field > span {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.filter-field input, .filter-field select {
+  min-height: 34px;
+  padding: 6px 10px;
+  font-size: 13px;
+}
+
+.filter-search > div, .filter-number > div, .filter-dates > div {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.filter-search svg {
+  position: absolute;
+  left: 10px;
+  color: var(--text-subtle);
+  pointer-events: none;
+}
+
+.filter-search input {
+  padding-left: 30px;
+}
+
+.filter-number em, .filter-dates em {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-style: normal;
+}
+
+.filter-dates {
+  grid-column: span 2;
+}
+
+.filter-dates input {
+  min-width: 0;
+}
+
+.filter-summary {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--text-muted);
+  font-size: 12.5px;
+}
+
+.filter-summary .text-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+@media (max-width: 640px) {
+  .filter-fields {
+    grid-template-columns: 1fr 1fr;
+  }
+  .filter-dates {
+    grid-column: 1 / -1;
+  }
+}
+
+/* A customer's instances, orders, invoices and payments */
+.customer-links {
+  display: grid;
+  grid-template-columns: repeat(2, max-content);
+  gap: 4px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.customer-links a {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  padding: 2px 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  color: var(--text-secondary);
+  text-decoration: none;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+
+.customer-links a:hover {
+  border-color: var(--accent-admin);
+  color: var(--accent-text);
+}
+
+td .customer-links strong {
+  display: inline;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-weight: 600;
+}
+
+.customer-links em {
+  color: var(--warning-text);
+  font-style: normal;
+  font-size: 11px;
+}
+
+/* Overview cards open the list behind their numbers. */
+.clickable-card {
+  position: relative;
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.clickable-card:hover {
+  border-color: var(--border-highlight);
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.08);
+}
+
+.clickable-card:focus-visible, .attention-list > a:focus-visible {
+  outline: 2px solid var(--accent-admin);
+  outline-offset: 2px;
+}
+
+.metrics .card-arrow {
+  position: absolute;
+  top: 18px;
+  right: 16px;
+  color: var(--text-subtle);
+  margin: 0;
+  transition: transform 0.15s ease, color 0.15s ease;
+}
+
+.metrics article:hover .card-arrow {
+  color: var(--accent-text-strong);
+  transform: translateX(2px);
+}
+
+.attention-list > a {
+  padding: 16px;
+  color: var(--text-muted);
+  border-radius: var(--radius-md);
+  background: var(--bg-card-subtle);
+  border: 1px solid var(--border-subtle);
+  font-size: 13px;
+  text-decoration: none;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.attention-list > a:hover {
+  border-color: var(--border-highlight);
+  background: var(--bg-hover);
+}
+
+a.hero-signal {
+  text-decoration: none;
+  transition: border-color 0.15s ease;
+}
+
+a.hero-signal:hover {
+  border-color: var(--border-highlight);
+  border-top-color: var(--accent-admin);
+}
+
+.inline-link {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: var(--border-highlight);
+  text-underline-offset: 3px;
+}
+
+.inline-link:hover {
+  color: var(--accent-text);
+  text-decoration-color: currentColor;
+}
+
+.segmented .segmented-option {
+  margin: 0 6px 0 10px;
+}

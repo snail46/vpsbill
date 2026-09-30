@@ -1,11 +1,23 @@
 import { FormEvent, useEffect, useState } from 'react'
 import { X } from 'lucide-react'
 import { AccountRecord, api, cached, InvoiceRecord, OrderRecord, PlanRecord, RegionRecord, TransactionRecord } from '../api'
-import { PageActions, StatusBadge, cycleLabel, money } from '../shared/ui'
+import { PageActions, StatusBadge, cycleLabel, money, statusLabel } from '../shared/ui'
 import { formatDate, formatTime } from '../shared/time'
+import { osOptions } from '../shared/nav'
+import { DateRangeFilter, FilterBar, SearchFilter, SelectFilter, includesText, matchesAny, uniqueOptions, useCustomerOptions, useSection, useUrlFilters, withinDays, type Option } from './filters'
+
+const orderStatuses: Option[] = ['pending_payment', 'paid', 'fulfilling', 'completed', 'cancelled', 'review'].map(status => [status, statusLabel(status)])
+const invoiceStatuses: Option[] = ['open', 'paid', 'void', 'refunded', 'uncollectible', 'draft'].map(status => [status, statusLabel(status)])
+const invoiceKinds: Option[] = [['initial', '新购'], ['renewal', '续费'], ['topup', '充值']]
+const transactionStatuses: Option[] = [['succeeded', '成功'], ['pending', '处理中'], ['failed', '失败'], ['reversed', '已冲正']]
+const transactionTypes: Option[] = [['payment', '收款'], ['refund', '退款'], ['credit', '入账'], ['chargeback', '拒付'], ['adjustment', '调整']]
+
+const accountQuery = (account: string) => (account ? `?account_id=${encodeURIComponent(account)}` : '')
 
 export function OrdersView() {
-  const [orders, setOrders] = useState<OrderRecord[]>(() => cached<OrderRecord[]>('/api/v1/admin/orders') ?? [])
+  const { filters, set, reset, active } = useUrlFilters(['q', 'account', 'status', 'from', 'to'] as const)
+  const ordersPath = `/api/v1/admin/orders${accountQuery(filters.account)}`
+  const [orders, setOrders] = useState<OrderRecord[]>(() => cached<OrderRecord[]>(ordersPath) ?? [])
   const [customers, setCustomers] = useState<AccountRecord[]>(() => cached<AccountRecord[]>('/api/v1/admin/customers') ?? [])
   const [plans, setPlans] = useState<PlanRecord[]>(() => (cached<PlanRecord[]>('/api/v1/admin/plans') ?? []).filter(plan => plan.enabled))
   const [regions, setRegions] = useState<RegionRecord[]>(() => cached<RegionRecord[]>('/api/v1/admin/regions') ?? [])
@@ -15,7 +27,7 @@ export function OrdersView() {
   const load = async () => {
     try {
       const [orderRows, customerRows, planRows, regionRows] = await Promise.all([
-        api<OrderRecord[]>('/api/v1/admin/orders'),
+        api<OrderRecord[]>(ordersPath),
         api<AccountRecord[]>('/api/v1/admin/customers'),
         api<PlanRecord[]>('/api/v1/admin/plans'),
         api<RegionRecord[]>('/api/v1/admin/regions'),
@@ -31,7 +43,14 @@ export function OrdersView() {
 
   useEffect(() => {
     void load()
-  }, [])
+  }, [ordersPath])
+
+  const shown = orders.filter(
+    order =>
+      includesText(filters.q, order.number, order.id, order.invoice_number) &&
+      matchesAny(filters.status, order.status) &&
+      withinDays(order.created_at, filters.from, filters.to),
+  )
 
   return (
     <section className="workspace-panel">
@@ -58,6 +77,13 @@ export function OrdersView() {
         />
       )}
 
+      <FilterBar shown={shown.length} total={orders.length} active={active} onReset={reset}>
+        <SearchFilter label="订单号" value={filters.q} onChange={value => set('q', value)} placeholder="订单号或账单号" />
+        <SelectFilter label="客户名称" value={filters.account} onChange={value => set('account', value)} options={customers.map(item => [item.id, item.display_name] as Option)} all="全部客户" />
+        <SelectFilter label="订单状态" value={filters.status} onChange={value => set('status', value)} options={orderStatuses} />
+        <DateRangeFilter label="下单时间" from={filters.from} to={filters.to} onFrom={value => set('from', value)} onTo={value => set('to', value)} />
+      </FilterBar>
+
       <div className="table-wrap">
         <table>
           <thead>
@@ -71,7 +97,7 @@ export function OrdersView() {
             </tr>
           </thead>
           <tbody>
-            {orders.map(order => (
+            {shown.map(order => (
               <tr key={order.id}>
                 <td>
                   <strong>{order.number}</strong>
@@ -84,9 +110,9 @@ export function OrdersView() {
                 <td>{formatTime(order.created_at)}</td>
               </tr>
             ))}
-            {!orders.length && (
+            {!shown.length && (
               <tr>
-                <td colSpan={6} className="empty-state">尚未创建任何订单</td>
+                <td colSpan={6} className="empty-state">{orders.length ? '没有符合筛选条件的订单' : '尚未创建任何订单'}</td>
               </tr>
             )}
           </tbody>
@@ -209,9 +235,9 @@ export function OrderForm({
           <label>
             <span>预设操作系统镜像</span>
             <select key={planID} name="template_id" defaultValue={plan?.default_template_id}>
-              {plan?.allowed_template_ids.map(template => (
-                <option key={template} value={template}>
-                  {template}
+              {osOptions(plan?.allowed_template_ids ?? []).map(template => (
+                <option key={template.id} value={template.id} title={template.id}>
+                  {template.label}
                 </option>
               ))}
             </select>
@@ -235,16 +261,23 @@ export function OrderForm({
 }
 
 export function BillingView() {
-  const [invoices, setInvoices] = useState<InvoiceRecord[]>(() => cached<InvoiceRecord[]>('/api/v1/admin/invoices') ?? [])
-  const [transactions, setTransactions] = useState<TransactionRecord[]>(() => cached<TransactionRecord[]>('/api/v1/admin/transactions') ?? [])
+  const { filters, set, reset, active } = useUrlFilters(['account', 'invoice_q', 'invoice_status', 'invoice_kind', 'payer', 'channel', 'tx_status', 'tx_type', 'from', 'to'] as const)
+  // The invoice customer filter asks the server, which keeps only the newest
+  // 500 rows; the payment filters work on the loaded rows.
+  const invoicesPath = `/api/v1/admin/invoices${accountQuery(filters.account)}`
+  const transactionsPath = `/api/v1/admin/transactions${accountQuery(filters.payer)}`
+  const [invoices, setInvoices] = useState<InvoiceRecord[]>(() => cached<InvoiceRecord[]>(invoicesPath) ?? [])
+  const [transactions, setTransactions] = useState<TransactionRecord[]>(() => cached<TransactionRecord[]>(transactionsPath) ?? [])
+  const customers = useCustomerOptions()
+  useSection()
   const [error, setError] = useState('')
   const [paying, setPaying] = useState('')
 
   const load = async () => {
     try {
       const [invoiceRows, transactionRows] = await Promise.all([
-        api<InvoiceRecord[]>('/api/v1/admin/invoices'),
-        api<TransactionRecord[]>('/api/v1/admin/transactions'),
+        api<InvoiceRecord[]>(invoicesPath),
+        api<TransactionRecord[]>(transactionsPath),
       ])
       setInvoices(invoiceRows)
       setTransactions(transactionRows)
@@ -255,7 +288,36 @@ export function BillingView() {
 
   useEffect(() => {
     void load()
-  }, [])
+  }, [invoicesPath, transactionsPath])
+
+  const invoiceFilters = [filters.account, filters.invoice_q, filters.invoice_status, filters.invoice_kind].filter(Boolean).length
+  const shownInvoices = invoices.filter(
+    invoice =>
+      includesText(filters.invoice_q, invoice.number) &&
+      matchesAny(filters.invoice_status, invoice.status) &&
+      matchesAny(filters.invoice_kind, invoice.kind),
+  )
+  const shownTransactions = transactions.filter(
+    transaction =>
+      matchesAny(filters.channel, transaction.provider) &&
+      matchesAny(filters.tx_status, transaction.status) &&
+      matchesAny(filters.tx_type, transaction.type) &&
+      withinDays(transaction.created_at, filters.from, filters.to),
+  )
+  const resetInvoices = () => {
+    set('account', '')
+    set('invoice_q', '')
+    set('invoice_status', '')
+    set('invoice_kind', '')
+  }
+  const resetTransactions = () => {
+    set('payer', '')
+    set('channel', '')
+    set('tx_status', '')
+    set('tx_type', '')
+    set('from', '')
+    set('to', '')
+  }
 
   async function pay(invoice: InvoiceRecord) {
     if (
@@ -294,6 +356,12 @@ export function BillingView() {
           <h3>全部账单</h3>
           <span className="tag">{invoices.length} 笔账单</span>
         </div>
+        <FilterBar shown={shownInvoices.length} total={invoices.length} active={invoiceFilters} onReset={resetInvoices}>
+          <SearchFilter label="账单号" value={filters.invoice_q} onChange={value => set('invoice_q', value)} placeholder="账单号" />
+          <SelectFilter label="关联客户" value={filters.account} onChange={value => set('account', value)} options={customers} all="全部客户" />
+          <SelectFilter label="状态" value={filters.invoice_status} onChange={value => set('invoice_status', value)} options={invoiceStatuses} />
+          <SelectFilter label="类型" value={filters.invoice_kind} onChange={value => set('invoice_kind', value)} options={invoiceKinds} />
+        </FilterBar>
         <div className="table-wrap">
           <table>
             <thead>
@@ -308,7 +376,7 @@ export function BillingView() {
               </tr>
             </thead>
             <tbody>
-              {invoices.map(invoice => (
+              {shownInvoices.map(invoice => (
                 <tr key={invoice.id}>
                   <td><strong>{invoice.number}</strong></td>
                   <td>{invoice.customer_name}</td>
@@ -331,9 +399,9 @@ export function BillingView() {
                   </td>
                 </tr>
               ))}
-              {!invoices.length && (
+              {!shownInvoices.length && (
                 <tr>
-                  <td colSpan={7} className="empty-state">暂无账单数据</td>
+                  <td colSpan={7} className="empty-state">{invoices.length ? '没有符合筛选条件的账单' : '暂无账单数据'}</td>
                 </tr>
               )}
             </tbody>
@@ -341,11 +409,23 @@ export function BillingView() {
         </div>
       </div>
 
-      <div className="panel">
+      <div className="panel" id="transactions">
         <div className="panel-heading">
           <h3>不可变资金交易流水</h3>
           <span className="tag">APPEND ONLY</span>
         </div>
+        <FilterBar
+          shown={shownTransactions.length}
+          total={transactions.length}
+          active={[filters.payer, filters.channel, filters.tx_status, filters.tx_type, filters.from, filters.to].filter(Boolean).length}
+          onReset={resetTransactions}
+        >
+          <SelectFilter label="付款客户" value={filters.payer} onChange={value => set('payer', value)} options={customers} all="全部客户" />
+          <SelectFilter label="收款渠道" value={filters.channel} onChange={value => set('channel', value)} options={uniqueOptions(transactions.map(item => item.provider)).map(([value]) => [value, value.toUpperCase()] as Option)} />
+          <SelectFilter label="流水状态" value={filters.tx_status} onChange={value => set('tx_status', value)} options={transactionStatuses} />
+          <SelectFilter label="类型" value={filters.tx_type} onChange={value => set('tx_type', value)} options={transactionTypes} />
+          <DateRangeFilter label="入账时间" from={filters.from} to={filters.to} onFrom={value => set('from', value)} onTo={value => set('to', value)} />
+        </FilterBar>
         <div className="table-wrap">
           <table>
             <thead>
@@ -360,7 +440,7 @@ export function BillingView() {
               </tr>
             </thead>
             <tbody>
-              {transactions.map(transaction => (
+              {shownTransactions.map(transaction => (
                 <tr key={transaction.id}>
                   <td>
                     <strong>{transaction.provider_transaction_id}</strong>
@@ -370,13 +450,13 @@ export function BillingView() {
                   <td>{transaction.customer_name}</td>
                   <td><span className="tag">{transaction.provider.toUpperCase()}</span></td>
                   <td><strong>{money(transaction.amount_minor, transaction.currency)}</strong></td>
-                  <td><StatusBadge status={transaction.status} /></td>
+                  <td><span className={`status-badge ${transaction.status}`}>{transactionStatuses.find(([value]) => value === transaction.status)?.[1] ?? transaction.status}</span></td>
                   <td>{formatTime(transaction.created_at)}</td>
                 </tr>
               ))}
-              {!transactions.length && (
+              {!shownTransactions.length && (
                 <tr>
-                  <td colSpan={7} className="empty-state">暂无交易流水记录</td>
+                  <td colSpan={7} className="empty-state">{transactions.length ? '没有符合筛选条件的流水' : '暂无交易流水记录'}</td>
                 </tr>
               )}
             </tbody>

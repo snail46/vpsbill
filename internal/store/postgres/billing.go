@@ -42,13 +42,31 @@ type Account struct {
 	CreatedAt       time.Time `json:"created_at"`
 	// BalanceMinor is read-only here; balances change through wallet entries.
 	BalanceMinor int64 `json:"balance_minor"`
+	// Counts are what the customer has, for the admin customer list.
+	Counts *AccountCounts `json:"counts,omitempty"`
+}
+
+// AccountCounts sums a customer's instances, orders, invoices and payments.
+type AccountCounts struct {
+	Services       int `json:"services"`
+	ActiveServices int `json:"active_services"`
+	Orders         int `json:"orders"`
+	Invoices       int `json:"invoices"`
+	OpenInvoices   int `json:"open_invoices"`
+	Transactions   int `json:"transactions"`
 }
 
 func (s *BillingStore) ListAccounts(ctx context.Context) ([]Account, error) {
 	rows, err := s.db.Query(ctx, `
-		SELECT id, kind, status, display_name, billing_email, coalesce(legal_name,''),
-		       coalesce(tax_id,''), coalesce(country_code,''), default_currency, created_at, balance_minor
-		FROM accounts ORDER BY created_at DESC
+		SELECT a.id, a.kind, a.status, a.display_name, a.billing_email, coalesce(a.legal_name,''),
+		       coalesce(a.tax_id,''), coalesce(a.country_code,''), a.default_currency, a.created_at, a.balance_minor,
+		       (SELECT count(*) FROM services s WHERE s.account_id=a.id)::int,
+		       (SELECT count(*) FROM services s WHERE s.account_id=a.id AND s.status NOT IN ('terminated','cancelled'))::int,
+		       (SELECT count(*) FROM orders o WHERE o.account_id=a.id)::int,
+		       (SELECT count(*) FROM invoices i WHERE i.account_id=a.id)::int,
+		       (SELECT count(*) FROM invoices i WHERE i.account_id=a.id AND i.status='open')::int,
+		       (SELECT count(*) FROM transactions t WHERE t.account_id=a.id)::int
+		FROM accounts a ORDER BY a.created_at DESC
 	`)
 	if err != nil {
 		return nil, err
@@ -57,9 +75,12 @@ func (s *BillingStore) ListAccounts(ctx context.Context) ([]Account, error) {
 	accounts := make([]Account, 0)
 	for rows.Next() {
 		var account Account
-		if err := rows.Scan(&account.ID, &account.Kind, &account.Status, &account.DisplayName, &account.BillingEmail, &account.LegalName, &account.TaxID, &account.CountryCode, &account.DefaultCurrency, &account.CreatedAt, &account.BalanceMinor); err != nil {
+		var counts AccountCounts
+		if err := rows.Scan(&account.ID, &account.Kind, &account.Status, &account.DisplayName, &account.BillingEmail, &account.LegalName, &account.TaxID, &account.CountryCode, &account.DefaultCurrency, &account.CreatedAt, &account.BalanceMinor,
+			&counts.Services, &counts.ActiveServices, &counts.Orders, &counts.Invoices, &counts.OpenInvoices, &counts.Transactions); err != nil {
 			return nil, err
 		}
+		account.Counts = &counts
 		accounts = append(accounts, account)
 	}
 	return accounts, rows.Err()
@@ -441,14 +462,17 @@ func sanitizeOrderConfiguration(input map[string]any) (map[string]any, error) {
 	return result, nil
 }
 
-func (s *BillingStore) ListOrders(ctx context.Context) ([]Order, error) {
+// ListOrders lists the newest orders, of one customer when accountID is
+// set.
+func (s *BillingStore) ListOrders(ctx context.Context, accountID string) ([]Order, error) {
 	rows, err := s.db.Query(ctx, `
 		SELECT o.id, o.number, o.account_id, a.display_name, o.status, o.currency,
 		       o.subtotal_minor, o.tax_minor, o.total_minor, coalesce(i.id::text,''), coalesce(i.number,''), o.created_at
 		FROM orders o JOIN accounts a ON a.id=o.account_id
 		LEFT JOIN invoices i ON i.order_id=o.id
+		WHERE ($1='' OR o.account_id::text=$1)
 		ORDER BY o.created_at DESC LIMIT 500
-	`)
+	`, accountID)
 	if err != nil {
 		return nil, err
 	}
@@ -505,13 +529,16 @@ type Invoice struct {
 	CreatedAt    time.Time  `json:"created_at"`
 }
 
-func (s *BillingStore) ListInvoices(ctx context.Context) ([]Invoice, error) {
+// ListInvoices lists the newest invoices, of one customer when accountID
+// is set.
+func (s *BillingStore) ListInvoices(ctx context.Context, accountID string) ([]Invoice, error) {
 	rows, err := s.db.Query(ctx, `
 		SELECT i.id, i.number, i.account_id, a.display_name, i.order_id,i.service_id,i.kind, i.status, i.currency,
 		       i.total_minor, i.balance_minor, i.due_at, i.paid_at,i.period_start,i.period_end, i.created_at
 		FROM invoices i JOIN accounts a ON a.id=i.account_id
+		WHERE ($1='' OR i.account_id::text=$1)
 		ORDER BY i.created_at DESC LIMIT 500
-	`)
+	`, accountID)
 	if err != nil {
 		return nil, err
 	}
@@ -563,15 +590,18 @@ type Transaction struct {
 	CreatedAt             time.Time `json:"created_at"`
 }
 
-func (s *BillingStore) ListTransactions(ctx context.Context) ([]Transaction, error) {
+// ListTransactions lists the newest payments, of one customer when
+// accountID is set.
+func (s *BillingStore) ListTransactions(ctx context.Context, accountID string) ([]Transaction, error) {
 	rows, err := s.db.Query(ctx, `
 		SELECT t.id, t.account_id, a.display_name, t.invoice_id, coalesce(i.number,''), t.provider,
 		       coalesce(t.provider_transaction_id,''), t.type, t.status, t.currency, t.amount_minor, t.created_at
 		FROM transactions t
 		JOIN accounts a ON a.id=t.account_id
 		LEFT JOIN invoices i ON i.id=t.invoice_id
+		WHERE ($1='' OR t.account_id::text=$1)
 		ORDER BY t.created_at DESC LIMIT 500
-	`)
+	`, accountID)
 	if err != nil {
 		return nil, err
 	}

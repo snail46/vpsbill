@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from 'react'
+import { FormEvent, Fragment, useEffect, useState } from 'react'
 import { ArrowLeftRight, Boxes, DatabaseBackup, CheckCircle2, ChevronRight, CircleDollarSign, Cpu, CreditCard, Headphones, LayoutDashboard, Megaphone, LogOut, Menu, X, PackageOpen, ReceiptText, ScrollText, ServerCog, Settings, SlidersHorizontal, ShieldCheck, Store, Users } from 'lucide-react'
 import { adoptCache, api, clearCached, StaffUser } from '../api'
 import { prefetchPage, usePrefetch } from '../shared/prefetch'
@@ -100,7 +100,9 @@ const adminPageData: Record<string, string[]> = {
   backups: ['/api/v1/admin/backups'],
 }
 
-export type AdminRoute = { view: View; hostID?: string }
+// An admin route is a page, with a host for the probe detail and the page's
+// filters as a query string (see admin/filters.tsx).
+export type AdminRoute = { view: View; hostID?: string; query?: string; stamp?: number }
 
 export function adminRouteFromPath(): AdminRoute {
   const parts = window.location.pathname.split('/').filter(Boolean)
@@ -108,11 +110,13 @@ export function adminRouteFromPath(): AdminRoute {
     return { view: 'hosts', hostID: decodeURIComponent(parts[2]) }
   }
   const candidate = (parts[0] === 'admin' ? parts[1] : undefined) as View
-  return { view: adminViews.includes(candidate) ? candidate : 'overview' }
+  if (!adminViews.includes(candidate)) return { view: 'overview' }
+  return { view: candidate, query: window.location.search.replace(/^\?/, '') }
 }
 
 export function adminRoutePath(route: AdminRoute) {
-  return route.hostID ? `/admin/hosts/${encodeURIComponent(route.hostID)}` : `/admin/${route.view}`
+  if (route.hostID) return `/admin/hosts/${encodeURIComponent(route.hostID)}`
+  return `/admin/${route.view}${route.query ? `?${route.query}` : ''}`
 }
 
 export function AdminApp() {
@@ -421,10 +425,12 @@ export function AdminShell({ meta, user, onLogout }: { meta: Meta | null; user: 
   useEffect(() => {
     const initial = adminRouteFromPath()
     const canonical = adminRoutePath(initial)
-    if (window.location.pathname !== canonical) {
+    if (window.location.pathname + window.location.search !== canonical) {
       window.history.replaceState(null, '', canonical)
     }
-    const pop = () => setRoute(adminRouteFromPath())
+    // Each navigation starts the page afresh (stamp), even to the same
+    // address: its filters may have changed the address since.
+    const pop = () => setRoute({ ...adminRouteFromPath(), stamp: Date.now() })
     window.addEventListener('popstate', pop)
     return () => window.removeEventListener('popstate', pop)
   }, [])
@@ -432,9 +438,9 @@ export function AdminShell({ meta, user, onLogout }: { meta: Meta | null; user: 
   const navigate = (next: AdminRoute) => {
     setMenuOpen(false)
     const path = adminRoutePath(next)
-    if (window.location.pathname === path) return
+    if (window.location.pathname + window.location.search === path) return
     window.history.pushState(null, '', path)
-    setRoute(next)
+    setRoute({ ...next, stamp: Date.now() })
   }
 
   return (
@@ -485,6 +491,8 @@ export function AdminShell({ meta, user, onLogout }: { meta: Meta | null; user: 
           </div>
         </header>
 
+        {/* A link that opens a page with other filters starts it afresh. */}
+        <Fragment key={`${view}?${route.query ?? ''}#${route.stamp ?? 0}`}>
         {view === 'overview' && <Overview />}
         {view === 'customers' && <CustomersView />}
         {view === 'orders' && <OrdersView />}
@@ -507,6 +515,7 @@ export function AdminShell({ meta, user, onLogout }: { meta: Meta | null; user: 
         {view === 'audit' && <AuditView />}
         {view === 'announcements' && <AnnouncementsView />}
         {view === 'security' && <SecuritySettings enabled={user.mfa_enabled} />}
+        </Fragment>
       </main>
     </div>
   )

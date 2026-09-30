@@ -63,6 +63,7 @@ type ProvisionContext struct {
 
 type ServiceRecord struct {
 	ID                 string     `json:"id"`
+	AccountID          string     `json:"account_id"`
 	CustomerName       string     `json:"customer_name"`
 	PlanName           string     `json:"plan_name"`
 	RegionName         string     `json:"region_name"`
@@ -451,15 +452,17 @@ func (s *ProvisioningStore) RetryJob(ctx context.Context, id string) error {
 	return tx.Commit(ctx)
 }
 
-func (s *ProvisioningStore) ListServices(ctx context.Context) ([]ServiceRecord, error) {
+// ListServices lists every service, of one customer when accountID is set.
+func (s *ProvisioningStore) ListServices(ctx context.Context, accountID string) ([]ServiceRecord, error) {
 	rows, err := s.db.Query(ctx, `
-		SELECT s.id,a.display_name,p.name,r.name,coalesce(n.name,''),s.status,s.runtime_status,s.instance_name,
+		SELECT s.id,s.account_id,a.display_name,p.name,r.name,coalesce(n.name,''),s.status,s.runtime_status,s.instance_name,
 		       coalesce(s.external_id,''),coalesce(host(s.primary_ipv4),''),coalesce(host(s.primary_ipv6),''),
 		       s.next_due_at,s.last_reconciled_at,coalesce(s.last_reconcile_error,''),s.created_at
 		FROM services s JOIN accounts a ON a.id=s.account_id JOIN plans p ON p.id=s.plan_id
 		JOIN regions r ON r.id=s.region_id LEFT JOIN nodes n ON n.id=s.node_id
+		WHERE ($1='' OR s.account_id::text=$1)
 		ORDER BY s.created_at DESC
-	`)
+	`, accountID)
 	if err != nil {
 		return nil, err
 	}
@@ -467,7 +470,7 @@ func (s *ProvisioningStore) ListServices(ctx context.Context) ([]ServiceRecord, 
 	result := make([]ServiceRecord, 0)
 	for rows.Next() {
 		var row ServiceRecord
-		if err := rows.Scan(&row.ID, &row.CustomerName, &row.PlanName, &row.RegionName, &row.NodeName, &row.Status, &row.RuntimeStatus,
+		if err := rows.Scan(&row.ID, &row.AccountID, &row.CustomerName, &row.PlanName, &row.RegionName, &row.NodeName, &row.Status, &row.RuntimeStatus,
 			&row.InstanceName, &row.ExternalID, &row.PrimaryIPv4, &row.PrimaryIPv6, &row.NextDueAt, &row.LastReconciledAt, &row.LastReconcileError, &row.CreatedAt); err != nil {
 			return nil, err
 		}
@@ -476,13 +479,16 @@ func (s *ProvisioningStore) ListServices(ctx context.Context) ([]ServiceRecord, 
 	return result, rows.Err()
 }
 
-func (s *ProvisioningStore) ListJobs(ctx context.Context) ([]ProvisioningJob, error) {
+// ListJobs lists the newest automation jobs, of one customer's services
+// when accountID is set.
+func (s *ProvisioningStore) ListJobs(ctx context.Context, accountID string) ([]ProvisioningJob, error) {
 	rows, err := s.db.Query(ctx, `
 		SELECT j.id,j.service_id,s.instance_name,a.display_name,j.action,j.status,j.attempts,j.available_at,
 		       j.locked_at,coalesce(j.last_error,''),j.created_at,j.updated_at
 		FROM provisioning_jobs j JOIN services s ON s.id=j.service_id JOIN accounts a ON a.id=s.account_id
+		WHERE ($1='' OR s.account_id::text=$1)
 		ORDER BY j.created_at DESC LIMIT 500
-	`)
+	`, accountID)
 	if err != nil {
 		return nil, err
 	}

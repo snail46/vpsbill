@@ -92,7 +92,7 @@ func (a *adminBilling) listRegions(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *adminBilling) listOrders(w http.ResponseWriter, r *http.Request) {
-	orders, err := a.store.ListOrders(r.Context())
+	orders, err := a.store.ListOrders(r.Context(), r.URL.Query().Get("account_id"))
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "internal_error"})
 		return
@@ -117,7 +117,7 @@ func (a *adminBilling) createOrder(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *adminBilling) listInvoices(w http.ResponseWriter, r *http.Request) {
-	invoices, err := a.store.ListInvoices(r.Context())
+	invoices, err := a.store.ListInvoices(r.Context(), r.URL.Query().Get("account_id"))
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "internal_error"})
 		return
@@ -126,7 +126,7 @@ func (a *adminBilling) listInvoices(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *adminBilling) listTransactions(w http.ResponseWriter, r *http.Request) {
-	transactions, err := a.store.ListTransactions(r.Context())
+	transactions, err := a.store.ListTransactions(r.Context(), r.URL.Query().Get("account_id"))
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "internal_error"})
 		return

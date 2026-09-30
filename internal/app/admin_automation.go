@@ -15,7 +15,7 @@ func newAdminAutomation(store *postgres.ProvisioningStore) *adminAutomation {
 }
 
 func (a *adminAutomation) listServices(w http.ResponseWriter, r *http.Request) {
-	rows, err := a.store.ListServices(r.Context())
+	rows, err := a.store.ListServices(r.Context(), r.URL.Query().Get("account_id"))
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "internal_error"})
 		return
@@ -24,7 +24,7 @@ func (a *adminAutomation) listServices(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *adminAutomation) listJobs(w http.ResponseWriter, r *http.Request) {
-	rows, err := a.store.ListJobs(r.Context())
+	rows, err := a.store.ListJobs(r.Context(), r.URL.Query().Get("account_id"))
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "internal_error"})
 		return

@@ -3,6 +3,9 @@ import { ChevronRight, RefreshCw, ShieldCheck, X } from 'lucide-react'
 import { api, cached, HostProbeRecord, NodeRecord, Overcommit, PendingAgentRecord, ProviderTypeRecord, RegionAdminRecord } from '../api'
 import { OvercommitDialog, overcommitText } from '../Supply'
 import { PageActions, StatusBadge, formatBytes, NodeExpiry, CapacityBar, useReveal } from '../shared/ui'
+import { FilterBar, SelectFilter, matchesAny, useUrlFilters, type Option } from './filters'
+
+const nodeStatuses: Option[] = [['online', '在线'], ['offline', '离线'], ['degraded', '降级'], ['maintenance', '维护中'], ['unknown', '未知']]
 import { formatTime } from '../shared/time'
 import { ConnectSteps, PendingAgents } from '../shared/agents'
 
@@ -13,6 +16,8 @@ type FormTarget = { agent: PendingAgentRecord } | { type: string } | { node: Nod
 
 export function NodesView() {
   const [nodes, setNodes] = useState<NodeRecord[]>(() => cached<NodeRecord[]>('/api/v1/admin/nodes') ?? [])
+  const { filters, set, reset, active } = useUrlFilters(['status'] as const)
+  const shownNodes = nodes.filter(node => matchesAny(filters.status, node.status))
   const [form, setForm] = useState<FormTarget | null>(null)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
@@ -115,6 +120,9 @@ export function NodesView() {
           <RefreshCw size={15} />刷新
         </button>
       </div>
+      <FilterBar shown={shownNodes.length} total={nodes.length} active={active} onReset={reset}>
+        <SelectFilter label="连接状态" value={filters.status} onChange={value => set('status', value)} options={nodeStatuses} />
+      </FilterBar>
       <div className="table-wrap">
         <table>
           <thead>
@@ -128,7 +136,7 @@ export function NodesView() {
             </tr>
           </thead>
           <tbody>
-            {nodes.map(node => (
+            {shownNodes.map(node => (
               <tr key={node.id}>
                 <td>
                   <strong>{node.name}</strong>
@@ -178,9 +186,9 @@ export function NodesView() {
                 </td>
               </tr>
             ))}
-            {!nodes.length && (
+            {!shownNodes.length && (
               <tr>
-                <td colSpan={6} className="empty-state">尚未接入任何虚拟化计算节点，按上面的教程接入第一台。</td>
+                <td colSpan={6} className="empty-state">{nodes.length ? '没有该状态的节点' : '尚未接入任何虚拟化计算节点，按上面的教程接入第一台。'}</td>
               </tr>
             )}
           </tbody>

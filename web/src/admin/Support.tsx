@@ -4,10 +4,14 @@ import { api, cached, AuditLogRecord, TicketDetailRecord, TicketRecord } from '.
 import { ticketRequestBody, useAttachmentLimit } from '../TicketAttachments'
 import { ticketStatusLabel, TicketConversation } from '../shared/ui'
 import { formatTime } from '../shared/time'
+import { useUrlFilters } from './filters'
 
 export function AdminSupport() {
   const [tickets, setTickets] = useState<TicketRecord[]>(() => cached<TicketRecord[]>('/api/v1/admin/tickets') ?? [])
   const [scope, setScope] = useState<'platform' | 'hosted'>('platform')
+  // open=1 (from the overview) shows only tickets still waiting.
+  const { filters, set } = useUrlFilters(['open'] as const)
+  const listed = tickets.filter(ticket => !filters.open || !['resolved', 'closed'].includes(ticket.status))
   const [detail, setDetail] = useState<TicketDetailRecord | null>(null)
   const [error, setError] = useState('')
   const maxMB = useAttachmentLimit()
@@ -77,17 +81,20 @@ export function AdminSupport() {
 
       <div className="segmented" role="tablist">
         <button role="tab" aria-selected={scope === 'platform'} className={scope === 'platform' ? 'active' : ''} onClick={() => setScope('platform')}>
-          平台工单 <span className="count">{tickets.filter(ticket => !ticket.host_account_id).length}</span>
+          平台工单 <span className="count">{listed.filter(ticket => !ticket.host_account_id).length}</span>
         </button>
         <button role="tab" aria-selected={scope === 'hosted'} className={scope === 'hosted' ? 'active' : ''} onClick={() => setScope('hosted')}>
-          托管工单 <span className="count">{tickets.filter(ticket => ticket.host_account_id).length}</span>
+          托管工单 <span className="count">{listed.filter(ticket => ticket.host_account_id).length}</span>
         </button>
+        <label className="checkbox segmented-option">
+          <input type="checkbox" checked={Boolean(filters.open)} onChange={event => set('open', event.target.checked ? '1' : '')} /> 只看未解决
+        </label>
       </div>
       {scope === 'hosted' && <p className="muted-text">托管工单由母机机主作为第一处理人，平台可以查看并在必要时介入回复。</p>}
 
       <div className="support-layout">
         <div className="ticket-list">
-          {tickets.filter(ticket => (scope === 'hosted') === Boolean(ticket.host_account_id)).map(ticket => (
+          {listed.filter(ticket => (scope === 'hosted') === Boolean(ticket.host_account_id)).map(ticket => (
             <button
               key={ticket.id}
               className={detail?.ticket.id === ticket.id ? 'ticket-row selected' : 'ticket-row'}

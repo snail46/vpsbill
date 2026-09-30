@@ -198,6 +198,9 @@ export type AccountRecord = {
   default_currency: string
   created_at: string
   balance_minor?: number
+  legal_name?: string
+  // counts are in the admin customer list only.
+  counts?: { services: number; active_services: number; orders: number; invoices: number; open_invoices: number; transactions: number }
 }
 
 export type RegionRecord = { id: string; code: string; name: string }
@@ -239,6 +242,7 @@ export type InvoiceRecord = {
 
 export type TransactionRecord = {
   id: string
+  account_id: string
   customer_name: string
   invoice_number: string
   provider: string
@@ -252,6 +256,7 @@ export type TransactionRecord = {
 
 export type ServiceRecord = {
   id: string
+  account_id: string
   customer_name: string
   plan_name: string
   region_name: string

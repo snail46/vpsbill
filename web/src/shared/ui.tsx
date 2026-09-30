@@ -197,36 +197,50 @@ export function JobError({ value }: { value?: string }) {
   )
 }
 
+// statusLabels name the statuses of services, jobs, invoices, orders and
+// payments.
+export const statusLabels: Record<string, string> = {
+  online: '在线',
+  active: '正常',
+  disabled: '已下架',
+  offline: '离线',
+  pending_payment: '待支付',
+  open: '待支付',
+  paid: '已支付',
+  fulfilling: '开通中',
+  provisioning: '开通中',
+  completed: '已完成',
+  succeeded: '成功',
+  failed: '等待重试',
+  pending: '排队中',
+  running: '运行中',
+  creating: '创建中',
+  stopped: '已关机',
+  overdue: '已逾期',
+  suspended: '已暂停',
+  terminating: '待删除',
+  terminated: '已删除',
+  review: '需人工审核',
+  uncollectible: '无法收回',
+  missing: '实例缺失',
+  unknown: '未知',
+  error: '异常',
+  dead: '需人工处理',
+  cancelled: '已取消',
+  void: '已作废',
+  refunded: '已退款',
+  draft: '草稿',
+  fraud: '风险拦截',
+  closed: '已关闭',
+  locked: '已锁定',
+}
+
+export function statusLabel(status: string) {
+  return statusLabels[status] ?? status
+}
+
 export function StatusBadge({ status }: { status: string }) {
-  const labels: Record<string, string> = {
-    online: '在线',
-    active: '正常',
-    disabled: '已下架',
-    offline: '离线',
-    pending_payment: '待支付',
-    open: '待支付',
-    paid: '已支付',
-    fulfilling: '开通中',
-    provisioning: '开通中',
-    completed: '已完成',
-    succeeded: '成功',
-    failed: '等待重试',
-    pending: '排队中',
-    running: '运行中',
-    creating: '创建中',
-    stopped: '已关机',
-    overdue: '已逾期',
-    suspended: '已暂停',
-    terminating: '待删除',
-    terminated: '已删除',
-    review: '需人工审核',
-    uncollectible: '无法收回',
-    missing: '实例缺失',
-    unknown: '未知',
-    error: '异常',
-    dead: '需人工处理',
-  }
-  return <span className={`status-badge ${status}`}>{labels[status] ?? status}</span>
+  return <span className={`status-badge ${status}`}>{statusLabel(status)}</span>
 }
 
 export { cycleUnit as cycleLabel } from './cycles'
