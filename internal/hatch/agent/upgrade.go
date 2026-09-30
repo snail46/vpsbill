@@ -30,7 +30,8 @@ import (
 // <state_dir>/bin, never written over the installed one (the systemd unit
 // keeps /usr/local read-only); at start the installed binary hands over to
 // the staged one. A staged build that does not stay connected for a minute
-// in stagedTries starts is dropped and the installed binary runs again.
+// in stagedTries starts is dropped, the installed binary runs again, and
+// that version is refused from then on (see rejectedFile).
 
 const (
 	stagedTries = 3
@@ -44,6 +45,11 @@ func stagedBinary(stateDir string) string { return filepath.Join(stateDir, "bin"
 func stagedTriesFile(stateDir string) string {
 	return filepath.Join(stateDir, "bin", "tries")
 }
+
+// stagedVersionFile names the staged build's version; rejectedFile the
+// last version dropped for failing to start.
+func stagedVersionFile(stateDir string) string { return filepath.Join(stateDir, "bin", "version") }
+func rejectedFile(stateDir string) string      { return filepath.Join(stateDir, "bin", "rejected") }
 
 // Handover replaces this process with the staged agent build when there is
 // one and this process is not it. It returns when this binary should keep
@@ -71,8 +77,12 @@ func Handover(config Config, logger *slog.Logger) {
 	tries, _ := strconv.Atoi(strings.TrimSpace(string(data)))
 	if tries >= stagedTries {
 		logger.Error("staged agent build failed to stay connected; running the installed one", "path", staged, "tries", tries)
+		if version, err := os.ReadFile(stagedVersionFile(config.StateDir)); err == nil {
+			_ = os.WriteFile(rejectedFile(config.StateDir), version, 0o600)
+		}
 		_ = os.Remove(staged)
 		_ = os.Remove(stagedTriesFile(config.StateDir))
+		_ = os.Remove(stagedVersionFile(config.StateDir))
 		return
 	}
 	if err := os.WriteFile(stagedTriesFile(config.StateDir), []byte(strconv.Itoa(tries+1)), 0o600); err != nil {
@@ -98,6 +108,9 @@ func (c *Client) upgrade(ctx context.Context, raw json.RawMessage) error {
 	}
 	if params.Version == c.version {
 		return nil
+	}
+	if rejected, _ := os.ReadFile(rejectedFile(c.config.StateDir)); strings.TrimSpace(string(rejected)) == params.Version {
+		return errorf(protocol.CodeConflict, "version %s failed to start on this host before; reinstall the agent to retry", params.Version)
 	}
 	if !c.upgrading.CompareAndSwap(false, true) {
 		return errorf(protocol.CodeConflict, "an upgrade is already running")
@@ -164,6 +177,9 @@ func (c *Client) stage(ctx context.Context, version string) (string, error) {
 	}
 	if got := strings.TrimSpace(string(output)); got != version {
 		return "", fmt.Errorf("the downloaded agent is version %q, not %q", got, version)
+	}
+	if err := os.WriteFile(stagedVersionFile(c.config.StateDir), []byte(version), 0o600); err != nil {
+		return "", err
 	}
 	if err := os.Rename(file.Name(), staged); err != nil {
 		return "", err

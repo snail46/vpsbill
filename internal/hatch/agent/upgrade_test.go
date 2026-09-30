@@ -72,6 +72,16 @@ func TestUpgradeStagesTheBundledBuild(t *testing.T) {
 		t.Fatal("a second upgrade ran while the first waits to restart")
 	}
 
+	// A version dropped for failing to start is not taken again.
+	client.upgrading.Store(false)
+	if err := os.WriteFile(rejectedFile(dir), []byte("v2"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var conflict *protocol.Error
+	if err := upgrade("v2"); !errors.As(err, &conflict) || conflict.Code != protocol.CodeConflict {
+		t.Fatalf("rejected version: %v", err)
+	}
+
 	off := false
 	client.config.AutoUpgrade = &off
 	client.upgrading.Store(false)
