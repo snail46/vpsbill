@@ -8,6 +8,7 @@ import { FilterBar, SelectFilter, matchesAny, useUrlFilters, type Option } from 
 const nodeStatuses: Option[] = [['online', '在线'], ['offline', '离线'], ['degraded', '降级'], ['maintenance', '维护中'], ['unknown', '未知']]
 import { formatTime } from '../shared/time'
 import { ConnectSteps, PendingAgents } from '../shared/agents'
+import { confirmDialog } from '../shared/dialog'
 
 type Enrollments = { install_command: string; agents: PendingAgentRecord[] }
 // FormTarget is what the node form opens for: a pending Hatch agent, a new
@@ -47,7 +48,7 @@ export function NodesView() {
   }, [])
 
   async function removeNode(node: NodeRecord) {
-    if (!window.confirm(`确认删除节点【${node.name}】？仅在节点上没有未终止的服务时才能删除。`)) return
+    if (!(await confirmDialog({ title: `删除节点【${node.name}】？`, message: '仅在节点上没有未终止的服务时才能删除。', confirmText: '删除', danger: true }))) return
     setError('')
     try {
       await api(`/api/v1/admin/nodes/${node.id}`, { method: 'DELETE' })
@@ -58,7 +59,7 @@ export function NodesView() {
   }
 
   async function dismiss(agent: PendingAgentRecord) {
-    if (!window.confirm(`从待接入列表移除 ${agent.hostname || '这台主机'}？它重新连接后会再次出现。`)) return
+    if (!(await confirmDialog({ title: `从待接入列表移除 ${agent.hostname || '这台主机'}？`, message: '它重新连接后会再次出现。', confirmText: '移除' }))) return
     try {
       await api(`/api/v1/admin/agent-enrollments/${agent.id}`, { method: 'DELETE' })
       void loadEnrollments()

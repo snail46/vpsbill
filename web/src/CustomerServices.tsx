@@ -29,6 +29,8 @@ import { formatDate, formatTime, platformMonth } from './shared/time'
 import { navigatePortal, osLabel, osOptions, portalPathPart } from './shared/nav'
 import { cycleUnit } from './shared/cycles'
 import ChatRoom from './ChatRoom'
+import { confirmDialog } from './shared/dialog'
+import { PasswordInput } from './shared/password'
 
 // The console (xterm.js and noVNC) is loaded on demand; the detail page
 // fetches it in the background so the first click opens it at once.
@@ -603,7 +605,7 @@ function ServiceDialog({
   }
 
   const remove = async (index: number) => {
-    if (!confirm('确定删除该端口映射规则？')) return
+    if (!(await confirmDialog({ title: '删除这条端口映射？', message: '删除后外部将无法通过该端口访问实例。', confirmText: '删除', danger: true }))) return
     try {
       const next = await api<PortMappingRecord[]>(`/api/v1/customer/services/${service.id}/port-mappings/${index}`, {
         method: 'DELETE',
@@ -659,7 +661,7 @@ function ServiceDialog({
             <>
               <label>
                 <span>新 root 密码（留空自动随机生成）</span>
-                <input name="password" type="password" placeholder="8-64 位，包含字母与数字" />
+                <PasswordInput name="password" placeholder="8-64 位，包含字母与数字" />
               </label>
               <p style={{ color: 'var(--text-muted)', fontSize: '12.5px' }}>
                 重置成功后新密码将加密留存，可直接在 VPS 卡片中查看与一键复制。
@@ -683,7 +685,7 @@ function ServiceDialog({
               </label>
               <label>
                 <span>新 root 密码（留空沿用当前密码）</span>
-                <input name="password" type="password" autoComplete="new-password" placeholder="8-64 位，包含字母与数字" />
+                <PasswordInput name="password" placeholder="8-64 位，包含字母与数字" />
               </label>
               <label className="confirm-check">
                 <input type="checkbox" checked={confirmed} onChange={event => setConfirmed(event.target.checked)} />

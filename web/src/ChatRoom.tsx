@@ -3,6 +3,7 @@ import { Flag, Send, VolumeX } from 'lucide-react'
 import { api, type ChatHistoryRecord, type ChatMessageRecord, type ChatMuteRecord } from './api'
 import { ReportDialog } from './Reports'
 import { formatTime } from './shared/time'
+import { promptDialog } from './shared/dialog'
 
 const roleLabels: Record<string, string> = { host: '机主', buyer: '用户', staff: '平台', system: '系统' }
 
@@ -23,8 +24,18 @@ export default function ChatRoom({ base, nodeID, title, staff = false }: { base:
   }
   useEffect(loadMutes, [staff, base, nodeID])
   async function mute(message: ChatMessageRecord) {
-    const hours = Number(window.prompt(`禁言 ${message.author_name} 多少小时？`, '24'))
-    if (!hours || !message.author_account_id) return
+    if (!message.author_account_id) return
+    const answer = await promptDialog({
+      title: `禁言 ${message.author_name}`,
+      label: '禁言小时数（1-8760）',
+      inputType: 'number',
+      defaultValue: '24',
+      confirmText: '禁言',
+      danger: true,
+      validate: value => (/^d+$/.test(value.trim()) && Number(value) >= 1 && Number(value) <= 8760 ? '' : '请输入 1 到 8760 之间的整数小时'),
+    })
+    if (answer === null) return
+    const hours = Number(answer)
     try {
       await api(`${base}/${nodeID}/mutes`, { method: 'POST', body: JSON.stringify({ account_id: message.author_account_id, hours, reason: '聊天室违规' }) })
       loadMutes()

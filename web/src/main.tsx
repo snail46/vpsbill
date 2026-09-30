@@ -5,9 +5,11 @@ import './styles.css'
 import { initTheme } from './ThemeToggle'
 import { initTableLabels } from './shared/tableLabels'
 import { loadBoot } from './shared/boot'
+import { initFormValidation } from './shared/validation'
 
 initTheme()
 initTableLabels()
+initFormValidation()
 // Without inline boot data (development), ask for it while the app code
 // for this side of the site is still loading.
 loadBoot().catch(() => undefined)

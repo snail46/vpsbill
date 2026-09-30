@@ -5,6 +5,7 @@ import { PageActions, StatusBadge, cycleLabel, money, statusLabel } from '../sha
 import { formatDate, formatTime } from '../shared/time'
 import { osOptions } from '../shared/nav'
 import { DateRangeFilter, FilterBar, SearchFilter, SelectFilter, includesText, matchesAny, uniqueOptions, useCustomerOptions, useSection, useUrlFilters, withinDays, type Option } from './filters'
+import { confirmDialog } from '../shared/dialog'
 
 const orderStatuses: Option[] = ['pending_payment', 'paid', 'fulfilling', 'completed', 'cancelled', 'review'].map(status => [status, statusLabel(status)])
 const invoiceStatuses: Option[] = ['open', 'paid', 'void', 'refunded', 'uncollectible', 'draft'].map(status => [status, statusLabel(status)])
@@ -321,9 +322,11 @@ export function BillingView() {
 
   async function pay(invoice: InvoiceRecord) {
     if (
-      !window.confirm(
-        `确认已线下收到款项 ${money(invoice.balance_minor, invoice.currency)}？此操作将记录不可更改的入账流水并触发 VPS 自动调度开通。`
-      )
+      !(await confirmDialog({
+        title: `确认已线下收到款项 ${money(invoice.balance_minor, invoice.currency)}？`,
+        message: '此操作将记录不可更改的入账流水并触发 VPS 自动调度开通。',
+        confirmText: '确认入账',
+      }))
     ) {
       return
     }

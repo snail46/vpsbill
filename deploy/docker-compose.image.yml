@@ -59,7 +59,7 @@ services:
     ports:
       # Portal and admin console. deploy.sh publishes them on all addresses
       # (direct access) or on loopback behind Caddy, Cloudflare Tunnel or
-      # your own proxy, where the trusted listeners 8080/8081 are used.
+      # your own proxy, where the trusted listeners 7080/7081 are used.
       - "${PORTAL_BIND:-0.0.0.0}:${PORTAL_PORT:-8080}:${PORTAL_TARGET:-80}"
       - "${ADMIN_BIND:-0.0.0.0}:${ADMIN_PORT:-8081}:${ADMIN_TARGET:-81}"
     depends_on:
@@ -87,7 +87,7 @@ services:
   cloudflared:
     # Cloudflare Tunnel for servers without a public IP. Create a tunnel in
     # the Cloudflare dashboard, point its public hostnames at
-    # http://web:8080 (portal) and http://web:8081 (admin), and put the
+    # http://web:7080 (portal) and http://web:7081 (admin), and put the
     # tunnel token in CLOUDFLARE_TUNNEL_TOKEN.
     image: cloudflare/cloudflared:latest
     profiles: ["tunnel"]
@@ -103,16 +103,16 @@ configs:
   caddyfile:
     content: |
       # Automatic HTTPS for the portal and the admin console, forwarded to the
-      # web container's trusted listeners (8080 portal, 8081 admin).
+      # web container's trusted listeners (7080 portal, 7081 admin).
       ${DOMAIN:-localhost} {
         encode zstd gzip
-        reverse_proxy web:8080
+        reverse_proxy web:7080
         header Strict-Transport-Security "max-age=31536000; includeSubDomains"
       }
 
       ${ADMIN_DOMAIN:-admin.localhost} {
         encode zstd gzip
-        reverse_proxy web:8081
+        reverse_proxy web:7081
         header Strict-Transport-Security "max-age=31536000; includeSubDomains"
       }
 

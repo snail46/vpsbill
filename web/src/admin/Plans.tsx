@@ -157,7 +157,7 @@ export function PlanForm({
   const [loadingTemplates, setLoadingTemplates] = useState(true)
 
   const [providers, setProviders] = useState<ProviderTypeRecord[]>(() => cached<ProviderTypeRecord[]>('/api/v1/admin/provider-types') ?? [])
-  const [providerType, setProviderType] = useState(plan?.provider_type || 'clicd')
+  const [providerType, setProviderType] = useState(plan?.provider_type || 'hatch')
   const [virtualization, setVirtualization] = useState<'lxc' | 'kvm' | 'podman'>(plan?.virtualization || 'lxc')
   const [allowed, setAllowed] = useState<string[]>(plan?.allowed_template_ids || [])
   const [capacity, setCapacity] = useState<StockCapacityRecord | null>(null)
@@ -336,7 +336,7 @@ export function PlanForm({
               method: 'POST',
               body: JSON.stringify({
                 id: plan?.id ?? '',
-                provider_type: providerType,
+                provider_type: data.get('provider_type') || providerType,
                 virtualization: data.get('virtualization') || virtualization,
                 vcpu: Number(data.get('vcpu')),
                 ram_mb: Number(data.get('ram_mb')),

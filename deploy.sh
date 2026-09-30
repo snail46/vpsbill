@@ -75,7 +75,7 @@ case "$ACCESS_MODE" in
       echo "ACCESS_MODE=caddy needs DOMAIN (portal) and ADMIN_DOMAIN (admin console) in .env"
       exit 1
     fi
-    PORTAL_BIND=127.0.0.1; ADMIN_BIND=127.0.0.1; PORTAL_TARGET=8080; ADMIN_TARGET=8081
+    PORTAL_BIND=127.0.0.1; ADMIN_BIND=127.0.0.1; PORTAL_TARGET=7080; ADMIN_TARGET=7081
     PROFILES="--profile tls"
     ;;
   cloudflare)
@@ -83,11 +83,11 @@ case "$ACCESS_MODE" in
       echo "ACCESS_MODE=cloudflare needs CLOUDFLARE_TUNNEL_TOKEN in .env"
       exit 1
     fi
-    PORTAL_BIND=127.0.0.1; ADMIN_BIND=127.0.0.1; PORTAL_TARGET=8080; ADMIN_TARGET=8081
+    PORTAL_BIND=127.0.0.1; ADMIN_BIND=127.0.0.1; PORTAL_TARGET=7080; ADMIN_TARGET=7081
     PROFILES="--profile tunnel"
     ;;
   proxy)
-    PORTAL_BIND=127.0.0.1; ADMIN_BIND=127.0.0.1; PORTAL_TARGET=8080; ADMIN_TARGET=8081
+    PORTAL_BIND=127.0.0.1; ADMIN_BIND=127.0.0.1; PORTAL_TARGET=7080; ADMIN_TARGET=7081
     ;;
   *)
     echo "ACCESS_MODE must be direct, caddy, cloudflare or proxy"
@@ -103,7 +103,7 @@ echo "VPSBill is starting ($ACCESS_MODE)."
 case "$ACCESS_MODE" in
   direct) echo "Customer portal: http://<server-ip>:$PORTAL_PORT   Admin console: http://<server-ip>:$ADMIN_PORT/admin" ;;
   caddy) echo "Customer portal: https://$DOMAIN   Admin console: https://$ADMIN_DOMAIN/admin" ;;
-  cloudflare) echo "Point your tunnel hostnames at http://web:8080 (portal) and http://web:8081 (admin)." ;;
+  cloudflare) echo "Point your tunnel hostnames at http://web:7080 (portal) and http://web:7081 (admin)." ;;
   proxy) echo "Proxy your portal domain to http://127.0.0.1:$PORTAL_PORT and your admin domain to http://127.0.0.1:$ADMIN_PORT." ;;
 esac
 echo "Finish the Web installer on the admin console, then set the public and admin addresses in 站点设置."

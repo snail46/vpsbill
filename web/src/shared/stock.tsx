@@ -30,6 +30,11 @@ export function StockField({
   const [capacity, setCapacity] = useState<StockCapacityRecord | null>(null)
   const [error, setError] = useState('')
   const touched = useRef(false)
+  // The form's owner recreates preview on every render with its current
+  // state (the provider type, for one); refreshes must use the latest, not
+  // the one from the first render.
+  const latest = useRef({ preview, onCapacity })
+  latest.current = { preview, onCapacity }
 
   useEffect(() => {
     const form = ref.current?.closest('form')
@@ -39,11 +44,12 @@ export function StockField({
     const refresh = () => {
       window.clearTimeout(timer)
       timer = window.setTimeout(() => {
-        preview(form)
+        latest.current
+          .preview(form)
           .then(value => {
             if (cancelled) return
             setCapacity(value)
-            onCapacity?.(value)
+            latest.current.onCapacity?.(value)
             setError('')
             // A new plan defaults to everything its nodes can hold.
             if (!plan && !touched.current && input.current) input.current.value = String(value.max)
@@ -65,7 +71,7 @@ export function StockField({
       form.removeEventListener('input', onChange)
       form.removeEventListener('change', onChange)
     }
-    // preview is recreated on every render; the form fields drive refreshes.
+    // The form fields drive refreshes; preview is read through latest.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [plan?.id])
 

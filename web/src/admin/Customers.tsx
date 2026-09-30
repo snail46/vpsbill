@@ -5,6 +5,7 @@ import { AdminWalletPanel, walletMoney } from '../Wallet'
 import { PageActions, StatusBadge } from '../shared/ui'
 import { formatTime } from '../shared/time'
 import { AdminLink, FilterBar, SearchFilter, SelectFilter, adminHref, includesText, matchesAny, useUrlFilters, type Option } from './filters'
+import { confirmDialog } from '../shared/dialog'
 
 const customerKinds: Option[] = [['individual', '个人客户'], ['business', '企业客户']]
 const customerStatuses: Option[] = [['active', '正常'], ['suspended', '已暂停'], ['pending', '待激活'], ['closed', '已关闭']]
@@ -25,7 +26,7 @@ export function CustomersView() {
   const [copied, setCopied] = useState(false)
 
   async function issueResetLink(customer: AccountRecord) {
-    if (!window.confirm(`为客户【${customer.display_name}】生成一次性密码重置链接？此前未使用的链接会失效。`)) return
+    if (!(await confirmDialog({ title: `为客户【${customer.display_name}】生成密码重置链接？`, message: '链接只能使用一次；此前未使用的链接会失效。', confirmText: '生成链接' }))) return
     setUpdating(customer.id)
     setError('')
     setCopied(false)
@@ -62,7 +63,7 @@ export function CustomersView() {
 
   async function toggleStatus(customer: AccountRecord) {
     const status = customer.status === 'active' ? 'suspended' : 'active'
-    if (status === 'suspended' && !window.confirm(`确认暂停客户【${customer.display_name}】的账户？这会撤销其全部登录会话。`)) {
+    if (status === 'suspended' && !(await confirmDialog({ title: `暂停客户【${customer.display_name}】的账户？`, message: '这会撤销其全部登录会话。', confirmText: '暂停账户', danger: true }))) {
       return
     }
     setUpdating(customer.id)

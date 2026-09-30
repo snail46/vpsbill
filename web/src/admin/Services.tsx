@@ -6,6 +6,7 @@ import { formatDate, formatTime } from '../shared/time'
 import {
   FilterBar, NumberFilter, SearchFilter, SelectFilter, includesText, matchesAny, uniqueOptions, useCustomerOptions, useSection, useUrlFilters, type Option,
 } from './filters'
+import { confirmDialog } from '../shared/dialog'
 
 const serviceStatuses: Option[] = ['provisioning', 'active', 'overdue', 'suspended', 'terminating', 'terminated', 'error']
   .map(status => [status, statusLabel(status)] as Option)
@@ -80,9 +81,9 @@ export function ServicesView() {
       start: `确认开机实例【${service.instance_name}】？`,
       stop: `确认关机实例【${service.instance_name}】？`,
       restart: `确认重启实例【${service.instance_name}】？`,
-      terminate: `确认立即终止【${service.customer_name}】的实例【${service.instance_name}】？实例与数据将被删除，未付账单作废，此操作不可撤销。`,
+      terminate: `立即终止【${service.customer_name}】的实例【${service.instance_name}】？实例与数据将被删除，未付账单作废，此操作不可撤销。`,
     }
-    if (!window.confirm(prompts[action])) return
+    if (!(await confirmDialog({ title: prompts[action], confirmText: action === 'terminate' ? '立即终止' : '确定', danger: action === 'terminate' || action === 'stop' }))) return
     setRetrying(service.id)
     setError('')
     try {
@@ -96,7 +97,7 @@ export function ServicesView() {
   }
 
   async function retry(job: ProvisioningJobRecord) {
-    if (!window.confirm(`确认重新提交实例【${job.instance_name}】的自动化开通任务？`)) return
+    if (!(await confirmDialog({ title: `重新提交实例【${job.instance_name}】的开通任务？`, confirmText: '重新提交' }))) return
     setRetrying(job.id)
     setError('')
     try {

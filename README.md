@@ -67,8 +67,8 @@ docker-compose.yml   # 使用 deploy/docker-compose.image.yml 的内容
 IMAGE_TAG=latest
 PORTAL_BIND=127.0.0.1
 ADMIN_BIND=127.0.0.1
-PORTAL_TARGET=8080
-ADMIN_TARGET=8081
+PORTAL_TARGET=7080
+ADMIN_TARGET=7081
 DOMAIN=billing.example.com
 ADMIN_DOMAIN=admin.example.com
 POSTGRES_DB=vpsbill
@@ -86,8 +86,8 @@ cat >.env <<EOF
 IMAGE_TAG=latest
 PORTAL_BIND=127.0.0.1
 ADMIN_BIND=127.0.0.1
-PORTAL_TARGET=8080
-ADMIN_TARGET=8081
+PORTAL_TARGET=7080
+ADMIN_TARGET=7081
 DOMAIN=billing.example.com
 ADMIN_DOMAIN=admin.example.com
 POSTGRES_DB=vpsbill

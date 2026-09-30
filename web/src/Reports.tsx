@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useState } from 'react'
 import { Flag, RefreshCw, X } from 'lucide-react'
 import { api, cached, reportReasons, type ReportRecord } from './api'
 import { formatTime } from './shared/time'
+import { promptDialog } from './shared/dialog'
 
 const nodeReasons = ['resources', 'oversell', 'false_info', 'other']
 const messageReasons = ['abuse', 'spam', 'other']
@@ -106,16 +107,30 @@ export function AdminReports() {
     }
   }
 
-  function resolve(report: ReportRecord, status: 'resolved' | 'dismissed') {
-    const resolution = window.prompt(status === 'resolved' ? '处理结果（记录备查）' : '驳回原因（记录备查）', '')
+  async function resolve(report: ReportRecord, status: 'resolved' | 'dismissed') {
+    const resolution = await promptDialog({
+      title: status === 'resolved' ? '标记为已处理' : '驳回举报',
+      label: status === 'resolved' ? '处理结果（记录备查，可留空）' : '驳回原因（记录备查，可留空）',
+      multiline: true,
+      confirmText: status === 'resolved' ? '标记已处理' : '驳回',
+    })
     if (resolution === null) return
     void act(() => api(`/api/v1/admin/reports/${report.id}/resolve`, { method: 'POST', body: JSON.stringify({ status, resolution }) }), statusNames[status])
   }
 
-  function mute(report: ReportRecord) {
+  async function mute(report: ReportRecord) {
     if (!report.message_author_account_id) return
-    const hours = Number(window.prompt(`禁言 ${report.message_author} 多少小时？`, '24'))
-    if (!hours) return
+    const answer = await promptDialog({
+      title: `禁言 ${report.message_author}`,
+      label: '禁言小时数（1-8760）',
+      inputType: 'number',
+      defaultValue: '24',
+      confirmText: '禁言',
+      danger: true,
+      validate: value => (/^d+$/.test(value.trim()) && Number(value) >= 1 && Number(value) <= 8760 ? '' : '请输入 1 到 8760 之间的整数小时'),
+    })
+    if (answer === null) return
+    const hours = Number(answer)
     void act(
       () =>
         api(`/api/v1/admin/chat/rooms/${report.node_id}/mutes`, {

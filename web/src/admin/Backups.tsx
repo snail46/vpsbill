@@ -3,6 +3,7 @@ import { ArchiveRestore, CloudDownload, DatabaseBackup, Download, Lock, PlugZap,
 import { api, cached, csrfToken } from '../api'
 import { formatBytes } from '../shared/ui'
 import { formatTime } from '../shared/time'
+import { confirmDialog } from '../shared/dialog'
 
 type BackupSettings = {
   schedule: 'off' | 'daily' | 'interval'
@@ -204,7 +205,7 @@ export function BackupsView() {
   }
 
   async function remove(file: LocalBackup) {
-    if (!window.confirm(`删除本地备份 ${file.name}？WebDAV 上的副本不受影响。`)) return
+    if (!(await confirmDialog({ title: `删除本地备份 ${file.name}？`, message: 'WebDAV 上的副本不受影响。', confirmText: '删除', danger: true }))) return
     try {
       await api(`${endpoint}/local/${encodeURIComponent(file.name)}`, { method: 'DELETE' })
       await load()

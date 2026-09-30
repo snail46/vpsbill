@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useState } from 'react'
 import { RefreshCw, WalletCards, X } from 'lucide-react'
 import { api, cached, type CustomerCatalogRecord, type PaymentIntentRecord, type TopupInvoiceRecord, type WalletEntryRecord, type WalletRecord } from './api'
 import { formatTime } from './shared/time'
+import { confirmDialog } from './shared/dialog'
 
 export const walletKindLabels: Record<WalletEntryRecord['kind'], string> = {
   topup: '充值',
@@ -233,7 +234,7 @@ export function AdminWalletPanel({ accountID, name, onClose, onChanged }: { acco
       setError('请输入非零金额，负数表示扣减')
       return
     }
-    if (!window.confirm(`确认为「${name}」${yuan > 0 ? '增加' : '扣减'}余额 ¥${Math.abs(yuan).toFixed(2)}？`)) return
+    if (!(await confirmDialog({ title: `为「${name}」${yuan > 0 ? '增加' : '扣减'}余额 ¥${Math.abs(yuan).toFixed(2)}？`, message: '调整会记入账户流水。', confirmText: yuan > 0 ? '增加余额' : '扣减余额', danger: yuan < 0 }))) return
     setBusy(true)
     setError('')
     try {

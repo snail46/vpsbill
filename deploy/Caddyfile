@@ -1,14 +1,14 @@
 # Automatic HTTPS for the customer portal and the admin console. Caddy
-# forwards to the web container's trusted listeners (8080 portal, 8081
+# forwards to the web container's trusted listeners (7080 portal, 7081
 # admin), which take the client address from Caddy's X-Forwarded-For.
 {$DOMAIN} {
 	encode zstd gzip
-	reverse_proxy web:8080
+	reverse_proxy web:7080
 	header Strict-Transport-Security "max-age=31536000; includeSubDomains"
 }
 
 {$ADMIN_DOMAIN} {
 	encode zstd gzip
-	reverse_proxy web:8081
+	reverse_proxy web:7081
 	header Strict-Transport-Security "max-age=31536000; includeSubDomains"
 }

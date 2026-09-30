@@ -7,6 +7,7 @@ import { walletMoney } from './Wallet'
 import { formatTime } from './shared/time'
 import { StatusBadge } from './shared/ui'
 import { overcommitText } from './Supply'
+import { promptDialog } from './shared/dialog'
 
 function offlineFor(node: HostedNodeRecord) {
   if (node.status === 'online' || !node.last_seen_at) return ''
@@ -71,14 +72,18 @@ function HostedNodes() {
     }
   }
 
-  function hold(node: HostedNodeRecord) {
-    const hours = window.prompt('暂缓清退多少小时？（1-2160，填 0 取消暂缓）', '72')
+  async function hold(node: HostedNodeRecord) {
+    const hours = await promptDialog({
+      title: '暂缓清退',
+      message: '在这段时间内不会自动清退该母机。填 0 取消暂缓。',
+      label: '暂缓小时数（0-2160）',
+      inputType: 'number',
+      defaultValue: '72',
+      confirmText: '保存',
+      validate: value => (/^d+$/.test(value.trim()) && Number(value) >= 0 && Number(value) <= 2160 ? '' : '请输入 0 到 2160 之间的整数小时'),
+    })
     if (hours === null) return
     const value = Number(hours)
-    if (!Number.isFinite(value) || value < 0 || value > 2160) {
-      setError('请输入 0 到 2160 之间的小时数')
-      return
-    }
     const until = value === 0 ? null : new Date(Date.now() + value * 3_600_000).toISOString()
     void call(`/api/v1/admin/marketplace/nodes/${node.id}/hold`, 'PUT', { until }, value === 0 ? '已取消暂缓' : `已暂缓清退 ${value} 小时`)
   }

@@ -5,6 +5,7 @@ import { walletMoney } from './Wallet'
 import { formatDate, formatTime } from './shared/time'
 import { cycleName } from './shared/cycles'
 import { siteMeta } from './shared/boot'
+import { promptDialog } from './shared/dialog'
 
 const statusNames: Record<TradeListingRecord['status'], string> = { listed: '挂售中', sold: '已售出', cancelled: '已下架' }
 
@@ -371,7 +372,15 @@ export function AdminTradeListings() {
   }, [])
 
   async function cancel(listing: TradeListingRecord) {
-    const reason = window.prompt('下架原因（会记录在审计日志并显示给卖家）', '违反交易规则')
+    const reason = await promptDialog({
+      title: '强制下架',
+      message: '下架原因会记录在审计日志，并显示给卖家。',
+      label: '下架原因',
+      defaultValue: '违反交易规则',
+      required: true,
+      confirmText: '下架',
+      danger: true,
+    })
     if (reason === null) return
     try {
       await api(`/api/v1/admin/trade/listings/${listing.id}/cancel`, { method: 'POST', body: JSON.stringify({ reason }) })

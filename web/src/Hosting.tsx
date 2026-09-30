@@ -31,6 +31,7 @@ import { readStock, stockLeft, StockField, StockTag } from './shared/stock'
 import { DiskIOFields, diskIOText, readDiskIO } from './shared/diskio'
 import { OvercommitDialog, SupplyDetails, overcommitText } from './Supply'
 import { ConnectSteps, PendingAgents } from './shared/agents'
+import { confirmDialog } from './shared/dialog'
 
 type Tab = 'market' | 'mine' | 'coupons' | 'tickets' | 'chat'
 const tabs: [Tab, string, typeof Store][] = [
@@ -408,7 +409,7 @@ function MyNodes() {
   }, [])
 
   async function dismiss(agent: PendingAgentRecord) {
-    if (!window.confirm(`从待接入列表移除 ${agent.hostname || '这台母机'}？它重新连接后会再次出现。`)) return
+    if (!(await confirmDialog({ title: `从待接入列表移除 ${agent.hostname || '这台母机'}？`, message: '它重新连接后会再次出现。', confirmText: '移除' }))) return
     try {
       await api(`/api/v1/customer/hosting/agents/${agent.id}`, { method: 'DELETE' })
       void load()

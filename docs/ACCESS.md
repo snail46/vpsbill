@@ -9,7 +9,7 @@
 
 两个入口互不相通：前台地址打不开 `/admin`，也调不到管理接口；后台地址不提供客户接口。首次安装要在**后台地址**完成。
 
-Web 容器内部有四个监听端口：80（前台）、81（后台）给直接访问的客户端，8080（前台）、8081（后台）只给可信的反向代理用——它们会从 `CF-Connecting-IP`、`X-Real-IP` 或 `X-Forwarded-For` 里取真实客户端地址，所以只能发布在 `127.0.0.1` 上，不能直接对外。
+Web 容器内部有四个监听端口：80（前台）、81（后台）给直接访问的客户端，7080（前台）、7081（后台）只给可信的反向代理用——它们会从 `CF-Connecting-IP`、`X-Real-IP` 或 `X-Forwarded-For` 里取真实客户端地址，所以只能发布在 `127.0.0.1` 上，不能直接对外。早期版本的可信端口是 8080/8081，现在仍然保留、效果相同，已经指向 `web:8080` / `web:8081` 的隧道不用改；新配置请用 7080/7081。
 
 ## 选择访问方式
 
@@ -42,14 +42,14 @@ DOMAIN=billing.example.com
 ADMIN_DOMAIN=admin.example.com
 ```
 
-两个域名都解析到服务器，放行 80、443。Caddy 自动申请和续期证书，前台域名转到 Web 容器的 8080，后台域名转到 8081。前台和后台端口只监听 `127.0.0.1`。
+两个域名都解析到服务器，放行 80、443。Caddy 自动申请和续期证书，前台域名转到 Web 容器的 7080，后台域名转到 7081。前台和后台端口只监听 `127.0.0.1`。
 
 ### cloudflare：Cloudflare Tunnel（无公网 IP）
 
 1. Cloudflare Zero Trust → Networks → Tunnels → Create a tunnel，选 Cloudflared，复制令牌。
 2. 在隧道的 Public Hostname 里添加两条：
-   - 前台域名，服务 `HTTP`，URL `web:8080`
-   - 后台域名，服务 `HTTP`，URL `web:8081`
+   - 前台域名，服务 `HTTP`，URL `web:7080`
+   - 后台域名，服务 `HTTP`，URL `web:7081`
 3. `.env`：
 
 ```dotenv
@@ -59,7 +59,7 @@ CLOUDFLARE_TUNNEL_TOKEN=从 Cloudflare 复制的令牌
 
 `deploy.sh` 会启动 `cloudflared` 容器，服务器不需要开放任何入站端口。
 
-隧道的服务地址必须是 `web:8080` / `web:8081`（或自己装的 cloudflared 指向 `127.0.0.1` 上的可信端口）。如果指向了直连端口（如 `http://localhost:8088`），所有访客都会被识别成 Docker 内网地址：登录限流互相影响，审计日志和登录记录看不到真实 IP。系统检测到这种情况时，会在后台「站点设置」顶部提示。建议在 Cloudflare Access 里给后台域名加一层登录保护。
+隧道的服务地址必须是 `web:7080` / `web:7081`（或自己装的 cloudflared 指向 `127.0.0.1` 上的可信端口）。如果指向了直连端口（如 `http://localhost:8088`），所有访客都会被识别成 Docker 内网地址：登录限流互相影响，审计日志和登录记录看不到真实 IP。系统检测到这种情况时，会在后台「站点设置」顶部提示。建议在 Cloudflare Access 里给后台域名加一层登录保护。
 
 ### proxy：自己的反向代理
 
@@ -98,7 +98,7 @@ Web 容器的 nginx 在返回页面时，通过 SSI 把 `/api/v1/boot`（站点�
 | 模式 | 追加到 `.env` | 启动命令 |
 |---|---|---|
 | direct | （默认值即可） | `docker compose up -d` |
-| caddy | `PORTAL_BIND=127.0.0.1`、`ADMIN_BIND=127.0.0.1`、`PORTAL_TARGET=8080`、`ADMIN_TARGET=8081` | `docker compose --profile tls up -d` |
+| caddy | `PORTAL_BIND=127.0.0.1`、`ADMIN_BIND=127.0.0.1`、`PORTAL_TARGET=7080`、`ADMIN_TARGET=7081` | `docker compose --profile tls up -d` |
 | cloudflare | 同上 | `docker compose --profile tunnel up -d` |
 | proxy | 同上 | `docker compose up -d` |
 

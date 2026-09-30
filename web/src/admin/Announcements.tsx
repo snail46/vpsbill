@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useState } from 'react'
 import { Pin, Plus } from 'lucide-react'
 import { api, cached, AnnouncementRecord } from '../api'
 import { formatTime } from '../shared/time'
+import { confirmDialog } from '../shared/dialog'
 
 // AnnouncementsView lets staff publish notices on the customer overview.
 export function AnnouncementsView() {
@@ -38,7 +39,7 @@ export function AnnouncementsView() {
   }
 
   async function remove(item: AnnouncementRecord) {
-    if (!window.confirm(`删除公告「${item.title}」？`)) return
+    if (!(await confirmDialog({ title: `删除公告「${item.title}」？`, message: '删除后客户将不再看到这条公告。', confirmText: '删除', danger: true }))) return
     try {
       await api(`/api/v1/admin/announcements/${item.id}`, { method: 'DELETE' })
       await load()
