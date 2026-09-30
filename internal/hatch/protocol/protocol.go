@@ -10,7 +10,9 @@
 //	agent  -> server  {"type":"event","method":"heartbeat","params":Heartbeat}
 //
 // The server only ever sends the typed requests below; the agent executes
-// nothing else, so a compromised billing server cannot run host commands.
+// nothing else. The one exception is agent.upgrade, which installs the
+// agent build the server bundles; hosts that must not trust the server with
+// that set auto_upgrade false in their config.
 package protocol
 
 import (
@@ -50,6 +52,7 @@ const (
 	MethodUpdatePortMapping = "portmap.update"     // PortMappingParams -> []PortMapping
 	MethodDeletePortMapping = "portmap.delete"     // PortMappingParams -> []PortMapping
 	MethodConsoleOpen       = "console.open"       // ConsoleOpenParams; output then flows as stream frames
+	MethodUpgrade           = "agent.upgrade"      // UpgradeParams; the agent restarts on the new build
 	EventHeartbeat          = "heartbeat"          // Heartbeat
 )
 
@@ -93,6 +96,14 @@ type Hello struct {
 	// EnrollKey, from the install command, lists an agent whose token no
 	// node uses yet as waiting to be added by that account (or the platform).
 	EnrollKey string `json:"enroll_key,omitempty"`
+}
+
+// UpgradeParams names the agent build the billing server bundles. The agent
+// fetches it only from its own configured server URL
+// (/api/v1/agent/download/), checks it against SHA256SUMS and that it
+// reports this version, and refuses when its config sets auto_upgrade false.
+type UpgradeParams struct {
+	Version string `json:"version"`
 }
 
 // EnrollHeader carries the enroll key on the connect request, so the

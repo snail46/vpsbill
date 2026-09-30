@@ -11,6 +11,7 @@ import (
 	"math/rand/v2"
 	"net/http"
 	"os"
+	"sync/atomic"
 	"time"
 
 	"github.com/coder/websocket"
@@ -34,7 +35,16 @@ type Client struct {
 	service *Service
 	logger  *slog.Logger
 	http    *http.Client
+
+	// busy counts running requests; an upgrade restarts only when idle.
+	busy      atomic.Int32
+	upgrading atomic.Bool
+	exit      func()
 }
+
+// SetExit sets how the agent ends itself after staging an upgrade; the
+// service manager is expected to start it again.
+func (c *Client) SetExit(exit func()) { c.exit = exit }
 
 func NewClient(config Config, version string, service *Service, logger *slog.Logger) (*Client, error) {
 	client, err := serverClient(config)
@@ -120,6 +130,14 @@ func (c *Client) session(ctx context.Context) error {
 	sessionCtx, stop := context.WithCancel(ctx)
 	defer stop()
 	go c.heartbeat(sessionCtx, conn)
+	// A build that stays connected for a minute is good (see Handover).
+	go func() {
+		select {
+		case <-sessionCtx.Done():
+		case <-time.After(time.Minute):
+			confirmUpgrade(c.config.StateDir)
+		}
+	}()
 	streams := newStreamTable()
 	defer streams.closeAll()
 	slots := make(chan struct{}, maxConcurrent)
@@ -156,9 +174,14 @@ func (c *Client) respond(ctx context.Context, conn *websocket.Conn, streams *str
 	defer cancel()
 	var result any
 	var err error
-	if request.Method == protocol.MethodConsoleOpen {
+	switch request.Method {
+	case protocol.MethodConsoleOpen:
 		err = c.openStream(requestCtx, ctx, conn, streams, request.Params)
-	} else {
+	case protocol.MethodUpgrade:
+		err = c.upgrade(requestCtx, request.Params)
+	default:
+		c.busy.Add(1)
+		defer c.busy.Add(-1)
 		result, err = c.service.Handle(requestCtx, request.Method, request.Params)
 	}
 	response := protocol.Frame{Type: protocol.TypeResponse, ID: request.ID}

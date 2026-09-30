@@ -52,6 +52,10 @@ type Hub struct {
 	mu       sync.Mutex
 	sessions map[string]*Session
 	unknown  int
+
+	// release is the agent build this server bundles; connecting agents
+	// on another version are asked to upgrade to it.
+	release string
 }
 
 func NewHub(logger *slog.Logger, known KnownFunc) *Hub {
@@ -72,6 +76,10 @@ type Session struct {
 	done     chan struct{}
 	closed   bool
 }
+
+// SetAgentRelease names the agent build to upgrade connecting agents to;
+// "" or "dev" (a local build) upgrades nothing.
+func (h *Hub) SetAgentRelease(version string) { h.release = version }
 
 // SetEnroller accepts agents carrying an enroll key.
 func (h *Hub) SetEnroller(enroll EnrollFunc) { h.enroll = enroll }
@@ -146,8 +154,28 @@ func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 	go h.keepalive(ctx, session)
+	if h.release != "" && h.release != "dev" && hello.AgentVersion != h.release && hello.AgentVersion != "dev" && (known || enrolled) {
+		go h.upgrade(ctx, session)
+	}
 	session.readLoop(ctx)
 	h.logger.Info("hatch agent disconnected", "endpoint", endpoint)
+}
+
+// upgrade asks an agent to move to the bundled build. Agents older than
+// self-upgrade answer "unsupported" and need the install command once.
+func (h *Hub) upgrade(ctx context.Context, session *Session) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	defer cancel()
+	err := session.Call(ctx, protocol.MethodUpgrade, protocol.UpgradeParams{Version: h.release}, nil)
+	var protocolErr *protocol.Error
+	switch {
+	case err == nil:
+		h.logger.Info("hatch agent upgrading", "endpoint", session.endpoint, "from", session.hello.AgentVersion, "to", h.release)
+	case errors.As(err, &protocolErr) && protocolErr.Code == protocol.CodeUnsupported:
+		h.logger.Info("hatch agent does not upgrade itself; rerun the install command on the host", "endpoint", session.endpoint, "version", session.hello.AgentVersion, "reason", protocolErr.Message)
+	default:
+		h.logger.Warn("hatch agent upgrade failed", "endpoint", session.endpoint, "version", session.hello.AgentVersion, "error", err)
+	}
 }
 
 func readHello(ctx context.Context, conn *websocket.Conn) (protocol.Hello, error) {

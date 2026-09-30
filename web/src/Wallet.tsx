@@ -214,7 +214,7 @@ export default function CustomerWallet() {
 // AdminWalletPanel shows a customer's balance history to staff and lets
 // them record a correction with a reason.
 export function AdminWalletPanel({ accountID, name, onClose, onChanged }: { accountID: string; name: string; onClose: () => void; onChanged: () => void }) {
-  const [wallet, setWallet] = useState<WalletRecord | null>(null)
+  const [wallet, setWallet] = useState<WalletRecord | null>(() => cached<WalletRecord>(`/api/v1/admin/customers/${accountID}/wallet`) ?? null)
   const [amount, setAmount] = useState('')
   const [reason, setReason] = useState('')
   const [busy, setBusy] = useState(false)

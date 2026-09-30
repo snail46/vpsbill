@@ -35,6 +35,9 @@
 #   --download-from URL     fetch the agent from another billing address than
 #                           --server (e.g. the public one while the agent uses
 #                           a loopback URL)
+#   --no-auto-upgrade       do not let the billing site upgrade the agent to
+#                           the build it bundles (new installs only; existing
+#                           ones set "auto_upgrade": false in agent.json)
 #
 # Every instance gets a hard disk size limit. For Podman that needs overlay on
 # XFS with project quotas, so the script keeps Podman's store on an XFS file
@@ -56,6 +59,7 @@ PODMAN_DISK="auto"
 PODMAN_IMAGES="build"
 ZRAM=1
 TUNE=1
+AUTO_UPGRADE=true
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -71,6 +75,7 @@ while [ $# -gt 0 ]; do
     --podman-images) PODMAN_IMAGES="$2"; shift 2 ;;
     --no-zram) ZRAM=0; shift ;;
     --no-tune) TUNE=0; shift ;;
+    --no-auto-upgrade) AUTO_UPGRADE=false; shift ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
@@ -435,11 +440,13 @@ fi
 
 [ "$BINARY" -ef /usr/local/bin/hatch-agent ] || install -m 0755 "$BINARY" /usr/local/bin/hatch-agent
 install -d -m 0700 /etc/hatch /var/lib/hatch
+# A build the site upgraded the agent to earlier would shadow this one.
+rm -rf /var/lib/hatch/bin
 
 UPGRADE=0
 if [ ! -f /etc/hatch/agent.json ]; then
   /usr/local/bin/hatch-agent init --config /etc/hatch/agent.json \
-    --server "$SERVER" --runtime "$RUNTIME" --public-ip "$PUBLIC_IP" --enroll "$ENROLL" $EXTRA
+    --server "$SERVER" --runtime "$RUNTIME" --public-ip "$PUBLIC_IP" --enroll "$ENROLL" --auto-upgrade="$AUTO_UPGRADE" $EXTRA
 else
   UPGRADE=1
   echo "Keeping existing /etc/hatch/agent.json; token:"

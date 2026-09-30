@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -75,6 +76,12 @@ func main() {
 	agentHub := gateway.NewHub(logger, catalogStore.NodeExistsByEndpoint)
 	hatchprovider.Register(agentHub)
 	agentHub.SetEnroller(app.AgentEnroller(catalogStore, secretBox, logger))
+	// Agents follow the build bundled next to this server, when there is one.
+	if cfg.AgentDownloadDir != "" {
+		if _, err := os.Stat(filepath.Join(cfg.AgentDownloadDir, "SHA256SUMS")); err == nil {
+			agentHub.SetAgentRelease(version)
+		}
+	}
 	var agentInternal http.Handler
 	if cfg.InternalURL != "" {
 		internalURL, err := cfg.ResolveInternalURL()

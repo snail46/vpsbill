@@ -59,6 +59,7 @@ func initConfig(args []string) error {
 	publicIP := flags.String("public-ip", "", "public IPv4 shown for NAT port forwards (default: detected at start)")
 	enroll := flags.String("enroll", "", "account key from the install command; lists this host for that account")
 	force := flags.Bool("force", false, "overwrite an existing config and rotate the token")
+	autoUpgrade := flags.Bool("auto-upgrade", true, "let the billing server upgrade the agent to the build it bundles")
 	lxdNetwork := flags.String("lxd-network", "", "LXD/Incus bridge for instances (default lxdbr0 or incusbr0)")
 	podmanNetwork := flags.String("podman-network", "", "Podman network for instances (default podman)")
 	_ = flags.Parse(args)
@@ -83,6 +84,9 @@ func initConfig(args []string) error {
 		default:
 			return fmt.Errorf("unknown runtime %q", runtime)
 		}
+	}
+	if !*autoUpgrade {
+		config.AutoUpgrade = autoUpgrade
 	}
 	config.ApplyDefaults()
 	if err := config.Validate(); err != nil {
@@ -136,7 +140,10 @@ func run(args []string) error {
 	if err != nil {
 		return err
 	}
-	if config.PublicIPv4 == "" {
+	// A build the server upgraded this agent to takes over from here.
+	agent.Handover(config, logger)
+	detectIP := config.PublicIPv4 == ""
+	if detectIP {
 		detectCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		address, err := agent.DetectPublicIPv4(detectCtx, config)
 		cancel()
@@ -176,6 +183,10 @@ func run(args []string) error {
 	if err != nil {
 		return err
 	}
+	client.SetExit(stop)
+	if detectIP {
+		go redetectPublicIPv4(ctx, config, service, logger)
+	}
 	go service.Meter(ctx, time.Minute)
 	go service.MeasureDisk()
 	attrs := []any{"version", version, "runtimes", config.Runtimes()}
@@ -188,4 +199,27 @@ func run(args []string) error {
 	logger.Info("hatch agent started", attrs...)
 	client.Run(ctx)
 	return nil
+}
+
+// redetectPublicIPv4 looks the address up again now and then: providers
+// change addresses, and an answer given while the billing site was
+// misconfigured (a CDN address) must not stick until the next restart.
+func redetectPublicIPv4(ctx context.Context, config agent.Config, service *agent.Service, logger *slog.Logger) {
+	ticker := time.NewTicker(10 * time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+		detectCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		address, err := agent.DetectPublicIPv4(detectCtx, config)
+		cancel()
+		if err != nil || address == service.PublicIPv4() {
+			continue
+		}
+		logger.Info("public IPv4 changed", "from", service.PublicIPv4(), "to", address)
+		service.SetPublicIPv4(address)
+	}
 }

@@ -12,7 +12,7 @@ import {
   MemoryStick,
   RefreshCw,
 } from 'lucide-react'
-import { api, HostProbeDetailRecord } from './api'
+import { api, cached, HostProbeDetailRecord } from './api'
 
 type Dict = Record<string, unknown>
 const asObject = (value: unknown): Dict => (value && typeof value === 'object' && !Array.isArray(value) ? (value as Dict) : {})
@@ -255,7 +255,8 @@ function LineChart({
 }
 
 export default function HostDetailPanel({ id, onBack }: { id: string; onBack: () => void }) {
-  const [detail, setDetail] = useState<HostProbeDetailRecord | null>(null)
+  // The last probe (from this page or before a reload) shows while it reloads.
+  const [detail, setDetail] = useState<HostProbeDetailRecord | null>(() => cached<HostProbeDetailRecord>(`/api/v1/admin/hosts/${id}/probe`) ?? null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
 

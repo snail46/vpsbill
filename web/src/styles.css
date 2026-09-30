@@ -1480,7 +1480,28 @@ textarea {
   transition: width 0.3s ease;
 }
 
+/* No reading yet: a moving sheen instead of an empty bar. */
+.runtime-meter.pending b {
+  width: 40%;
+  background: var(--text-muted);
+  opacity: 0.35;
+  animation: meter-pending 1.2s ease-in-out infinite;
+}
+
+@keyframes meter-pending {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(250%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .runtime-meter.pending b { animation: none; }
+}
+
 /* Live I/O strip */
+.live-io.pending span {
+  opacity: 0.5;
+}
+
 .live-io {
   display: grid;
   grid-template-columns: repeat(4, 1fr);

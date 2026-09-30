@@ -545,8 +545,11 @@ export function adoptCache(id: string) {
   }
 }
 
+// Secrets (root passwords) stay in this page's memory only.
+const unstored = /\/credential$/
+
 function store(path: string, data: unknown) {
-  if (!owner) return
+  if (!owner || unstored.test(path)) return
   try {
     const text = JSON.stringify(data)
     if (text.length <= storedLimit) sessionStorage.setItem(storagePrefix + path, text)

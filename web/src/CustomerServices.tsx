@@ -62,14 +62,16 @@ function StatusBadge({ status }: { status: string }) {
   return <span className={`status-badge ${status}`}>{statusMap[status] ?? status}</span>
 }
 
-function Meter({ label, value, text, Icon }: { label: string; value: number; text: string; Icon: typeof Gauge }) {
+// Meter shows one resource; without a reading yet (pending) it shows a
+// placeholder instead of a misleading 0.
+function Meter({ label, value, text, Icon, pending }: { label: string; value: number; text: string; Icon: typeof Gauge; pending?: boolean }) {
   return (
-    <div className="runtime-meter">
+    <div className={pending ? 'runtime-meter pending' : 'runtime-meter'}>
       <div>
         <span><Icon size={14} />{label}</span>
-        <strong>{text}</strong>
+        <strong>{pending ? '读取中…' : text}</strong>
       </div>
-      <i><b style={{ width: `${percent(value)}%` }} /></i>
+      <i><b style={{ width: pending ? undefined : `${percent(value)}%` }} /></i>
     </div>
   )
 }
@@ -77,10 +79,17 @@ function Meter({ label, value, text, Icon }: { label: string; value: number; tex
 // ServiceManager is the live part of the detail page: notices, monitoring,
 // access details and every operation on the instance.
 function ServiceManager({ service, onReload }: { service: CustomerServiceRecord; onReload: () => void }) {
-  const [runtime, setRuntime] = useState<ServiceRuntimeRecord | null>(null)
+  const runtimePath = (brief: boolean) => `/api/v1/customer/services/${service.id}/runtime${brief ? '?brief=1' : ''}`
+  // The last reading (from this page or before a reload) shows at once
+  // while the node is asked again.
+  const [runtime, setRuntime] = useState<ServiceRuntimeRecord | null>(
+    () => cached<ServiceRuntimeRecord>(runtimePath(false)) ?? cached<ServiceRuntimeRecord>(runtimePath(true)) ?? null,
+  )
   const [error, setError] = useState('')
   const [acting, setActing] = useState('')
-  const [credential, setCredential] = useState<ServiceCredentialRecord | null>(null)
+  const [credential, setCredential] = useState<ServiceCredentialRecord | null>(
+    () => cached<ServiceCredentialRecord>(`/api/v1/customer/services/${service.id}/credential`) ?? null,
+  )
   const [showPassword, setShowPassword] = useState(false)
   const [copiedKey, setCopiedKey] = useState('')
   const [consoleKind, setConsoleKind] = useState<'ssh' | 'vnc' | null>(null)
@@ -97,7 +106,7 @@ function ServiceManager({ service, onReload }: { service: CustomerServiceRecord;
   const busy = Boolean(service.desired_runtime_status) || restart !== null || reinstalling
 
   const load = (brief = true) =>
-    api<ServiceRuntimeRecord>(`/api/v1/customer/services/${service.id}/runtime${brief ? '?brief=1' : ''}`)
+    api<ServiceRuntimeRecord>(runtimePath(brief))
       .then(value => {
         // Brief polls omit templates and history; keep the last full load's.
         setRuntime(previous =>
@@ -196,6 +205,7 @@ function ServiceManager({ service, onReload }: { service: CustomerServiceRecord;
 
   const usage = runtime?.usage || {}
   const traffic = runtime?.traffic || {}
+  const pending = !runtime
   // Until the runtime loads, show every action; the node still rejects unsupported calls.
   const capabilities = runtime?.capabilities
   const hasConsole = (kind: string) => !capabilities || capabilities.console.includes(kind)
@@ -259,24 +269,28 @@ function ServiceManager({ service, onReload }: { service: CustomerServiceRecord;
       <div className="runtime-grid">
         <Meter
           label="CPU"
+          pending={pending}
           Icon={Activity}
           value={Number(usage.cpu_usage_pct) || 0}
           text={`${(Number(usage.cpu_usage_pct) || 0).toFixed(1)}%`}
         />
         <Meter
           label="内存"
+          pending={pending}
           Icon={Gauge}
           value={(memoryUsed / memoryTotal) * 100}
           text={`${bytes(memoryUsed)} / ${bytes(memoryTotal)}`}
         />
         <Meter
           label="磁盘"
+          pending={pending}
           Icon={HardDrive}
           value={(diskUsed / diskTotal) * 100}
           text={`${bytes(diskUsed)} / ${service.disk_gb} GB`}
         />
         <Meter
           label="流量"
+          pending={pending}
           Icon={Network}
           value={trafficLimit ? (trafficUsed / trafficLimit) * 100 : 0}
           text={`${bytes(trafficUsed)} / ${service.traffic_gb || '∞'} GB`}
@@ -288,7 +302,7 @@ function ServiceManager({ service, onReload }: { service: CustomerServiceRecord;
           本月流量按双向合计：下行 {bytes(rxBytes)} + 上行 {bytes(txBytes)} = {bytes(trafficUsed)}
         </div>
       )}
-      <div className="live-io">
+      <div className={pending ? "live-io pending" : "live-io"}>
         <span title="网络接收速率">↓ {rate(Number(usage.network_rx_bps) || 0)}</span>
         <span title="网络发送速率">↑ {rate(Number(usage.network_tx_bps) || 0)}</span>
         <span title="磁盘读取速率">读 {rate(Number(usage.disk_read_bps) || 0)}</span>
@@ -345,7 +359,7 @@ function ServiceManager({ service, onReload }: { service: CustomerServiceRecord;
 
       <div className="credential-row">
         <span><KeyRound size={14} />root 密码</span>
-        <code>{credential?.stored ? (showPassword ? credential.password : '••••••••••••') : '未留存，请重置后查看'}</code>
+        <code>{!credential ? '读取中…' : credential.stored ? (showPassword ? credential.password : '••••••••••••') : '未留存，请重置后查看'}</code>
         {credential?.stored && (
           <>
             <button

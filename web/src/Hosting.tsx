@@ -240,7 +240,7 @@ function BuyDialog({
   const [coupon, setCoupon] = useState('')
   const [discount, setDiscount] = useState(0)
   const [order, setOrder] = useState<OrderRecord | null>(null)
-  const [wallet, setWallet] = useState<WalletRecord | null>(null)
+  const [wallet, setWallet] = useState<WalletRecord | null>(() => cached<WalletRecord>('/api/v1/customer/wallet') ?? null)
   const [busy, setBusy] = useState(false)
   const [done, setDone] = useState(false)
   const [error, setError] = useState('')
@@ -865,7 +865,7 @@ function HostedNodeCard({
 }
 
 function HostedPlanForm({ node, plan, onClose, onSaved }: { node: HostedNodeRecord; plan?: PlanRecord; onClose: () => void; onSaved: () => void }) {
-  const [images, setImages] = useState<NodeImageRecord[]>([])
+  const [images, setImages] = useState<NodeImageRecord[]>(() => cached<NodeImageRecord[]>(`/api/v1/customer/hosting/nodes/${node.id}/templates`) ?? [])
   const [virtualization, setVirtualization] = useState<string>(plan?.virtualization || node.virtualization_types[0] || 'lxc')
   const [allowed, setAllowed] = useState<string[]>(plan?.allowed_template_ids || [])
   const [fallback, setFallback] = useState(plan?.default_template_id || '')
@@ -1127,8 +1127,8 @@ function HostTickets() {
 // ---- Chat ----
 
 function ChatRooms() {
-  const [rooms, setRooms] = useState<ChatRoomRecord[]>([])
-  const [selected, setSelected] = useState('')
+  const [rooms, setRooms] = useState<ChatRoomRecord[]>(() => cached<ChatRoomRecord[]>('/api/v1/customer/chat/rooms') ?? [])
+  const [selected, setSelected] = useState(() => rooms[0]?.node_id ?? '')
   const [error, setError] = useState('')
 
   useEffect(() => {

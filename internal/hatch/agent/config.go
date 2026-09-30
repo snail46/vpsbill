@@ -46,6 +46,9 @@ type Config struct {
 	// NFTTable names the nftables table holding the port forwards. Give each
 	// agent on the same host its own table so they do not replace each other.
 	NFTTable string `json:"nft_table,omitempty"`
+	// AutoUpgrade (default on) lets the billing server move the agent to
+	// the build it bundles; false keeps the installed binary.
+	AutoUpgrade *bool `json:"auto_upgrade,omitempty"`
 	// Capacity overrides detected host capacity when set.
 	Capacity CapacityConfig `json:"capacity"`
 	LXD      *LXDConfig     `json:"lxd,omitempty"`
@@ -149,6 +152,9 @@ func (c Config) Validate() error {
 	}
 	return nil
 }
+
+// Upgrades reports whether the server may upgrade this agent.
+func (c Config) Upgrades() bool { return c.AutoUpgrade == nil || *c.AutoUpgrade }
 
 // ConnectURL is the gateway WebSocket endpoint on the billing server.
 func (c Config) ConnectURL() string {

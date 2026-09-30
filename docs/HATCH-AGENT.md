@@ -19,7 +19,11 @@ Hatch 是 VPSBill 自研的宿主机 Agent。它运行在母鸡上，驱动本�
 - **身份**：Agent 令牌是 64 位十六进制随机数，只保存在 Agent 的 `/etc/hatch/agent.json`（0600）和计费库中（AES-256-GCM 加密）。节点的 `base_url` 存的是 `agent://<令牌 SHA-256 前 16 位>`，用于匹配会话，不暴露令牌。
 - **未登记令牌**：尚未接入节点的 Agent 最多同时保持 8 个连接，15 分钟内未被接入即断开。已登记节点的 Agent 不受该上限影响。
 - **接入码（免复制令牌）**：安装命令带 `--enroll <接入码>`，接入码每个托管账户一个、平台一个（后台「节点对接」显示的命令），同一账户的所有母机用同一条命令。Agent 连接时在请求头 `X-Hatch-Enroll` 和 hello 里带上接入码；接入码有效时，平台把它记在该账户的待接入列表里（`agent_enrollments`，令牌加密保存），不占上面的 8 个名额，一直保持连接直到被接入或移除。机主在「我的母机」、管理员在「节点对接」点「发布 / 接入」即可，平台用保存的令牌完成验证。每个账户最多 50 台待接入。接入码无效的连接在 hello 后立即断开。
-- **公网 IP 自动识别**：配置里不填 `public_ipv4` 时，Agent 启动时自己识别：默认路由的源地址是公网地址就用它；否则（服务商 1:1 NAT，网卡上只有内网 IP，如甲骨文）向计费站 `GET /api/v1/agent/ip` 询问自己连过来的 IPv4；计费站也说不清时（例如 Agent 与计费站在同一台机器、计费站走 Cloudflare Tunnel），再依次询问公共服务（Cloudflare 1.1.1.1、ipw.cn、ipify、icanhazip）。计费站不会用站点域名解析出来的地址：走 CDN 或隧道时那是 Cloudflare 的泛播 IP，不是母机。仍然不准时，在后台节点的「公网 IPv4（可选）」里直接填写，优先于 Agent 检测的地址，客户页面的 IP、SSH 和端口映射地址随即更新。公网 IP 只用于给客户显示端口转发地址，端口转发规则不依赖它。
+- **公网 IP 自动识别**：配置里不填 `public_ipv4` 时，Agent 启动时自己识别：默认路由的源地址是公网地址就用它；否则（服务商 1:1 NAT，网卡上只有内网 IP，如甲骨文）向计费站 `GET /api/v1/agent/ip` 询问自己连过来的 IPv4；计费站也说不清时（例如 Agent 与计费站在同一台机器、计费站走 Cloudflare Tunnel），再依次询问公共服务（Cloudflare 1.1.1.1、ipw.cn、ipify、icanhazip）。计费站不会用站点域名解析出来的地址：走 CDN 或隧道时那是 Cloudflare 的泛播 IP，不是母机。Agent 之后每 10 分钟重新识别一次，地址变了会自动更新，不需要重启（配置文件里写死了 `public_ipv4` 的除外）。仍然不准时，在后台节点的「公网 IPv4（可选）」里直接填写，优先于 Agent 检测的地址，客户页面的 IP、SSH 和端口映射地址随即更新。公网 IP 只用于给客户显示端口转发地址，端口转发规则不依赖它。
+- **自动升级**：计费站的 API 镜像自带同一版本构建的 Agent。Agent 连上计费站时，如果版本和站点不一致，站点会让它升级：Agent 只从自己配置的 `server_url` 下载 `/api/v1/agent/download/` 里的二进制，核对 `SHA256SUMS`，并确认新程序报告的版本号正确，然后放到 `<state_dir>/bin/hatch-agent`（不覆盖 `/usr/local/bin/hatch-agent`）。等手上的请求（例如正在创建的实例）处理完后，Agent 退出，由 systemd 重新拉起，启动时交给新版本运行。新版本连续 3 次启动都没能保持连接 1 分钟的，自动丢弃并回到原来安装的版本。所以更新站点镜像后，母机 Agent 会自动跟上，不用逐台操作。
+  - 这项功能加入之前安装的 Agent 不会自动升级，需要在母机上重新运行一次安装命令（配置和实例保持不变），之后就会自动升级。
+  - 自动升级意味着计费站可以替换母机上的 Agent 程序。不想这样的母机（例如不完全信任平台的托管机主）在 `agent.json` 里写 `"auto_upgrade": false` 后重启 Agent，或安装时加 `--no-auto-upgrade`；之后只能手动重新运行安装命令来升级。
+  - 本地构建（版本号 `dev`）的站点或 Agent 不参与自动升级。
 - **多实例**：Agent 会话保存在它所连接的 API 进程中。部署多个 API 实例时设置 `INTERNAL_URL=auto`（或每个实例可互访的内部地址），实例会把持有的 Agent 登记到 `agent_sessions` 表并每 30 秒续期；其他实例收到针对该 Agent 的请求（含 WebSSH）时，通过内部端点 `/internal/v1/agent/` 转发给持有者。内部请求用由 `SESSION_SECRET`+`ENCRYPTION_KEY` 派生的 HMAC 签名，时间窗 60 秒，公网代理不转发 `/internal/`。单实例部署留空即可。
 
 ## Agent 负责的事情
@@ -148,6 +152,7 @@ IOPS 上限按磁盘实际收到的请求计，文件系统的元数据和日志
   "port_range_end": 60000,
   "ipv6_ndp_interface": "",
   "nft_table": "hatch",
+  "auto_upgrade": true,
   "capacity": { "vcpu": 16, "ram_mb": 60000, "disk_gb": 900 },
   "lxd": { "socket": "/var/snap/lxd/common/lxd/unix.socket", "network": "lxdbr0", "storage_pool": "default" },
   "podman": { "socket": "/run/podman/podman.sock", "network": "podman" }

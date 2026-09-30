@@ -39,6 +39,9 @@ type Service struct {
 	// passwordRetry is the wait between root password attempts while a new
 	// instance boots.
 	passwordRetry time.Duration
+	// firstSampleWait separates the two looks usage takes at an instance it
+	// has no recent observation of.
+	firstSampleWait time.Duration
 	// run executes host commands (ip -6 neigh); replaced in tests.
 	run CommandRunner
 
@@ -47,9 +50,12 @@ type Service struct {
 	natMu   sync.Mutex
 
 	samplesMu sync.Mutex
-	samples   map[string]sample
+	samples   map[string]samples
 
 	diskPerf atomic.Pointer[protocol.DiskPerf]
+	// publicIPv4 starts as the configured or detected address; the agent
+	// detects it again now and then, since hosts may change address.
+	publicIPv4 atomic.Pointer[string]
 
 	// background tracks work left running after a reply, such as
 	// installing packages; tests wait for it.
@@ -61,6 +67,26 @@ type sample struct {
 	state RuntimeState
 }
 
+// samples keeps the two latest observations of an instance at least
+// minSampleGap apart, so rates never come from two reads made at nearly the
+// same moment (a page asks for the instance and its usage in parallel).
+type samples struct {
+	latest, older sample
+}
+
+const minSampleGap = 2 * time.Second
+
+// baseline is the observation at least minAge old to compute rates against
+// at now.
+func (p samples) baseline(now time.Time, minAge time.Duration) (sample, bool) {
+	for _, candidate := range []sample{p.latest, p.older} {
+		if age := now.Sub(candidate.at); !candidate.at.IsZero() && age >= minAge && age < 10*time.Minute {
+			return candidate, true
+		}
+	}
+	return sample{}, false
+}
+
 // SetForwarding makes NAT updates also allow instance traffic through the
 // iptables FORWARD chain (see Forwarding).
 func (s *Service) SetForwarding(forwarding Forwarding) { s.forwarding = &forwarding }
@@ -70,11 +96,19 @@ func NewService(config Config, version string, store *Store, runtimes []Runtime,
 	for _, runtime := range runtimes {
 		byKind[runtime.Virtualization()] = runtime
 	}
-	return &Service{
+	service := &Service{
 		config: config, version: version, store: store, runtimes: byKind, nat: nat, logger: logger,
-		now: time.Now, passwordRetry: 3 * time.Second, run: runCommand, locks: map[string]*sync.Mutex{}, samples: map[string]sample{},
+		now: time.Now, passwordRetry: 3 * time.Second, firstSampleWait: time.Second, run: runCommand, locks: map[string]*sync.Mutex{}, samples: map[string]samples{},
 	}
+	service.SetPublicIPv4(config.PublicIPv4)
+	return service
 }
+
+// PublicIPv4 is the address customers reach the host's NAT ports on.
+func (s *Service) PublicIPv4() string { return *s.publicIPv4.Load() }
+
+// SetPublicIPv4 replaces the address reported from now on.
+func (s *Service) SetPublicIPv4(address string) { s.publicIPv4.Store(&address) }
 
 // Init restores NAT rules and IPv6 neighbour proxies after an agent or
 // host restart.
@@ -263,7 +297,7 @@ func (s *Service) hostInfo(ctx context.Context) (protocol.HostInfo, error) {
 		}
 	}
 	return protocol.HostInfo{
-		Hostname: hostname, AgentVersion: s.version, Runtimes: s.config.Runtimes(), PublicIPv4: s.config.PublicIPv4,
+		Hostname: hostname, AgentVersion: s.version, Runtimes: s.config.Runtimes(), PublicIPv4: s.PublicIPv4(),
 		Capacity: lowerCapacity(detected, s.config.Capacity), Detected: detected, MachineID: machineID(),
 		Health: health, QuotaErrors: quotaErrors, DiskPerf: s.diskPerf.Load(), IOLimitErrors: ioErrors, Details: details,
 	}, nil
@@ -599,7 +633,7 @@ func (s *Service) get(ctx context.Context, name string) (protocol.Instance, erro
 	s.recordSample(name, state)
 	instance := protocol.Instance{
 		Name: name, Virtualization: record.Virtualization, Status: state.Status, Template: record.Template,
-		PrivateIPv4: record.PrivateIPv4, PublicIPv4: s.config.PublicIPv4, IPv6: record.IPv6, VCPU: record.VCPU, RAMMB: record.RAMMB,
+		PrivateIPv4: record.PrivateIPv4, PublicIPv4: s.PublicIPv4(), IPv6: record.IPv6, VCPU: record.VCPU, RAMMB: record.RAMMB,
 		DiskGB: record.DiskGB, PortMappings: record.Mappings, PortMappingLimit: record.PortMappingLimit,
 		MonthlyTrafficGB: record.MonthlyTrafficGB, NetworkDownMbps: record.NetworkDownMbps, NetworkUpMbps: record.NetworkUpMbps,
 		DiskIO: record.DiskIO,
@@ -839,7 +873,19 @@ func (s *Service) applyNAT(ctx context.Context) error {
 func (s *Service) recordSample(name string, state RuntimeState) {
 	s.samplesMu.Lock()
 	defer s.samplesMu.Unlock()
-	s.samples[name] = sample{at: s.now(), state: state}
+	now := s.now()
+	pair := s.samples[name]
+	if pair.latest.at.IsZero() || now.Sub(pair.latest.at) >= minSampleGap {
+		pair.older, pair.latest = pair.latest, sample{at: now, state: state}
+		s.samples[name] = pair
+	}
+}
+
+// sampleBaseline is the observation of name to compute rates against now.
+func (s *Service) sampleBaseline(name string) (sample, bool) {
+	s.samplesMu.Lock()
+	defer s.samplesMu.Unlock()
+	return s.samples[name].baseline(s.now(), s.firstSampleWait/2)
 }
 
 func (s *Service) forgetSample(name string) {
@@ -848,9 +894,10 @@ func (s *Service) forgetSample(name string) {
 	delete(s.samples, name)
 }
 
-// usage reports current resource use. Rates are computed against the
-// previous observation of the instance, so the first call after start
-// reports zero rates.
+// usage reports current resource use. Rates are computed against an
+// earlier observation of the instance; without a recent one (the first look
+// after an agent start, or after ten quiet minutes) it observes the
+// instance twice, a second apart.
 func (s *Service) usage(ctx context.Context, name string) (map[string]any, error) {
 	record, ok := s.store.Get(name)
 	if !ok {
@@ -867,17 +914,32 @@ func (s *Service) usage(ctx context.Context, name string) (map[string]any, error
 	if err != nil {
 		return nil, err
 	}
-	s.samplesMu.Lock()
-	previous, hasPrevious := s.samples[name]
-	s.samplesMu.Unlock()
-	s.recordSample(name, state)
+	previous, hasPrevious := s.sampleBaseline(name)
+	if !hasPrevious && state.Status == "running" && s.firstSampleWait > 0 {
+		previous, hasPrevious = sample{at: s.now(), state: state}, true
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(s.firstSampleWait):
+		}
+		if state, err = runtime.State(ctx, name); err != nil {
+			return nil, err
+		}
+		// Keep both looks: the next call within minSampleGap rates against
+		// the first.
+		s.samplesMu.Lock()
+		s.samples[name] = samples{older: previous, latest: sample{at: s.now(), state: state}}
+		s.samplesMu.Unlock()
+	} else {
+		s.recordSample(name, state)
+	}
 	result := map[string]any{
 		"memory_usage_bytes": state.MemoryBytes, "memory_total_bytes": int64(record.RAMMB) << 20,
 		"disk_usage_bytes": state.DiskBytes, "cpu_usage_pct": 0.0,
 		"network_rx_bps": 0.0, "network_tx_bps": 0.0, "disk_read_bps": 0.0, "disk_write_bps": 0.0,
 	}
 	elapsed := s.now().Sub(previous.at).Seconds()
-	if hasPrevious && elapsed > 0 && elapsed < 600 {
+	if hasPrevious && elapsed > 0 {
 		rate := func(current, before int64) float64 {
 			if current < before {
 				return 0
