@@ -279,6 +279,104 @@ PODMAN_IMG=/var/lib/hatch-podman.img
 # Podman can only cap a container's disk with overlay on XFS mounted with
 # project quotas. The store moves onto such a file system, kept in a
 # preallocated file so the host's own file system does not matter.
+# lxcfs lets free, top, nproc-style tools and uptime inside a Podman instance
+# show its own CPU count, memory, swap, load and uptime instead of the host's.
+# Instances use a lxcfs of their own, hatch-lxcfs.service at
+# /var/lib/hatch-lxcfs, with CPU-quota and load virtualisation (the
+# distribution's lxcfs.service runs without them). lxcfs older than 6 cannot
+# see swap limits on cgroup v2, so hosts with an older one (Debian 12,
+# Ubuntu 22.04/24.04) get the build bundled with the billing site.
+#
+# A running lxcfs is never restarted here: every container using it would
+# lose its /proc files. A newer library is loaded with a reload instead.
+lxcfs_major() {
+  "$1" --version 2>/dev/null | tr -dc '0-9.\n' | cut -d. -f1
+}
+
+setup_lxcfs() {
+  if [ ! -c /dev/fuse ]; then
+    echo "warning: /dev/fuse missing; instances will see the host's CPU count and memory" >&2
+    return
+  fi
+  LXCFS_BIN=""
+  SYSTEM_LXCFS=$(command -v lxcfs 2>/dev/null || true)
+  if [ -n "$SYSTEM_LXCFS" ] && [ "$(lxcfs_major "$SYSTEM_LXCFS")" -ge 6 ] 2>/dev/null; then
+    LXCFS_BIN=$SYSTEM_LXCFS
+  else
+    case "$(uname -m)" in
+      x86_64|amd64) LXCFS_ARCH=amd64 ;;
+      aarch64|arm64) LXCFS_ARCH=arm64 ;;
+      *) LXCFS_ARCH="" ;;
+    esac
+    LXCFS_TAR="hatch-lxcfs-linux-$LXCFS_ARCH.tar.gz"
+    if [ -n "$LXCFS_ARCH" ] && fetch "$BASE/$LXCFS_TAR" "$WORK/$LXCFS_TAR" 2>/dev/null && fetch "$BASE/SHA256SUMS" "$WORK/SHA256SUMS" &&
+       (cd "$WORK" && grep " $LXCFS_TAR\$" SHA256SUMS | sha256sum -c - >/dev/null); then
+      ldconfig -p 2>/dev/null | grep -q 'libfuse3\.so\.3 ' || apt_install fuse3
+      SUM=$(cd "$WORK" && sha256sum "$LXCFS_TAR" | cut -d' ' -f1)
+      if [ "$(cat /opt/hatch-lxcfs/.sha256 2>/dev/null)" != "$SUM" ]; then
+        # Unpack beside the old copy and swap directories, so a running
+        # lxcfs keeps the files it has open.
+        rm -rf /opt/hatch-lxcfs.new /opt/hatch-lxcfs.old
+        mkdir -p /opt/hatch-lxcfs.new
+        tar -C "$WORK" -xzf "$WORK/$LXCFS_TAR"
+        cp -a "$WORK/opt/hatch-lxcfs/." /opt/hatch-lxcfs.new/
+        echo "$SUM" > /opt/hatch-lxcfs.new/.sha256
+        [ ! -d /opt/hatch-lxcfs ] || mv /opt/hatch-lxcfs /opt/hatch-lxcfs.old
+        mv /opt/hatch-lxcfs.new /opt/hatch-lxcfs
+        rm -rf /opt/hatch-lxcfs.old
+      fi
+      /opt/hatch-lxcfs/bin/lxcfs --version >/dev/null 2>&1 && LXCFS_BIN=/opt/hatch-lxcfs/bin/lxcfs
+    fi
+    if [ -z "$LXCFS_BIN" ]; then
+      # The site has no bundled lxcfs (older release, or --binary installs
+      # without network): the distribution's still fixes the CPU count, load
+      # and memory; swap shows as 0.
+      [ -n "$SYSTEM_LXCFS" ] || apt_install lxcfs
+      LXCFS_BIN=$(command -v lxcfs)
+      [ "$(lxcfs_major "$LXCFS_BIN")" -ge 6 ] 2>/dev/null ||
+        echo "warning: using lxcfs $("$LXCFS_BIN" --version 2>/dev/null | tr -d '"'); instances will show 0 swap" >&2
+    fi
+  fi
+  cat > "$WORK/hatch-lxcfs.service" <<UNIT
+[Unit]
+Description=lxcfs for VPSBill Hatch instances
+Documentation=https://github.com/snail46/vpsbill/blob/main/docs/HATCH-AGENT.md
+Before=hatch-agent.service podman-restart.service
+
+[Service]
+OOMScoreAdjust=-1000
+ExecStartPre=/bin/mkdir -p /var/lib/hatch-lxcfs
+ExecStart=$LXCFS_BIN --enable-cfs --enable-loadavg -p /run/hatch-lxcfs.pid /var/lib/hatch-lxcfs
+ExecReload=/bin/kill -USR1 \$MAINPID
+ExecStopPost=-/bin/sh -c 'fusermount3 -u /var/lib/hatch-lxcfs 2>/dev/null || fusermount -u /var/lib/hatch-lxcfs'
+KillMode=process
+Restart=on-failure
+Delegate=yes
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+  if systemctl is-active --quiet hatch-lxcfs; then
+    if ! cmp -s "$WORK/hatch-lxcfs.service" /etc/systemd/system/hatch-lxcfs.service; then
+      # A different binary or options take effect at the next host restart.
+      install -m 0644 "$WORK/hatch-lxcfs.service" /etc/systemd/system/hatch-lxcfs.service
+      systemctl daemon-reload
+      echo "note: hatch-lxcfs changed; it switches over at the next host restart (running instances keep working)"
+    fi
+    systemctl reload hatch-lxcfs 2>/dev/null || true
+  else
+    install -m 0644 "$WORK/hatch-lxcfs.service" /etc/systemd/system/hatch-lxcfs.service
+    systemctl daemon-reload
+    systemctl enable --now hatch-lxcfs >/dev/null 2>&1 || true
+    sleep 1
+  fi
+  if [ -e /var/lib/hatch-lxcfs/proc/meminfo ]; then
+    echo "lxcfs: $("$LXCFS_BIN" --version 2>/dev/null | tr -d '"') at /var/lib/hatch-lxcfs"
+  else
+    echo "warning: hatch-lxcfs did not start; instances will see the host's CPU count and memory (journalctl -u hatch-lxcfs)" >&2
+  fi
+}
+
 setup_podman_disk() {
   if findmnt -rno FSTYPE,OPTIONS "$PODMAN_MOUNT" 2>/dev/null | grep -q '^xfs .*prjquota'; then
     echo "Podman data disk already mounted at $PODMAN_MOUNT"
@@ -390,19 +488,7 @@ BASE="${BASE%/}/api/v1/agent/download"
 
 if [ "$USE_PODMAN" = 1 ]; then
   command -v podman >/dev/null 2>&1 || apt_install podman
-  # lxcfs lets free, top and uptime inside a container show its own limits.
-  if [ ! -e /var/lib/lxcfs/proc/meminfo ]; then
-    command -v lxcfs >/dev/null 2>&1 || apt_install lxcfs
-    # Debian's unit skips containers; a host that is itself a container
-    # (common for small NAT servers) can still run it when FUSE is there.
-    if systemd-detect-virt --container >/dev/null 2>&1 && [ -c /dev/fuse ]; then
-      mkdir -p /etc/systemd/system/lxcfs.service.d
-      printf '[Unit]\nConditionVirtualization=\n' > /etc/systemd/system/lxcfs.service.d/hatch.conf
-      systemctl daemon-reload
-    fi
-    systemctl enable --now lxcfs >/dev/null 2>&1 && sleep 1 || true
-  fi
-  [ -e /var/lib/lxcfs/proc/meminfo ] || echo "warning: lxcfs unavailable; instances will see host memory in free" >&2
+  setup_lxcfs
   setup_podman_disk
   systemctl enable --now podman.socket >/dev/null
   systemctl enable podman-restart.service >/dev/null 2>&1 || true

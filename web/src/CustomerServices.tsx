@@ -31,6 +31,7 @@ import { cycleUnit } from './shared/cycles'
 import ChatRoom from './ChatRoom'
 import { confirmDialog } from './shared/dialog'
 import { PasswordInput } from './shared/password'
+import { bandwidthLabel } from './shared/ui'
 
 // The console (xterm.js and noVNC) is loaded on demand; the detail page
 // fetches it in the background so the first click opens it at once.
@@ -778,7 +779,10 @@ function ServiceTile({ service }: { service: CustomerServiceRecord }) {
       }}
     >
       <div className="service-tile-head">
-        <strong>{service.instance_name}</strong>
+        <div className="service-tile-title">
+          <strong>{service.plan_name}</strong>
+          <small>{service.instance_name}</small>
+        </div>
         <StatusBadge status={status} />
       </div>
       <div className="service-tile-tags">
@@ -787,11 +791,12 @@ function ServiceTile({ service }: { service: CustomerServiceRecord }) {
       </div>
       <dl className="service-tile-facts">
         <div><dt>配置</dt><dd>{service.vcpu} 核 · {service.ram_mb >= 1024 ? `${+(service.ram_mb / 1024).toFixed(1)} GB` : `${service.ram_mb} MB`} · {service.disk_gb} GB</dd></div>
+        <div><dt>带宽</dt><dd>{bandwidthLabel(service.network_down_mbps)}</dd></div>
         <div><dt>系统</dt><dd>{osLabel(service.template_id)}</dd></div>
         <div><dt>地域</dt><dd>{service.region_name}</dd></div>
         <div><dt>IP</dt><dd>{service.primary_ipv4 || service.primary_ipv6 || '—'}</dd></div>
         <div><dt>到期</dt><dd>{service.next_due_at && !ended ? formatDate(service.next_due_at) : '—'}</dd></div>
-        <div>
+        <div className="wide">
           <dt>续费</dt>
           <dd>{ended ? '—' : renewalText(service)}{!ended && <small>{service.auto_renew ? ' · 自动' : ' · 手动'}</small>}</dd>
         </div>
@@ -844,7 +849,8 @@ function ServiceDetail({ service, onReload }: { service: CustomerServiceRecord; 
       <section className="panel service-detail-head">
         <div className="panel-heading">
           <div>
-            <h2>{service.instance_name}</h2>
+            <h2>{service.plan_name}</h2>
+            <p className="service-detail-name">{service.instance_name}</p>
             <div className="service-tile-tags">
               <SourceTags service={service} />
               <span className="tag">{service.virtualization.toUpperCase()}</span>
@@ -853,9 +859,10 @@ function ServiceDetail({ service, onReload }: { service: CustomerServiceRecord; 
           <StatusBadge status={serviceUsable(service.status) ? service.runtime_status : service.status} />
         </div>
         <dl className="detail-facts">
-          <div><dt>套餐</dt><dd>{service.plan_name}</dd></div>
+          <div><dt>实例名</dt><dd>{service.instance_name}</dd></div>
           <div><dt>地域</dt><dd>{service.region_name}</dd></div>
           <div><dt>配置</dt><dd>{service.vcpu} 核 · {service.ram_mb} MB · {service.disk_gb} GB · 月流量 {service.traffic_gb || '不限'}{service.traffic_gb ? ' GB' : ''}</dd></div>
+          <div><dt>带宽</dt><dd>{bandwidthLabel(service.network_down_mbps)}</dd></div>
           <div><dt>系统</dt><dd>{osLabel(service.template_id)}</dd></div>
           <div><dt>来源</dt><dd>{service.source === 'hosted' ? `托管市场 · 机主 ${service.host_name || '—'}` : '平台自营'}{service.via_trade ? ' · 交易市场购入' : ''}</dd></div>
           <div><dt>业务状态</dt><dd><StatusBadge status={service.status} /></dd></div>

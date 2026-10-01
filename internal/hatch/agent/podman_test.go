@@ -121,6 +121,18 @@ func TestPodmanAppliesBandwidthLimitsOncePerVeth(t *testing.T) {
 	if mounts, _ := (*created)["mounts"].([]any); len(mounts) != 1 || mounts[0].(map[string]any)["destination"] != "/proc/meminfo" {
 		t.Fatalf("lxcfs mounts = %v", (*created)["mounts"])
 	}
+
+	// With hatch-lxcfs, instances use it and get the whole CPU directory.
+	runtime.exists = func(path string) bool {
+		return path == hatchLXCFSRoot+"/proc/meminfo" || path == hatchLXCFSRoot+"/sys/devices/system/cpu" || path == lxcfsRoot+"/proc/meminfo"
+	}
+	var sources []string
+	for _, mount := range runtime.lxcfsMounts() {
+		sources = append(sources, mount["source"].(string))
+	}
+	if len(sources) != 2 || sources[0] != hatchLXCFSRoot+"/proc/meminfo" || sources[1] != hatchLXCFSRoot+"/sys/devices/system/cpu" {
+		t.Fatalf("hatch-lxcfs mounts = %v", sources)
+	}
 	if size := (*created)["storage_opts"].(map[string]any)["size"]; size != "5G" {
 		t.Fatalf("disk size limit = %v", size)
 	}

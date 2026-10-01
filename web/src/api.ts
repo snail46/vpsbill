@@ -301,6 +301,7 @@ export type CustomerServiceRecord = {
   ram_mb: number
   disk_gb: number
   traffic_gb: number
+  network_down_mbps: number
   primary_ipv4?: string
   primary_ipv6?: string
   next_due_at?: string
@@ -783,6 +784,7 @@ export type TradeListingRecord = {
   ram_mb: number
   disk_gb: number
   traffic_gb: number
+  network_down_mbps: number
   port_mapping_count: number
   region_name: string
   host_name?: string

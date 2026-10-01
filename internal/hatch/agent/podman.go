@@ -185,16 +185,32 @@ const (
 // the host's.
 var lxcfsFiles = []string{
 	"/proc/cpuinfo", "/proc/diskstats", "/proc/meminfo", "/proc/stat", "/proc/swaps", "/proc/uptime", "/proc/loadavg",
-	"/sys/devices/system/cpu/online",
 }
 
-const lxcfsRoot = "/var/lib/lxcfs"
+const (
+	// hatchLXCFSRoot is the installer's hatch-lxcfs.service: it virtualises
+	// the CPU count from the instance's CPU quota and the load average,
+	// and (lxcfs 6) swap. lxcfsRoot is the distribution's lxcfs, used by
+	// hosts installed before it.
+	hatchLXCFSRoot = "/var/lib/hatch-lxcfs"
+	lxcfsRoot      = "/var/lib/lxcfs"
+)
 
-// lxcfsMounts binds the lxcfs views that exist on the host.
+// lxcfsMounts binds the lxcfs views that exist on the host. The mounts are
+// fixed when the container is created, so instances created earlier move to
+// hatch-lxcfs on their next reinstall.
 func (p *Podman) lxcfsMounts() []map[string]any {
+	root := lxcfsRoot
+	// With CPU-quota virtualisation the whole CPU directory follows the
+	// quota (online, cpuN entries), as LXC containers see it; the
+	// distribution's lxcfs only gets the online list.
+	cpu := "/sys/devices/system/cpu/online"
+	if p.exists(hatchLXCFSRoot + "/proc/meminfo") {
+		root, cpu = hatchLXCFSRoot, "/sys/devices/system/cpu"
+	}
 	var mounts []map[string]any
-	for _, file := range lxcfsFiles {
-		if source := lxcfsRoot + file; p.exists(source) {
+	for _, file := range append(lxcfsFiles, cpu) {
+		if source := root + file; p.exists(source) {
 			mounts = append(mounts, map[string]any{"destination": file, "type": "bind", "source": source, "options": []string{"rbind"}})
 		}
 	}

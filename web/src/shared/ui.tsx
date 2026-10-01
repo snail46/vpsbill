@@ -268,6 +268,12 @@ export function ticketAuthorLabel(type: string) {
   )
 }
 
+// bandwidthLabel names an instance's bandwidth by its download speed, the
+// figure customers compare; 0 means unlimited.
+export function bandwidthLabel(downMbps?: number) {
+  return downMbps ? `${downMbps} Mbps` : '不限带宽'
+}
+
 export function money(amountMinor: number, currency: string) {
   return new Intl.NumberFormat('zh-CN', { style: 'currency', currency }).format(amountMinor / 100)
 }

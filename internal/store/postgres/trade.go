@@ -73,6 +73,7 @@ type TradeListing struct {
 	RAMMB            int    `json:"ram_mb"`
 	DiskGB           int    `json:"disk_gb"`
 	TrafficGB        int    `json:"traffic_gb"`
+	NetworkDownMbps  int    `json:"network_down_mbps"`
 	PortMappingCount int    `json:"port_mapping_count"`
 	RegionName       string `json:"region_name"`
 	HostName         string `json:"host_name,omitempty"`
@@ -103,7 +104,7 @@ func maskName(name string) string {
 
 const listingSelect = `
 	SELECT l.id,l.service_id,s.instance_name,l.seller_account_id,sa.display_name,l.status,coalesce(l.cancel_reason,''),l.price_minor,l.currency,l.note,
-	       p.name,p.virtualization,p.vcpu,p.ram_mb,p.disk_gb,p.traffic_gb,p.port_mapping_count,r.name,coalesce(h.display_name,''),
+	       p.name,p.virtualization,p.vcpu,p.ram_mb,p.disk_gb,p.traffic_gb,p.network_down_mbps,p.port_mapping_count,r.name,coalesce(h.display_name,''),
 	       s.billing_cycle,s.next_due_at,s.created_at,l.created_at,l.sold_at,
 	       s.status='active' AND s.account_id=l.seller_account_id,
 	       least(coalesce((SELECT pp.amount_minor FROM plan_prices pp WHERE pp.plan_id=p.id AND pp.currency=l.currency AND pp.billing_cycle=s.billing_cycle
@@ -122,7 +123,7 @@ func scanListings(rows pgx.Rows, viewer string, owner bool) ([]TradeListing, err
 		var discountType *string
 		var discountValue *int64
 		if err := rows.Scan(&l.ID, &l.ServiceID, &l.InstanceName, &seller, &l.SellerName, &l.Status, &l.CancelReason, &l.PriceMinor, &l.Currency, &l.Note,
-			&l.PlanName, &l.Virtualization, &l.VCPU, &l.RAMMB, &l.DiskGB, &l.TrafficGB, &l.PortMappingCount, &l.RegionName, &l.HostName,
+			&l.PlanName, &l.Virtualization, &l.VCPU, &l.RAMMB, &l.DiskGB, &l.TrafficGB, &l.NetworkDownMbps, &l.PortMappingCount, &l.RegionName, &l.HostName,
 			&l.BillingCycle, &l.ExpiresAt, &l.ServiceCreatedAt, &l.CreatedAt, &l.SoldAt, &l.Available, &l.RenewalMinor, &discountType, &discountValue, &l.NodeOnline,
 			&l.TrafficBytes, &l.TrafficRXBytes, &l.TrafficTXBytes, &l.FeeMinor, &l.ProceedsMinor); err != nil {
 			return nil, err

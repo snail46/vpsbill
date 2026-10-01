@@ -27,25 +27,28 @@ type PortalStore struct{ db *pgxpool.Pool }
 func NewPortalStore(db *pgxpool.Pool) *PortalStore { return &PortalStore{db: db} }
 
 type CustomerService struct {
-	ID                   string     `json:"id"`
-	PlanName             string     `json:"plan_name"`
-	RegionName           string     `json:"region_name"`
-	Status               string     `json:"status"`
-	RuntimeStatus        string     `json:"runtime_status"`
-	DesiredRuntimeStatus string     `json:"desired_runtime_status,omitempty"`
-	InstanceName         string     `json:"instance_name"`
-	Virtualization       string     `json:"virtualization"`
-	VCPU                 int        `json:"vcpu"`
-	RAMMB                int        `json:"ram_mb"`
-	DiskGB               int        `json:"disk_gb"`
-	TrafficGB            int        `json:"traffic_gb"`
-	PrimaryIPv4          string     `json:"primary_ipv4,omitempty"`
-	PrimaryIPv6          string     `json:"primary_ipv6,omitempty"`
-	NextDueAt            *time.Time `json:"next_due_at,omitempty"`
-	GraceUntil           *time.Time `json:"grace_until,omitempty"`
-	TerminationAt        *time.Time `json:"termination_scheduled_at,omitempty"`
-	LastReconciledAt     *time.Time `json:"last_reconciled_at,omitempty"`
-	LastReconcileError   string     `json:"last_reconcile_error,omitempty"`
+	ID                   string `json:"id"`
+	PlanName             string `json:"plan_name"`
+	RegionName           string `json:"region_name"`
+	Status               string `json:"status"`
+	RuntimeStatus        string `json:"runtime_status"`
+	DesiredRuntimeStatus string `json:"desired_runtime_status,omitempty"`
+	InstanceName         string `json:"instance_name"`
+	Virtualization       string `json:"virtualization"`
+	VCPU                 int    `json:"vcpu"`
+	RAMMB                int    `json:"ram_mb"`
+	DiskGB               int    `json:"disk_gb"`
+	TrafficGB            int    `json:"traffic_gb"`
+	// NetworkDownMbps is the plan's download bandwidth, shown as the
+	// instance's bandwidth (0 = unlimited).
+	NetworkDownMbps    int        `json:"network_down_mbps"`
+	PrimaryIPv4        string     `json:"primary_ipv4,omitempty"`
+	PrimaryIPv6        string     `json:"primary_ipv6,omitempty"`
+	NextDueAt          *time.Time `json:"next_due_at,omitempty"`
+	GraceUntil         *time.Time `json:"grace_until,omitempty"`
+	TerminationAt      *time.Time `json:"termination_scheduled_at,omitempty"`
+	LastReconciledAt   *time.Time `json:"last_reconciled_at,omitempty"`
+	LastReconcileError string     `json:"last_reconcile_error,omitempty"`
 	// HostName is set for instances on a hosted node; TerminationReason
 	// explains a clearance.
 	HostName          string `json:"host_name,omitempty"`
@@ -178,7 +181,7 @@ type CustomerTransaction struct {
 func (s *PortalStore) ListServices(ctx context.Context, accountID string) ([]CustomerService, error) {
 	rows, err := s.db.Query(ctx, `
 		SELECT s.id,p.name,r.name,s.status,s.runtime_status,coalesce(s.desired_runtime_status,''),s.instance_name,
-		       p.virtualization,p.vcpu,p.ram_mb,p.disk_gb,p.traffic_gb,coalesce(host(s.primary_ipv4),''),coalesce(host(s.primary_ipv6),''),
+		       p.virtualization,p.vcpu,p.ram_mb,p.disk_gb,p.traffic_gb,p.network_down_mbps,coalesce(host(s.primary_ipv4),''),coalesce(host(s.primary_ipv6),''),
 		       s.next_due_at,s.grace_until,s.termination_scheduled_at,s.last_reconciled_at,coalesce(s.last_reconcile_error,''),
 		       coalesce(h.display_name,''),coalesce(s.termination_reason,''),
 		       s.acquired_at,coalesce(l.id::text,''),coalesce(l.price_minor,0),
@@ -206,7 +209,7 @@ func (s *PortalStore) ListServices(ctx context.Context, accountID string) ([]Cus
 		var row CustomerService
 		var price, locked, discountValue *int64
 		var discountType *string
-		if err := rows.Scan(&row.ID, &row.PlanName, &row.RegionName, &row.Status, &row.RuntimeStatus, &row.DesiredRuntimeStatus, &row.InstanceName, &row.Virtualization, &row.VCPU, &row.RAMMB, &row.DiskGB, &row.TrafficGB, &row.PrimaryIPv4, &row.PrimaryIPv6, &row.NextDueAt, &row.GraceUntil, &row.TerminationAt, &row.LastReconciledAt, &row.LastReconcileError, &row.HostName, &row.TerminationReason, &row.AcquiredAt, &row.ListingID, &row.ListingPriceMinor,
+		if err := rows.Scan(&row.ID, &row.PlanName, &row.RegionName, &row.Status, &row.RuntimeStatus, &row.DesiredRuntimeStatus, &row.InstanceName, &row.Virtualization, &row.VCPU, &row.RAMMB, &row.DiskGB, &row.TrafficGB, &row.NetworkDownMbps, &row.PrimaryIPv4, &row.PrimaryIPv6, &row.NextDueAt, &row.GraceUntil, &row.TerminationAt, &row.LastReconciledAt, &row.LastReconcileError, &row.HostName, &row.TerminationReason, &row.AcquiredAt, &row.ListingID, &row.ListingPriceMinor,
 			&row.TrafficUsedBytes, &row.TrafficRXBytes, &row.TrafficTXBytes, &row.TrafficLockedMonth,
 			&row.Source, &row.ViaTrade, &row.NodeID, &row.TemplateID, &row.AutoRenew, &row.BillingCycle, &row.Currency,
 			&price, &locked, &discountType, &discountValue); err != nil {

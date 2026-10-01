@@ -14,11 +14,14 @@ import (
 func TestUsageRatesIgnoreObservationsMadeMomentsAgo(t *testing.T) {
 	runtime, nat := agenttest.NewRuntime("lxc"), &agenttest.NAT{}
 	service := newService(t, t.TempDir(), runtime, nat)
+	// The clock is set before the instance exists, so no observation made
+	// while creating it comes from a different clock.
+	now := time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC)
+	agent.SetClock(service, func() time.Time { return now })
 	if _, err := call[protocol.EnsureResult](t, service, protocol.MethodEnsure, spec); err != nil {
 		t.Fatal(err)
 	}
-	now := time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC)
-	agent.SetClock(service, func() time.Time { return now })
+	now = now.Add(time.Minute)
 	name := protocol.NameParams{Name: "svc-1"}
 
 	runtime.SetCounters("svc-1", 0, 0)

@@ -1,3 +1,20 @@
+# lxcfs for Podman hosts: Debian 12 and Ubuntu 22.04/24.04 ship 5.0.x, which
+# cannot see swap limits on cgroup v2. Built on Ubuntu 22.04 (glibc 2.35,
+# libfuse3.so.3) so it runs on all of them; hosts whose own lxcfs is 6 or
+# newer keep theirs (see deploy/install-hatch-agent.sh). arm64 builds under
+# emulation.
+ARG LXCFS_VERSION=6.0.5
+
+FROM --platform=linux/amd64 ubuntu:22.04 AS lxcfs-amd64
+ARG LXCFS_VERSION
+COPY deploy/build-lxcfs.sh /build-lxcfs.sh
+RUN sh /build-lxcfs.sh "$LXCFS_VERSION" amd64
+
+FROM --platform=linux/arm64 ubuntu:22.04 AS lxcfs-arm64
+ARG LXCFS_VERSION
+COPY deploy/build-lxcfs.sh /build-lxcfs.sh
+RUN sh /build-lxcfs.sh "$LXCFS_VERSION" arm64
+
 FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS build
 ARG TARGETOS=linux
 ARG TARGETARCH=amd64
@@ -14,10 +31,12 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags=
 # architectures, served at /api/v1/agent/download/.
 COPY deploy/install-hatch-agent.sh /out/hatch-agent/install.sh
 COPY deploy/hatch-agent.service /out/hatch-agent/hatch-agent.service
+COPY --from=lxcfs-amd64 /hatch-lxcfs-linux-amd64.tar.gz /out/hatch-agent/
+COPY --from=lxcfs-arm64 /hatch-lxcfs-linux-arm64.tar.gz /out/hatch-agent/
 RUN for arch in amd64 arm64; do \
       CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath -ldflags="-s -w -X main.version=$VERSION" -o /out/hatch-agent/hatch-agent-linux-$arch ./cmd/hatch-agent; \
     done \
-    && cd /out/hatch-agent && sha256sum hatch-agent-linux-* > SHA256SUMS
+    && cd /out/hatch-agent && sha256sum hatch-agent-linux-* hatch-lxcfs-linux-* > SHA256SUMS
 
 FROM alpine:3.23
 # Keep trust roots and timezone data on the security patch level shipped by the

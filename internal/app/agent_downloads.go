@@ -12,9 +12,12 @@ import (
 var agentDownloadFiles = map[string]string{
 	"hatch-agent-linux-amd64": "application/octet-stream",
 	"hatch-agent-linux-arm64": "application/octet-stream",
-	"SHA256SUMS":              "text/plain; charset=utf-8",
-	"install.sh":              "text/x-shellscript; charset=utf-8",
-	"hatch-agent.service":     "text/plain; charset=utf-8",
+	// lxcfs for Podman hosts whose own is too old (see the Dockerfile).
+	"hatch-lxcfs-linux-amd64.tar.gz": "application/gzip",
+	"hatch-lxcfs-linux-arm64.tar.gz": "application/gzip",
+	"SHA256SUMS":                     "text/plain; charset=utf-8",
+	"install.sh":                     "text/x-shellscript; charset=utf-8",
+	"hatch-agent.service":            "text/plain; charset=utf-8",
 }
 
 // agentDownloads serves the Hatch agent release bundled with this API build,

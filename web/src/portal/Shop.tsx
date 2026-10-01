@@ -2,7 +2,7 @@ import { FormEvent, useEffect, useState } from 'react'
 import { api, cached, CustomerCatalogRecord, CustomerIdentity, OrderRecord, PaymentIntentRecord } from '../api'
 import { osOptions } from '../shared/nav'
 import { CouponField } from '../Coupons'
-import { cycleLabel, money } from '../shared/ui'
+import { cycleLabel, money , bandwidthLabel } from '../shared/ui'
 import { cycleOrder, priceLeft } from '../shared/cycles'
 import { stockLeft, StockTag } from '../shared/stock'
 
@@ -132,7 +132,8 @@ export function CustomerShop({ customer }: { customer: CustomerIdentity }) {
                 <span>{plan.vcpu} vCPU</span>
                 <span>{plan.ram_mb} MB 内存</span>
                 <span>{plan.disk_gb} GB SSD</span>
-                <span>{plan.traffic_gb} GB 流量</span>
+                <span>{plan.traffic_gb ? `${plan.traffic_gb} GB 流量` : '不限流量'}</span>
+                <span>{bandwidthLabel(plan.network_down_mbps)}</span>
               </div>
               <div className="shop-price">
                 {price ? money(price.amount_minor, price.currency) : '暂无报价'}

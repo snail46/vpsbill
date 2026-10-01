@@ -98,7 +98,7 @@ Podman 不用手动准备：下一步的安装脚本带 `--runtime podman`（或
 两个镜像都预装了 bash、curl、wget、nano、less、tar、unzip 等常用工具。LXC 实例（Incus / LXD 镜像）在开通和重装后，Agent 会在后台把缺少的这些工具装上（需要实例能访问软件源，装不上不影响开通）。
 - `localhost/hatch-alpine3.22:latest`（同一镜像也叫 `localhost/hatch-alpine:latest`）：Alpine 3.22 + OpenRC + sshd。带版本号的名字在前台显示为「Alpine 3.22」，新建套餐建议选它。
 
-脚本还会安装 lxcfs，实例里的 `free`、`top`、`uptime` 显示的是实例自己的限额，而不是母机的。
+脚本还会为 Podman 实例单独运行一份 lxcfs（`hatch-lxcfs.service`，挂载在 `/var/lib/hatch-lxcfs`，开启 CPU 配额和负载虚拟化），实例里的 `free`、`top`、`uptime`、`/proc/cpuinfo`、`lscpu` 显示的是实例自己的核心数、内存、swap、负载和开机时长，而不是母机的。系统自带的 lxcfs 低于 6.0（Debian 12、Ubuntu 22.04/24.04）时识别不了 cgroup v2 的 swap 限额，脚本会改用计费站自带的 lxcfs 6.0.5（安装到 `/opt/hatch-lxcfs`，LGPL-2.1+，源码见 github.com/lxc/lxcfs）。已有的 lxcfs 不会被重启，以免正在运行的实例丢失 /proc 文件；已有实例重装系统后改用新的挂载。两点限制：`nproc` 读的是 CPU 亲和性，仍显示母机核数；`top` 等工具的 CPU 占用率来自 /proc/stat，cgroup v2 下 lxcfs 无法虚拟化，显示的是母机整体占用（计费站实例详情页的探针按实例自身的 cgroup 计算，不受影响）。
 
 两个镜像空闲时只占几 MB 内存，**1 核 / 64 MB / 1 GB** 的套餐可以正常开机和 SSH 登录。套餐的系统模板 ID 填这两个名字。数据盘大小用 `--podman-disk 20G` 指定，默认是剩余空间减 2 GiB（空间会预先占用）。已有 Podman 容器的机器需要先删除容器再迁移存储。
 

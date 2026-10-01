@@ -22,7 +22,7 @@ import { osOptions } from './shared/nav'
 import ChatRoom from './ChatRoom'
 import { CouponField, CouponManager } from './Coupons'
 import { ReportDialog } from './Reports'
-import { StatusBadge, TicketConversation, ticketStatusLabel, useReveal } from './shared/ui'
+import { StatusBadge, TicketConversation, ticketStatusLabel, useReveal , bandwidthLabel } from './shared/ui'
 import { ticketRequestBody, useAttachmentLimit } from './TicketAttachments'
 import { walletMoney } from './Wallet'
 import { formatDate, formatTime } from './shared/time'
@@ -101,7 +101,7 @@ function PlanSpecs({ plan }: { plan: PlanRecord }) {
       <span>{plan.ram_mb} MB 内存</span>
       <span>{plan.disk_gb} GB 磁盘</span>
       <span>{plan.traffic_gb ? `${plan.traffic_gb} GB 流量` : '不限流量'}</span>
-      <span>{plan.network_down_mbps ? `${plan.network_down_mbps}/${plan.network_up_mbps} Mbps` : '不限带宽'}</span>
+      <span>{bandwidthLabel(plan.network_down_mbps)}</span>
       {diskIOText(plan) && <span>{diskIOText(plan)}</span>}
       <span>NAT × {plan.port_mapping_count}</span>
     </div>

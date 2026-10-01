@@ -6,6 +6,7 @@ import { formatDate, formatTime } from './shared/time'
 import { cycleName } from './shared/cycles'
 import { siteMeta } from './shared/boot'
 import { promptDialog } from './shared/dialog'
+import { bandwidthLabel } from './shared/ui'
 
 const statusNames: Record<TradeListingRecord['status'], string> = { listed: '挂售中', sold: '已售出', cancelled: '已下架' }
 
@@ -60,6 +61,7 @@ function ListingSpecs({ listing }: { listing: TradeListingRecord }) {
         <span>{listing.ram_mb} MB 内存</span>
         <span>{listing.disk_gb} GB 磁盘</span>
         <span>{listing.traffic_gb ? `${listing.traffic_gb} GB 流量` : '不限流量'}</span>
+        <span>{bandwidthLabel(listing.network_down_mbps)}</span>
         <span>NAT × {listing.port_mapping_count}</span>
       </div>
       <dl className="market-facts">
