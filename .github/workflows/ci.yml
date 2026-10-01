@@ -74,6 +74,8 @@ jobs:
           docker compose --env-file .env.example -f deploy/docker-compose.yml --profile tls config --quiet
           docker compose --env-file .env.example -f deploy/docker-compose.image.yml config --quiet
           docker compose --env-file .env.example -f deploy/docker-compose.image.yml --profile tls config --quiet
+      # The API image builds lxcfs for arm64 as well, under emulation.
+      - uses: docker/setup-qemu-action@v4
       - name: Build production images
         run: |
           docker build --pull -t vpsbill-api:test .
