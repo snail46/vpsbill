@@ -3,6 +3,8 @@ import { api, cached, PaymentSettingsRecord } from '../api'
 import { ImageUp, RotateCcw } from 'lucide-react'
 import { setSiteLogo, type LogoMode } from '../shared/boot'
 import { Brand, StatusBadge } from '../shared/ui'
+import type { ContactLink } from '../shared/contact'
+import { ContactSettings } from './ContactSettings'
 
 export function PaymentSettingsView() {
   const [settings, setSettings] = useState<PaymentSettingsRecord | null>(null)
@@ -254,6 +256,9 @@ export type SiteSettingsRecord = {
   logo_url: string
   logo_external_url: string
   logo_mode: LogoMode
+  // contact_intro and contact_links fill the portal's "联系我们" page.
+  contact_intro?: string
+  contact_links?: ContactLink[]
   // proxy_warning explains a reverse proxy that hides visitors' addresses.
   proxy_warning?: string
 }
@@ -428,6 +433,7 @@ export function SiteSettingsView() {
 
       {settings?.proxy_warning && <div className="note-banner warn" role="alert">{settings.proxy_warning}</div>}
       {settings && <LogoSettings key={settings.logo_url} current={settings.logo_url} external={settings.logo_external_url} mode={settings.logo_mode || 'auto'} siteName={settings.app_name} />}
+      {settings && <ContactSettings intro={settings.contact_intro ?? ''} links={settings.contact_links ?? []} />}
 
       <form className="panel site-settings" onSubmit={submit}>
         <div className="form-grid">

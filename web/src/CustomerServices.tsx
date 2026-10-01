@@ -64,6 +64,14 @@ const bytes = (value = 0) => {
   return `${Math.round(value)} B`
 }
 const rate = (value = 0) => `${bytes(value)}/s`
+// usedOf writes "183 / 512 MB": both numbers in the total's unit with at
+// most three digits, short enough to stay on one line in a meter.
+const usedOf = (used = 0, total = 0) => {
+  const units: [number, string][] = [[1024 ** 4, 'TB'], [1024 ** 3, 'GB'], [1024 ** 2, 'MB'], [1024, 'KB']]
+  const [size, unit] = units.find(([size]) => total >= size) ?? [1, 'B']
+  const short = (value: number) => (value >= 100 ? String(Math.round(value)) : String(Number(value.toFixed(1))))
+  return `${short(used / size)} / ${short(total / size)} ${unit}`
+}
 const percent = (value = 0) => Math.max(0, Math.min(100, Number.isFinite(value) ? value : 0))
 
 const statusMap: Record<string, string> = {
@@ -356,21 +364,21 @@ function ServiceManager({ service, onReload }: { service: CustomerServiceRecord;
           pending={pending}
           Icon={Gauge}
           value={(memoryUsed / memoryTotal) * 100}
-          text={`${bytes(memoryUsed)} / ${bytes(memoryTotal)}`}
+          text={usedOf(memoryUsed, memoryTotal)}
         />
         <Meter
           label="磁盘"
           pending={pending}
           Icon={HardDrive}
           value={(diskUsed / diskTotal) * 100}
-          text={`${bytes(diskUsed)} / ${service.disk_gb} GB`}
+          text={usedOf(diskUsed, service.disk_gb * 1024 ** 3)}
         />
         <Meter
           label="流量"
           pending={pending}
           Icon={Network}
           value={trafficLimit ? (trafficUsed / trafficLimit) * 100 : 0}
-          text={`${bytes(trafficUsed)} / ${service.traffic_gb || '∞'} GB`}
+          text={service.traffic_gb ? usedOf(trafficUsed, service.traffic_gb * 1024 ** 3) : `${bytes(trafficUsed)} / 不限`}
         />
       </div>
 

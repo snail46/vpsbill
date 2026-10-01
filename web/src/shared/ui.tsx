@@ -1,4 +1,5 @@
 import { FormEvent, RefObject, useEffect, useState } from 'react'
+import type { ContactInfo } from './contact'
 import { Plus, Send, ShieldCheck } from 'lucide-react'
 import { api, TicketDetailRecord } from '../api'
 import { AttachmentGallery, AttachmentPicker } from '../TicketAttachments'
@@ -20,6 +21,8 @@ export type Meta = {
   trade_hold_days?: number
   ticket_attachment_max_mb?: number
   marketplace_enabled?: boolean
+  // contact fills the portal's "联系我们" page.
+  contact?: ContactInfo
 }
 
 // useReveal brings a form that just opened into view, flashes it and puts

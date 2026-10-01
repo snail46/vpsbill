@@ -259,6 +259,7 @@ func NewHandler(deps Dependencies) (http.Handler, error) {
 	mux.Handle("POST /api/v1/admin/settings/logo", auth.require("settings:write", http.HandlerFunc(adminSettings.uploadLogo)))
 	mux.Handle("PUT /api/v1/admin/settings/logo", auth.require("settings:write", http.HandlerFunc(adminSettings.linkLogo)))
 	mux.Handle("PUT /api/v1/admin/settings/logo/mode", auth.require("settings:write", http.HandlerFunc(adminSettings.logoMode)))
+	mux.Handle("PUT /api/v1/admin/settings/contact", auth.require("settings:write", http.HandlerFunc(adminSettings.contact)))
 	mux.Handle("POST /api/v1/admin/settings/site/test-mail", auth.require("settings:write", http.HandlerFunc(adminSettings.testMail)))
 	mux.Handle("GET /api/v1/admin/services", auth.require("services:read", http.HandlerFunc(automation.listServices)))
 	mux.Handle("GET /api/v1/admin/jobs", auth.require("services:read", http.HandlerFunc(automation.listJobs)))

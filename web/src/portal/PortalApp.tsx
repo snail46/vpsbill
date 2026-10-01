@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react'
-import { ArrowLeftRight, Boxes, ChevronRight, Coins, Headphones, LayoutDashboard, LogOut, Menu, X, ShieldCheck, ShoppingCart, Store, UserCircle, WalletCards } from 'lucide-react'
+import { ArrowLeftRight, Boxes, ChevronRight, Coins, Contact as ContactIcon, Headphones, LayoutDashboard, LogOut, Menu, X, ShieldCheck, ShoppingCart, Store, UserCircle, WalletCards } from 'lucide-react'
 import { adoptCache, api, clearCached, CustomerIdentity } from '../api'
 import { prefetchPage, usePrefetch } from '../shared/prefetch'
 import CustomerServicesPanel from '../CustomerServices'
@@ -16,6 +16,7 @@ import { CustomerShop } from './Shop'
 import { CustomerBilling } from './Billing'
 import { CustomerProfile } from './Profile'
 import { CustomerSupport } from './Support'
+import { CustomerContact } from './Contact'
 
 export type CustomerAuthScreen = 'loading' | 'install' | 'login' | 'register' | 'forgot' | 'reset' | 'ready' | 'uninstalled'
 
@@ -26,9 +27,9 @@ function portalScreen(boot: Boot): CustomerAuthScreen {
   return boot.customer ? 'ready' : 'login'
 }
 
-export type PortalView = 'overview' | 'shop' | 'services' | 'billing' | 'wallet' | 'hosting' | 'trade' | 'support' | 'profile' | 'announcements'
+export type PortalView = 'overview' | 'shop' | 'services' | 'billing' | 'wallet' | 'hosting' | 'trade' | 'support' | 'profile' | 'announcements' | 'contact'
 
-export const portalViews: PortalView[] = ['overview', 'shop', 'services', 'billing', 'wallet', 'hosting', 'trade', 'support', 'profile', 'announcements']
+export const portalViews: PortalView[] = ['overview', 'shop', 'services', 'billing', 'wallet', 'hosting', 'trade', 'support', 'profile', 'announcements', 'contact']
 
 // portalPageData is what each page loads first, for prefetching.
 const portalPageData: Record<string, string[]> = {
@@ -336,6 +337,7 @@ export function CustomerShell({ customer, siteName, onLogout }: { customer: Cust
     support: '支持工单',
     profile: '账户资料',
     announcements: '平台公告',
+    contact: '联系我们',
   }
 
   return (
@@ -359,6 +361,14 @@ export function CustomerShell({ customer, siteName, onLogout }: { customer: Cust
               {id === view && <ChevronRight size={16} />}
             </button>
           ))}
+        </nav>
+        {/* Contact sits at the foot of the menu, above the account. */}
+        <nav className="sidebar-foot" aria-label="联系我们">
+          <button className={view === 'contact' ? 'nav-item active' : 'nav-item'} onClick={() => navigate('contact')}>
+            <ContactIcon size={18} />
+            <span>联系我们</span>
+            {view === 'contact' && <ChevronRight size={16} />}
+          </button>
         </nav>
         <div className="sidebar-status">
           <span className="status-dot online" />
@@ -395,6 +405,7 @@ export function CustomerShell({ customer, siteName, onLogout }: { customer: Cust
         {view === 'trade' && <TradeMarket />}
         {view === 'support' && <CustomerSupport />}
         {view === 'profile' && <CustomerProfile customer={customer} />}
+        {view === 'contact' && <CustomerContact />}
       </main>
     </div>
   )

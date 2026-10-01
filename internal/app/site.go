@@ -28,6 +28,7 @@ func siteMeta(cfg config.Config, runtime *settings.Manager, r *http.Request) map
 		"ticket_attachment_max_mb": current.TicketAttachmentMaxMB,
 		"marketplace_enabled":      current.Marketplace.Enabled,
 		"trade_hold_days":          current.Marketplace.TradeHoldDays,
+		"contact":                  map[string]any{"intro": current.ContactIntro, "links": current.ContactLinks},
 		"capabilities": []string{
 			"accounts", "catalog", "billing", "provisioning", "clicd", "support", "audit", "notifications", "wallet", "marketplace",
 		},
@@ -152,6 +153,26 @@ func (a adminSettings) logoMode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.logoResult(w, a.settings.SetLogoMode(r.Context(), input.Mode, principalFromContext(r.Context()).UserID))
+}
+
+func (a adminSettings) contact(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		Intro string                 `json:"intro"`
+		Links []settings.ContactLink `json:"links"`
+	}
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	err := a.settings.SetContact(r.Context(), input.Intro, input.Links, principalFromContext(r.Context()).UserID)
+	switch {
+	case errors.Is(err, settings.ErrInvalidSettings):
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "validation_error", "message": strings.TrimPrefix(err.Error(), settings.ErrInvalidSettings.Error()+": ")})
+	case err != nil:
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "settings_update_failed"})
+	default:
+		current := a.settings.Current()
+		writeJSON(w, http.StatusOK, map[string]any{"data": map[string]any{"intro": current.ContactIntro, "links": current.ContactLinks}})
+	}
 }
 
 func (a adminSettings) logoResult(w http.ResponseWriter, err error) {

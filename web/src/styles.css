@@ -4900,3 +4900,43 @@ input, select, textarea { min-height: 34px; padding: 6px 10px; font-size: 13px; 
 }
 .shop-plan > div:first-child { justify-content: flex-start; flex-wrap: wrap; gap: 6px; }
 .shop-plan > div:first-child .selected-mark { margin-left: auto; }
+/* Meter readings stay on one line next to their label. */
+.runtime-meter > div { flex-wrap: nowrap; }
+.runtime-meter strong { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Top-up: paying before agreeing points at the terms instead of a dead button. */
+.primary-button.needs-agree { opacity: 0.72; }
+.topup-terms.attention { border-color: var(--danger-text); box-shadow: 0 0 0 3px rgba(225, 29, 72, 0.14); animation: terms-shake 0.4s ease; }
+.topup-terms.attention .check-row { color: var(--danger-text); font-weight: 600; }
+.topup-terms small.danger-text { display: block; margin-top: 4px; font-size: 12.5px; }
+@keyframes terms-shake { 0%, 100% { transform: none; } 25% { transform: translateX(-4px); } 75% { transform: translateX(4px); } }
+@media (prefers-reduced-motion: reduce) { .topup-terms.attention { animation: none; } }
+
+/* Portal sidebar: "联系我们" sits at the foot, above the account. */
+.sidebar .sidebar-foot { margin-top: auto; padding-top: 8px; overflow: visible; }
+.sidebar .sidebar-foot + .sidebar-status { margin-top: 8px; }
+.sidebar.menu-open .sidebar-foot { padding-top: 0; }
+
+/* 联系我们 */
+.contact-intro { white-space: pre-line; }
+.contact-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+.contact-card { display: flex; align-items: flex-start; gap: 12px; padding: 14px; border: 1px solid var(--border-default); border-radius: var(--radius-lg); background: var(--bg-card); box-shadow: var(--shadow-sm); }
+.contact-icon { display: grid; place-items: center; flex: none; width: 36px; height: 36px; border-radius: var(--radius-md); background: var(--accent-customer-glow); color: var(--accent-customer); }
+.contact-body { display: grid; gap: 2px; flex: 1; min-width: 0; }
+.contact-body small { color: var(--text-subtle); font-size: 11.5px; }
+.contact-body strong { color: var(--text-primary); font-size: 14px; }
+.contact-body code { color: var(--text-secondary); font-size: 12.5px; overflow-wrap: anywhere; }
+.contact-body p { margin: 2px 0 0; color: var(--text-muted); font-size: 12px; }
+.contact-actions { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex: none; }
+.contact-actions a { display: inline-flex; align-items: center; gap: 4px; text-decoration: none; }
+.contact-ticket { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 10px 14px; border: 1px dashed var(--border-highlight); border-radius: var(--radius-md); color: var(--text-muted); font-size: 12.5px; }
+.contact-ticket > svg { color: var(--accent-customer); flex: none; }
+.contact-ticket span { flex: 1; min-width: 200px; }
+.contact-settings { margin-bottom: 14px; }
+.contact-settings > .muted-text { margin: 0 0 10px; font-size: 12.5px; }
+.contact-rows { display: grid; gap: 8px; margin-bottom: 10px; }
+.contact-row { display: grid; grid-template-columns: 130px minmax(0, 0.8fr) minmax(0, 1.4fr) minmax(0, 1fr) auto; gap: 8px; align-items: center; }
+.contact-row .row-actions { margin: 0; flex-wrap: nowrap; }
+@media (max-width: 900px) {
+  .contact-row { grid-template-columns: 1fr 1fr; padding: 10px; border: 1px solid var(--border-default); border-radius: var(--radius-md); }
+  .contact-row .row-actions { justify-content: flex-end; }
+}

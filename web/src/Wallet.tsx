@@ -1,8 +1,9 @@
-import { FormEvent, useEffect, useState } from 'react'
+import { FormEvent, useEffect, useRef, useState } from 'react'
 import { RefreshCw, WalletCards, X } from 'lucide-react'
 import { api, cached, type CustomerCatalogRecord, type PaymentIntentRecord, type TopupInvoiceRecord, type WalletEntryRecord, type WalletRecord } from './api'
 import { formatTime } from './shared/time'
 import { confirmDialog } from './shared/dialog'
+import { toast } from './shared/toast'
 
 export const walletKindLabels: Record<WalletEntryRecord['kind'], string> = {
   topup: '充值',
@@ -71,6 +72,9 @@ export default function CustomerWallet() {
   const [amount, setAmount] = useState('50')
   const [created, setCreated] = useState<TopupInvoiceRecord | null>(null)
   const [agreed, setAgreed] = useState(false)
+  // nudge marks the terms when someone tries to pay without agreeing.
+  const [nudge, setNudge] = useState(0)
+  const agreeRef = useRef<HTMLInputElement>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
 
@@ -99,11 +103,22 @@ export default function CustomerWallet() {
     void load()
   }, [])
 
+  // The terms block is remounted on each nudge (to replay its shake), so
+  // its checkbox is focused once it is back.
+  useEffect(() => {
+    if (!nudge) return
+    agreeRef.current?.focus({ preventScroll: true })
+    agreeRef.current?.closest('.topup-terms')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }, [nudge])
+
   async function topup(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const yuan = Number(amount)
     if (!agreed) {
-      setError('请先阅读并勾选同意充值须知')
+      // The button stays clickable so the reason can be said where it
+      // applies: the terms light up and their checkbox gets focus.
+      setNudge(value => value + 1)
+      toast('info', '请先同意充值须知', '阅读下方充值须知并勾选「我已阅读并同意」后，才能生成充值账单。')
       return
     }
     if (!Number.isFinite(yuan) || yuan < 1 || yuan > 100000) {
@@ -179,20 +194,21 @@ export default function CustomerWallet() {
             <span>金额（元）</span>
             <input type="number" min="1" max="100000" step="0.01" value={amount} onChange={event => setAmount(event.target.value)} />
           </label>
-          <button className="primary-button compact" disabled={busy || !agreed}>
+          <button className={agreed ? 'primary-button compact' : 'primary-button compact needs-agree'} disabled={busy}>
             {busy ? '正在处理…' : checkoutEnabled ? '前往支付' : '生成充值账单'}
           </button>
         </div>
-        <div className="topup-terms">
+        <div key={nudge} className={nudge && !agreed ? 'topup-terms attention' : 'topup-terms'}>
           <strong>充值须知</strong>
           <ul>
             <li>请根据您的实际消费需求进行充值。我们建议「用多少充多少」，避免账户余额积压。</li>
             <li>充值到账后，余额仅限用于平台服务消费，不支持提现或退款到原支付渠道，请知悉。</li>
           </ul>
           <label className="check-row">
-            <input type="checkbox" checked={agreed} onChange={event => setAgreed(event.target.checked)} />
+            <input ref={agreeRef} type="checkbox" checked={agreed} onChange={event => setAgreed(event.target.checked)} />
             我已阅读并同意以上充值须知
           </label>
+          {nudge > 0 && !agreed && <small className="danger-text">请先勾选同意充值须知，再生成充值账单。</small>}
         </div>
         {created && !checkoutEnabled && (
           <p className="muted-text">

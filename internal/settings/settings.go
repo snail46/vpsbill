@@ -54,6 +54,9 @@ type Runtime struct {
 	// LogoMode is how the logo sits beside the site name: auto, icon or
 	// wordmark (see SiteInput).
 	LogoMode string
+	// ContactIntro and ContactLinks fill the portal's "联系我们" page.
+	ContactIntro string
+	ContactLinks []ContactLink
 }
 
 // MarketplaceSettings controls the hosting center: whether customers can
@@ -266,7 +269,7 @@ func (m *Manager) UpdatePaymentGateway(ctx context.Context, in PaymentGatewayInp
 
 func (m *Manager) reload(ctx context.Context) error {
 	var v Runtime
-	var payment, notification, metrics, gatewayConfig, smtpPassword, mailNotifications []byte
+	var payment, notification, metrics, gatewayConfig, smtpPassword, mailNotifications, contactLinks []byte
 	var gatewayType string
 	var poll, reconcile, lifecycle, lead, grace, retention int
 	err := m.db.QueryRow(ctx, `SELECT app_name,public_url,timezone,payment_provider_name,payment_checkout_url,
@@ -277,17 +280,19 @@ func (m *Manager) reload(ctx context.Context) error {
 		mail_notifications,ticket_attachment_max_mb,
 		marketplace_enabled,marketplace_fee_percent::float8,marketplace_offline_hours,trade_fee_percent::float8,admin_url,
 		max_overcommit_cpu::float8,max_overcommit_ram::float8,max_overcommit_disk::float8,max_overcommit_traffic::float8,
-		logo_url,logo_version,logo_mode,trade_hold_days
+		logo_url,logo_version,logo_mode,trade_hold_days,contact_intro,contact_links
 		FROM system_settings WHERE singleton=true`).Scan(&v.AppName, &v.PublicURL, &v.Timezone, &v.PaymentProviderName, &v.PaymentCheckoutURL,
 		&payment, &v.NotificationWebhookURL, &notification, &metrics, &poll, &reconcile, &lifecycle, &lead, &grace, &retention, &gatewayType, &gatewayConfig,
 		&v.SMTP.Host, &v.SMTP.Port, &v.SMTP.Username, &smtpPassword, &v.SMTP.From, &v.SMTP.Security,
 		&mailNotifications, &v.TicketAttachmentMaxMB,
 		&v.Marketplace.Enabled, &v.Marketplace.FeePercent, &v.Marketplace.OfflineHours, &v.Marketplace.TradeFeePercent, &v.AdminURL,
 		&v.Marketplace.MaxOvercommitCPU, &v.Marketplace.MaxOvercommitRAM, &v.Marketplace.MaxOvercommitDisk, &v.Marketplace.MaxOvercommitTraffic,
-		&v.LogoURL, &v.LogoVersion, &v.LogoMode, &v.Marketplace.TradeHoldDays)
+		&v.LogoURL, &v.LogoVersion, &v.LogoMode, &v.Marketplace.TradeHoldDays, &v.ContactIntro, &contactLinks)
 	if err != nil {
 		return err
 	}
+	v.ContactLinks = []ContactLink{}
+	_ = json.Unmarshal(contactLinks, &v.ContactLinks)
 	if v.PaymentWebhookSecret, err = m.box.Open(payment); err != nil {
 		return fmt.Errorf("decrypt payment webhook secret: %w", err)
 	}
