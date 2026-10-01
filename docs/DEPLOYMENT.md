@@ -66,7 +66,7 @@ curl -fsS http://127.0.0.1:8088/health/ready
 - 已装 Incus 就用 Incus，已装 LXD 就用 LXD（按现有配置，不再改动）；都没有时从 Zabbly 源安装 Incus；
 - Incus 没有 `default` 存储池时建 btrfs 存储池（放在一个文件里，每台实例都有硬盘上限），大小用 `--lxc-disk 50G` 指定，默认剩余空间减 2 GiB（同时装 Podman 时两者各占一半）；
 - 没有网桥时建 `incusbr0`（`10.78.N.0/24`，开启 NAT）；
-- 导入三个系统镜像：`debian12`（Debian 12）、`ubuntu2204`（Ubuntu 22.04）、`alpine3.22`（Alpine 3.22），已有同名镜像时跳过；不需要时加 `--lxc-images skip`。镜像从 images.linuxcontainers.org 下载，下载失败只给警告，之后可以手动导入。
+- 导入三个系统镜像：`debian12`（Debian 12）、`ubuntu2204`（Ubuntu 22.04）、`alpine3.22`（Alpine 3.22），已有同名镜像时跳过；不需要时加 `--lxc-images skip`。镜像源默认自动选择：脚本各下载 3 MB 测速，在官方 images.linuxcontainers.org 和清华 TUNA 镜像（mirrors.tuna.tsinghua.edu.cn/lxc-images）之间选快的那个（实测香港母机官方源约 40 KB/s、TUNA 约 1 MB/s），也可以用 `--lxc-image-server URL` 指定。下载失败只给警告，之后可以手动导入。
 
 想自己准备（或在已有 Incus 上自定义）时，按下面的手动步骤。安装 Incus（Zabbly 官方源，Debian 12/13、Ubuntu 22.04/24.04 通用）：
 

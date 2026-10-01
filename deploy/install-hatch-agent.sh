@@ -40,6 +40,10 @@
 #                           uses the free space minus 2 GiB
 #   --lxc-images MODE       import (default) the LXC templates into Incus, or
 #                           skip
+#   --lxc-image-server URL  simplestreams server to import them from; "auto"
+#                           (default) times images.linuxcontainers.org and the
+#                           TUNA mirror (mirrors.tuna.tsinghua.edu.cn) and
+#                           takes the faster
 #   --no-zram               do not set up compressed swap in RAM
 #   --no-tune               leave kernel network, conntrack and OOM settings as
 #                           they are (see "Host tuning")
@@ -70,6 +74,7 @@ PODMAN_DISK="auto"
 PODMAN_IMAGES="build"
 LXC_DISK="auto"
 LXC_IMAGES="import"
+LXC_IMAGE_SERVER="auto"
 LXC_NETWORK=""
 ZRAM=1
 TUNE=1
@@ -89,6 +94,7 @@ while [ $# -gt 0 ]; do
     --podman-images) PODMAN_IMAGES="$2"; shift 2 ;;
     --lxc-disk) LXC_DISK="$2"; shift 2 ;;
     --lxc-images) LXC_IMAGES="$2"; shift 2 ;;
+    --lxc-image-server) LXC_IMAGE_SERVER="$2"; shift 2 ;;
     --no-zram) ZRAM=0; shift ;;
     --no-tune) TUNE=0; shift ;;
     --no-auto-upgrade) AUTO_UPGRADE=false; shift ;;
@@ -584,21 +590,54 @@ setup_lxc() {
   [ "$LXC_IMAGES" = "skip" ] || import_lxc_images
 }
 
+OFFICIAL_IMAGES=https://images.linuxcontainers.org
+TUNA_IMAGES=https://mirrors.tuna.tsinghua.edu.cn/lxc-images
+
+# pick_image_server prints the faster image server for this host, timed on
+# the first 3 MB of the Alpine template. From many hosts in Asia the
+# official server runs at tens of KB/s while the TUNA mirror is fast.
+pick_image_server() {
+  if ! command -v curl >/dev/null 2>&1; then echo "$OFFICIAL_IMAGES"; return; fi
+  ARCH=$(dpkg --print-architecture 2>/dev/null || echo amd64)
+  PROBE=""
+  for base in "$TUNA_IMAGES" "$OFFICIAL_IMAGES"; do
+    PROBE=$(curl -fsSL --max-time 30 "$base/streams/v1/images.json" 2>/dev/null |
+      grep -o "images/alpine/3.22/$ARCH/cloud/[0-9_:]*/rootfs.squashfs" | tail -n 1) || true
+    [ -z "$PROBE" ] || break
+  done
+  BEST="$OFFICIAL_IMAGES"
+  BEST_SPEED=0
+  [ -n "$PROBE" ] || { echo "$BEST"; return; }
+  for base in "$OFFICIAL_IMAGES" "$TUNA_IMAGES"; do
+    SPEED=$(curl -sL -r 0-3145727 -o /dev/null --max-time 10 -w '%{speed_download}' "$base/$PROBE" 2>/dev/null | cut -d. -f1)
+    if [ "${SPEED:-0}" -gt "$BEST_SPEED" ] 2>/dev/null; then
+      BEST="$base"
+      BEST_SPEED="$SPEED"
+    fi
+  done
+  echo "$BEST"
+}
+
 # The alias is the template ID plans use, and the billing site names it:
 # debian12 is "Debian 12", ubuntu2204 "Ubuntu 22.04", alpine3.22 "Alpine
 # 3.22". Cloud variants come first; the agent installs an SSH server in
 # instances whose image has none.
 import_lxc_images() {
+  SERVER="$LXC_IMAGE_SERVER"
+  [ "$SERVER" != "auto" ] || SERVER=$(pick_image_server)
+  echo "LXC templates come from $SERVER"
+  incus remote remove hatch-images >/dev/null 2>&1 || true
+  incus remote add hatch-images "$SERVER" --protocol=simplestreams --public >/dev/null
   for pair in debian12=debian/12 ubuntu2204=ubuntu/22.04 alpine3.22=alpine/3.22; do
     alias=${pair%%=*}
     source=${pair#*=}
     if incus image alias list local: --format csv 2>/dev/null | cut -d, -f1 | grep -qx "$alias"; then
       continue
     fi
-    echo "Importing LXC template $alias (images:$source)"
-    incus image copy "images:$source/cloud" local: --alias "$alias" >/dev/null 2>&1 ||
-      incus image copy "images:$source" local: --alias "$alias" >/dev/null 2>&1 ||
-      echo "warning: could not download images:$source; import it later with: incus image copy images:$source local: --alias $alias" >&2
+    echo "Importing LXC template $alias ($source)"
+    incus image copy "hatch-images:$source/cloud" local: --alias "$alias" >/dev/null 2>&1 ||
+      incus image copy "hatch-images:$source" local: --alias "$alias" >/dev/null 2>&1 ||
+      echo "warning: could not download $source; import it later with: incus image copy hatch-images:$source/cloud local: --alias $alias" >&2
   done
 }
 
