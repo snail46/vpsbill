@@ -358,6 +358,9 @@ export type CustomerServiceRecord = {
   node_id?: string
   template_id: string
   auto_renew: boolean
+  // password_stored says a root password is kept (the password itself
+  // comes from /credential).
+  password_stored?: boolean
   billing_cycle: string
   currency: string
   renewal_price_minor: number | null

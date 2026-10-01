@@ -4761,3 +4761,112 @@ input, select, textarea { min-height: 34px; padding: 6px 10px; font-size: 13px; 
 .plan-grid { grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); }
 .shop-grid { grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); }
 .shop-layout.with-order .shop-grid { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+
+/* Compact density, second pass: detail pages, dialogs and the remaining
+   panels that kept their roomy spacing. */
+
+/* Instance detail: facts on the left, the live card on the right on wide
+   screens, so monitoring, addresses and actions fit in one screen. */
+.service-detail-layout { display: grid; gap: 12px; align-items: start; }
+.service-detail-side { display: grid; gap: 12px; min-width: 0; }
+.service-detail-side > .panel, .service-detail-side > .chat-room, .service-detail-layout > .service-manager { margin: 0; }
+@media (min-width: 1180px) {
+  .service-detail-layout { grid-template-columns: minmax(300px, 380px) minmax(0, 1fr); }
+  .service-detail-layout .detail-facts { grid-template-columns: 1fr 1fr; }
+}
+.service-detail-head h2 { font-size: 17px; margin-bottom: 4px; }
+.detail-facts { gap: 8px 14px; margin: 10px 0; }
+.detail-facts dd { font-size: 13px; }
+.auto-renew { padding-top: 10px; }
+.service-card { padding: 16px; }
+.service-card footer { padding-top: 12px; }
+.runtime-grid { gap: 8px; margin: 10px 0; }
+.runtime-meter { padding: 9px 12px; }
+.live-io { margin-bottom: 10px; }
+.live-io span { padding: 5px 4px; }
+.network-box { gap: 10px; padding: 10px 12px; }
+.credential-row { margin-top: 10px; padding: 8px 12px; }
+.service-actions { margin-top: 12px; }
+.service-actions.manage-row { margin-top: 8px; padding-top: 10px; }
+.pending-action, .service-warning, .service-notice, .reinstall-progress { margin-top: 10px; padding: 8px 12px; }
+.form-error, .form-success, .form-notice, .success-note { padding: 8px 12px; margin-bottom: 12px; }
+.note-banner { padding: 10px 12px; }
+.danger-note { padding: 10px 12px; }
+.service-tile { padding: 12px 14px; }
+.chip-button { padding: 6px 12px; }
+.segmented button { padding: 6px 12px; }
+.filter-chips { margin-bottom: 12px; }
+@media (min-width: 641px) {
+  .service-manager .runtime-grid { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
+  .service-manager .network-box { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
+}
+
+/* Dialogs */
+.app-dialog-body { gap: 12px; padding: 16px 16px 4px; }
+.app-dialog footer { padding: 12px 16px 14px; }
+.modal-backdrop .modal { gap: 12px; }
+.mapping-list > div { padding: 9px 12px; }
+
+/* Node detail (admin and hosting) */
+.host-grid { gap: 12px; }
+.host-resource-grid { gap: 10px; margin-bottom: 12px; }
+.host-resource-stat { gap: 12px; min-height: 76px; padding: 12px 14px; }
+.host-resource-stat strong { font-size: 16px; }
+.history-grid { gap: 10px; margin-bottom: 14px; }
+.history-chart { padding: 12px 14px; }
+.probe-sections { gap: 10px; }
+.probe-section summary { gap: 12px; padding: 12px 16px; }
+.probe-content { padding: 12px 16px; }
+.probe-group { padding: 12px 14px; }
+.probe-object > dl > div { padding: 8px 12px; }
+.probe-table th, .probe-table td { padding: 7px 10px; }
+.probe-array > article { padding: 10px 12px; }
+
+/* Tickets and chat */
+.support-layout { gap: 12px; }
+.ticket-row { gap: 6px 12px; padding: 10px 14px; }
+.message-list { gap: 8px; }
+.message { padding: 10px 14px; }
+.message header { gap: 12px; }
+.message p { margin-top: 6px; line-height: 1.55; }
+.reply-form { gap: 10px; margin-top: 14px; padding-top: 14px; }
+.reply-form-actions { gap: 10px 16px; }
+.support-placeholder { min-height: 240px; }
+
+/* Ordering, payment and balance */
+.checkout-success { gap: 14px; padding: 12px 16px; }
+.order-total strong, .shop-order-total strong, .refund-summary strong, .trade-price { font-size: 18px; }
+.gateway-options { margin-bottom: 16px; }
+.gateway-options label { padding: 12px 14px; }
+.callback-box { margin: 6px 0 14px; padding: 10px 14px; }
+.topup-terms { padding: 10px 12px; }
+.network-policy { gap: 10px 14px; padding: 12px !important; }
+.cycle-prices { padding: 12px !important; }
+.cycle-price-grid, .price-formula-grid { gap: 10px 12px; }
+.price-line .price-chip + .price-chip strong { font-size: 16px; }
+.shop-market-link { padding: 10px 14px; }
+.shop-order-card { padding: 14px; }
+.shop-order-card header h3 { font-size: 15px; }
+
+/* Overview, settings and admin lists */
+.attention-list > a, .attention-list span { padding: 12px; }
+.attention-list strong { font-size: 20px; }
+.market-grid { gap: 12px; }
+.logo-settings, .backup-settings { margin-bottom: 14px; }
+.logo-settings-body { gap: 14px; }
+.logo-preview, .pending-empty { padding: 12px; }
+.backup-settings { gap: 12px; }
+.restore-progress { padding: 32px 20px; }
+.guide-body { gap: 10px; padding-top: 12px; }
+.pending-agent { gap: 10px; padding: 10px 12px; }
+.region-item, .plan-select-bar, .preset-bar, .batch-edit-row { padding: 8px 12px; }
+.batch-edit-images { gap: 12px; }
+.plan-group { margin-bottom: 18px; }
+.plan-group-head h3 { font-size: 15px; }
+.tag-input-box { min-height: 34px; }
+.mfa-secret { padding: 10px 12px; }
+
+/* Loading screens and the console */
+.session-loading { gap: 14px; }
+.console-loading { padding: 12px 16px; }
+.console-error { padding: 10px 16px; }

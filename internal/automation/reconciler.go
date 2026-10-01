@@ -18,14 +18,17 @@ type Reconciler struct {
 	logger          *slog.Logger
 	interval        time.Duration
 	intervalCurrent func() time.Duration
+	// kicks carries node endpoints to check right away, for agents that
+	// just connected.
+	kicks chan string
 }
 
 func NewDynamicReconciler(store *postgres.ProvisioningStore, catalog *postgres.CatalogStore, box *security.SecretBox, logger *slog.Logger, interval func() time.Duration) *Reconciler {
-	return &Reconciler{store: store, catalog: catalog, box: box, logger: logger, intervalCurrent: interval}
+	return &Reconciler{store: store, catalog: catalog, box: box, logger: logger, intervalCurrent: interval, kicks: make(chan string, 64)}
 }
 
 func NewReconciler(store *postgres.ProvisioningStore, catalog *postgres.CatalogStore, box *security.SecretBox, logger *slog.Logger, interval time.Duration) *Reconciler {
-	return &Reconciler{store: store, catalog: catalog, box: box, logger: logger, interval: interval}
+	return &Reconciler{store: store, catalog: catalog, box: box, logger: logger, interval: interval, kicks: make(chan string, 64)}
 }
 
 // agentGrace is how long a freshly started API waits before its first
@@ -33,39 +36,49 @@ func NewReconciler(store *postgres.ProvisioningStore, catalog *postgres.CatalogS
 // have would mark their nodes offline until the next round.
 const agentGrace = 30 * time.Second
 
-func (r *Reconciler) Run(ctx context.Context) {
-	grace := time.NewTimer(agentGrace)
+// Kick asks for the node with this endpoint, and its services, to be
+// checked now instead of at the next round: an agent that reconnects
+// after an upgrade shows as online again within seconds.
+func (r *Reconciler) Kick(endpoint string) {
 	select {
-	case <-ctx.Done():
-		grace.Stop()
-		return
-	case <-grace.C:
+	case r.kicks <- endpoint:
+	default:
 	}
-	r.reconcile(ctx)
+}
+
+func (r *Reconciler) Run(ctx context.Context) {
+	timer := time.NewTimer(agentGrace)
+	defer func() { timer.Stop() }()
 	for {
-		interval := r.interval
-		if r.intervalCurrent != nil {
-			interval = r.intervalCurrent()
-		}
-		timer := time.NewTimer(interval)
 		select {
 		case <-ctx.Done():
-			timer.Stop()
 			return
+		case endpoint := <-r.kicks:
+			r.reconcile(ctx, endpoint)
 		case <-timer.C:
-			r.reconcile(ctx)
+			r.reconcile(ctx, "")
+			interval := r.interval
+			if r.intervalCurrent != nil {
+				interval = r.intervalCurrent()
+			}
+			timer = time.NewTimer(interval)
 		}
 	}
 }
 
-func (r *Reconciler) reconcile(ctx context.Context) {
-	r.reconcileNodes(ctx)
+// reconcile checks the node with this endpoint and its services, or every
+// node and service when endpoint is "".
+func (r *Reconciler) reconcile(ctx context.Context, endpoint string) {
+	r.reconcileNodes(ctx, endpoint)
 	targets, err := r.store.ListReconcileTargets(ctx)
 	if err != nil {
 		r.logger.Error("list service reconciliation targets", "error", err)
 		return
 	}
 	for _, target := range targets {
+		if endpoint != "" && target.BaseURL != endpoint {
+			continue
+		}
 		driver, err := provider.OpenSealed(r.box, target.Sealed(), 20*time.Second)
 		if err != nil {
 			r.recordError(ctx, target, "error", err)
@@ -79,7 +92,12 @@ func (r *Reconciler) reconcile(ctx context.Context) {
 			continue
 		}
 		if err != nil {
-			r.recordError(ctx, target, "unknown", err)
+			// The agent restarting for an upgrade keeps the last state
+			// instead of flashing "unknown"; it is checked again when it
+			// reconnects.
+			if !provider.Reconnecting(driver) {
+				r.recordError(ctx, target, "unknown", err)
+			}
 			continue
 		}
 		if err := r.store.UpdateReconciledService(ctx, target.ServiceID, provider.NormalizeStatus(instance.Status), instance.ExternalID, instance.UUID, instance.IP, instance.IPv6, ""); err != nil {
@@ -88,7 +106,7 @@ func (r *Reconciler) reconcile(ctx context.Context) {
 	}
 }
 
-func (r *Reconciler) reconcileNodes(ctx context.Context) {
+func (r *Reconciler) reconcileNodes(ctx context.Context, endpoint string) {
 	nodes, err := r.catalog.ListNodeSecrets(ctx)
 	if err != nil {
 		r.logger.Error("list nodes for reconciliation", "error", err)
@@ -96,7 +114,7 @@ func (r *Reconciler) reconcileNodes(ctx context.Context) {
 	}
 	for _, node := range nodes {
 		// Cleared hosted nodes are kept for history only.
-		if node.RetiredAt != nil {
+		if node.RetiredAt != nil || (endpoint != "" && node.BaseURL != endpoint) {
 			continue
 		}
 		if _, registered := provider.Lookup(node.ProviderType); !registered {
@@ -111,7 +129,9 @@ func (r *Reconciler) reconcileNodes(ctx context.Context) {
 		info, err := driver.HostInfo(requestCtx)
 		cancel()
 		if err != nil {
-			_ = r.catalog.UpdateNodeHealth(ctx, node.ID, "offline", map[string]any{})
+			if !provider.Reconnecting(driver) {
+				_ = r.catalog.UpdateNodeHealth(ctx, node.ID, "offline", map[string]any{})
+			}
 			continue
 		}
 		if err := r.catalog.RecordNodeReport(ctx, node.ID, info); err != nil {

@@ -71,10 +71,13 @@ type CustomerService struct {
 	ViaTrade bool   `json:"via_trade"`
 	NodeID   string `json:"node_id,omitempty"`
 	// TemplateID is the installed system.
-	TemplateID   string `json:"template_id"`
-	AutoRenew    bool   `json:"auto_renew"`
-	BillingCycle string `json:"billing_cycle"`
-	Currency     string `json:"currency"`
+	TemplateID string `json:"template_id"`
+	AutoRenew  bool   `json:"auto_renew"`
+	// PasswordStored says a root password is kept, so the page can show
+	// the masked row before fetching the password itself.
+	PasswordStored bool   `json:"password_stored"`
+	BillingCycle   string `json:"billing_cycle"`
+	Currency       string `json:"currency"`
 	// RenewalPriceMinor is what the next renewal costs, with a hosted price
 	// lock and a recurring coupon applied; nil when the plan has no price.
 	RenewalPriceMinor *int64 `json:"renewal_price_minor"`
@@ -190,7 +193,7 @@ func (s *PortalStore) ListServices(ctx context.Context, accountID string) ([]Cus
 		       EXISTS(SELECT 1 FROM service_listings b WHERE b.service_id=s.id AND b.status='sold' AND b.buyer_account_id=s.account_id),
 		       CASE WHEN p.owner_account_id IS NULL THEN '' ELSE coalesce(p.node_id::text,'') END,
 		       coalesce(s.template_id, oi.configuration->>'template_id', p.default_template_id),
-		       s.auto_renew, s.billing_cycle, a.default_currency,
+		       s.auto_renew, s.root_password_ciphertext IS NOT NULL, s.billing_cycle, a.default_currency,
 		       coalesce(pp.amount_minor, s.list_price_minor), s.renewal_price_minor, s.renewal_discount_type, s.renewal_discount_value
 		FROM services s JOIN plans p ON p.id=s.plan_id JOIN regions r ON r.id=s.region_id JOIN accounts a ON a.id=s.account_id
 		LEFT JOIN accounts h ON h.id=p.owner_account_id
@@ -211,7 +214,7 @@ func (s *PortalStore) ListServices(ctx context.Context, accountID string) ([]Cus
 		var discountType *string
 		if err := rows.Scan(&row.ID, &row.PlanName, &row.RegionName, &row.Status, &row.RuntimeStatus, &row.DesiredRuntimeStatus, &row.InstanceName, &row.Virtualization, &row.VCPU, &row.RAMMB, &row.DiskGB, &row.TrafficGB, &row.NetworkDownMbps, &row.PrimaryIPv4, &row.PrimaryIPv6, &row.NextDueAt, &row.GraceUntil, &row.TerminationAt, &row.LastReconciledAt, &row.LastReconcileError, &row.HostName, &row.TerminationReason, &row.AcquiredAt, &row.ListingID, &row.ListingPriceMinor,
 			&row.TrafficUsedBytes, &row.TrafficRXBytes, &row.TrafficTXBytes, &row.TrafficLockedMonth,
-			&row.Source, &row.ViaTrade, &row.NodeID, &row.TemplateID, &row.AutoRenew, &row.BillingCycle, &row.Currency,
+			&row.Source, &row.ViaTrade, &row.NodeID, &row.TemplateID, &row.AutoRenew, &row.PasswordStored, &row.BillingCycle, &row.Currency,
 			&price, &locked, &discountType, &discountValue); err != nil {
 			return nil, err
 		}

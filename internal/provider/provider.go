@@ -68,6 +68,19 @@ type Driver interface {
 	DeleteInstance(ctx context.Context, name string) error
 }
 
+// Reconnector is implemented by drivers whose nodes connect in to the
+// billing server. Reconnecting reports that the node is expected back
+// shortly, so a failed call is not yet a sign that it is down.
+type Reconnector interface {
+	Reconnecting() bool
+}
+
+// Reconnecting reports whether driver's node is only briefly away.
+func Reconnecting(driver Driver) bool {
+	r, ok := driver.(Reconnector)
+	return ok && r.Reconnecting()
+}
+
 type Reinstaller interface {
 	Reinstall(ctx context.Context, name string, spec ReinstallSpec) (string, error)
 }

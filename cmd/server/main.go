@@ -99,6 +99,7 @@ func main() {
 	worker := automation.NewDynamicWorker(provisioningStore, secretBox, logger, workerID, func() time.Duration { return runtime.Current().WorkerPollInterval })
 	reconciler := automation.NewDynamicReconciler(provisioningStore, catalogStore, secretBox, logger, func() time.Duration { return runtime.Current().ReconcileInterval })
 	go worker.Run(workCtx)
+	agentHub.SetOnConnect(reconciler.Kick)
 	go reconciler.Run(workCtx)
 	lifecycleWorker := billing.NewDynamicWorker(postgres.NewLifecycleStore(db), logger, func() (time.Duration, time.Duration, time.Duration, time.Duration) {
 		current := runtime.Current()

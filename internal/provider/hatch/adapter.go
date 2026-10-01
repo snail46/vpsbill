@@ -68,6 +68,10 @@ var (
 	_ provider.Terminal         = (*Driver)(nil)
 )
 
+// Reconnecting reports that the agent dropped moments ago (or the server
+// just started) and is expected back by itself.
+func (d *Driver) Reconnecting() bool { return d.hub.Reconnecting(d.endpoint) }
+
 func (d *Driver) call(ctx context.Context, method string, params, result any) error {
 	return d.translate(d.hub.Call(ctx, d.endpoint, method, params, result))
 }

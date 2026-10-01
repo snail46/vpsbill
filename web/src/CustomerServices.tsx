@@ -214,6 +214,24 @@ function ServiceManager({ service, onReload }: { service: CustomerServiceRecord;
     setTimeout(() => setCopiedKey(''), 2000)
   }
 
+  // The service list already says whether a password is kept, so the
+  // masked row shows at once; the password itself arrives a moment later
+  // and is only needed to reveal or copy it.
+  const passwordStored = credential ? credential.stored : service.password_stored
+  const loadPassword = async () => {
+    if (credential) return credential
+    const value = await api<ServiceCredentialRecord>(`/api/v1/customer/services/${service.id}/credential`)
+    setCredential(value)
+    return value
+  }
+  const copyPassword = async () => {
+    try {
+      copyToClipboard((await loadPassword())?.password, 'pwd')
+    } catch (err) {
+      toast('error', '读取密码失败', err instanceof Error ? err.message : undefined)
+    }
+  }
+
   const action = async (value: string) => {
     const spec = powerActions[value]
     if (spec) {
@@ -418,19 +436,30 @@ function ServiceManager({ service, onReload }: { service: CustomerServiceRecord;
 
       <div className="credential-row">
         <span><KeyRound size={14} />root 密码</span>
-        <code>{!credential ? '读取中…' : credential.stored ? (showPassword ? credential.password : '••••••••••••') : '未留存，请重置后查看'}</code>
-        {credential?.stored && (
+        <code>
+          {passwordStored === undefined
+            ? '读取中…'
+            : !passwordStored
+              ? '未留存，请重置后查看'
+              : !showPassword
+                ? '••••••••••••'
+                : (credential?.password ?? '读取中…')}
+        </code>
+        {passwordStored && (
           <>
             <button
               className="icon-button"
-              onClick={() => setShowPassword(v => !v)}
+              onClick={() => {
+                setShowPassword(v => !v)
+                if (!credential) void loadPassword().catch(() => {})
+              }}
               title={showPassword ? '隐藏密码' : '显示密码'}
             >
               {showPassword ? <EyeOff size={14} /> : <Eye size={14} />}
             </button>
             <button
               className="icon-button"
-              onClick={() => copyToClipboard(credential.password, 'pwd')}
+              onClick={() => void copyPassword()}
               title="复制密码"
             >
               {copiedKey === 'pwd' ? <Check size={14} /> : <Copy size={14} />}
@@ -903,40 +932,44 @@ function ServiceDetail({ service, onReload }: { service: CustomerServiceRecord; 
       <button className="text-button back-link" onClick={() => navigatePortal('/portal/services')}>
         <ArrowLeft size={14} />返回我的 VPS
       </button>
-      <section className="panel service-detail-head">
-        <div className="panel-heading">
-          <div>
-            <h2>{service.plan_name}</h2>
-            <p className="service-detail-name">{service.instance_name}</p>
-            <div className="service-tile-tags">
-              <SourceTags service={service} />
-              <span className="tag">{service.virtualization.toUpperCase()}</span>
+      <div className="service-detail-layout">
+        <div className="service-detail-side">
+          <section className="panel service-detail-head">
+            <div className="panel-heading">
+              <div>
+                <h2>{service.plan_name}</h2>
+                <p className="service-detail-name">{service.instance_name}</p>
+                <div className="service-tile-tags">
+                  <SourceTags service={service} />
+                  <span className="tag">{service.virtualization.toUpperCase()}</span>
+                </div>
+              </div>
+              <StatusBadge status={serviceUsable(service.status) ? service.runtime_status : service.status} />
             </div>
-          </div>
-          <StatusBadge status={serviceUsable(service.status) ? service.runtime_status : service.status} />
+            <dl className="detail-facts">
+              <div><dt>实例名</dt><dd>{service.instance_name}</dd></div>
+              <div><dt>地域</dt><dd>{service.region_name}</dd></div>
+              <div><dt>配置</dt><dd>{service.vcpu} 核 · {service.ram_mb} MB · {service.disk_gb} GB · 月流量 {service.traffic_gb || '不限'}{service.traffic_gb ? ' GB' : ''}</dd></div>
+              <div><dt>带宽</dt><dd>{bandwidthLabel(service.network_down_mbps)}</dd></div>
+              <div><dt>系统</dt><dd>{osLabel(service.template_id)}</dd></div>
+              <div><dt>来源</dt><dd>{service.source === 'hosted' ? `托管市场 · 机主 ${service.host_name || '—'}` : '平台自营'}{service.via_trade ? ' · 交易市场购入' : ''}</dd></div>
+              <div><dt>业务状态</dt><dd><StatusBadge status={service.status} /></dd></div>
+              <div><dt>到期时间</dt><dd>{service.next_due_at ? formatTime(service.next_due_at) : '—'}</dd></div>
+              <div><dt>续费价格</dt><dd>{renewalText(service)}</dd></div>
+            </dl>
+            {!ended && <AutoRenewSwitch service={service} onChanged={onReload} />}
+            {service.source === 'hosted' && service.node_id && !ended && (
+              <div className="form-actions">
+                <button className="secondary-button" onClick={() => setChat(value => !value)}>
+                  <MessagesSquare size={14} />{chat ? '收起母机聊天室' : '母机聊天室'}
+                </button>
+              </div>
+            )}
+          </section>
+          {chat && service.node_id && <ChatRoom base="/api/v1/customer/chat/rooms" nodeID={service.node_id} title={`${service.host_name || ''} 的母机聊天室`} />}
         </div>
-        <dl className="detail-facts">
-          <div><dt>实例名</dt><dd>{service.instance_name}</dd></div>
-          <div><dt>地域</dt><dd>{service.region_name}</dd></div>
-          <div><dt>配置</dt><dd>{service.vcpu} 核 · {service.ram_mb} MB · {service.disk_gb} GB · 月流量 {service.traffic_gb || '不限'}{service.traffic_gb ? ' GB' : ''}</dd></div>
-          <div><dt>带宽</dt><dd>{bandwidthLabel(service.network_down_mbps)}</dd></div>
-          <div><dt>系统</dt><dd>{osLabel(service.template_id)}</dd></div>
-          <div><dt>来源</dt><dd>{service.source === 'hosted' ? `托管市场 · 机主 ${service.host_name || '—'}` : '平台自营'}{service.via_trade ? ' · 交易市场购入' : ''}</dd></div>
-          <div><dt>业务状态</dt><dd><StatusBadge status={service.status} /></dd></div>
-          <div><dt>到期时间</dt><dd>{service.next_due_at ? formatTime(service.next_due_at) : '—'}</dd></div>
-          <div><dt>续费价格</dt><dd>{renewalText(service)}</dd></div>
-        </dl>
-        {!ended && <AutoRenewSwitch service={service} onChanged={onReload} />}
-        {service.source === 'hosted' && service.node_id && !ended && (
-          <div className="form-actions">
-            <button className="secondary-button" onClick={() => setChat(value => !value)}>
-              <MessagesSquare size={14} />{chat ? '收起母机聊天室' : '母机聊天室'}
-            </button>
-          </div>
-        )}
-      </section>
-      {chat && service.node_id && <ChatRoom base="/api/v1/customer/chat/rooms" nodeID={service.node_id} title={`${service.host_name || ''} 的母机聊天室`} />}
-      <ServiceManager service={service} onReload={onReload} />
+        <ServiceManager service={service} onReload={onReload} />
+      </div>
     </>
   )
 }

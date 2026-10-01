@@ -30,6 +30,10 @@ const (
 	// an administrator can add the node; they receive no requests meanwhile.
 	maxUnknownSessions = 8
 	unknownSessionTTL  = 15 * time.Minute
+	// reconnectGrace is how long after a server start, or after an agent
+	// dropped, the agent is expected back by itself: it reconnects within
+	// seconds after a server upgrade or its own self-upgrade restart.
+	reconnectGrace = 2 * time.Minute
 )
 
 // ErrOffline means no agent is connected for the node.
@@ -52,6 +56,10 @@ type Hub struct {
 	mu       sync.Mutex
 	sessions map[string]*Session
 	unknown  int
+	// gone is when each endpoint's last session ended.
+	gone      map[string]time.Time
+	started   time.Time
+	onConnect func(endpoint string)
 
 	// release is the agent build this server bundles; connecting agents
 	// on another version are asked to upgrade to it.
@@ -59,7 +67,7 @@ type Hub struct {
 }
 
 func NewHub(logger *slog.Logger, known KnownFunc) *Hub {
-	return &Hub{logger: logger, known: known, sessions: map[string]*Session{}}
+	return &Hub{logger: logger, known: known, sessions: map[string]*Session{}, gone: map[string]time.Time{}, started: time.Now()}
 }
 
 type Session struct {
@@ -80,6 +88,27 @@ type Session struct {
 // SetAgentRelease names the agent build to upgrade connecting agents to;
 // "" or "dev" (a local build) upgrades nothing.
 func (h *Hub) SetAgentRelease(version string) { h.release = version }
+
+// SetOnConnect is called with the endpoint each time a registered agent
+// connects, so its node's state can be refreshed right away. Set it before
+// serving.
+func (h *Hub) SetOnConnect(fn func(endpoint string)) { h.onConnect = fn }
+
+// Reconnecting reports that the endpoint's agent is not connected but is
+// expected back shortly: the server started or the agent dropped less than
+// reconnectGrace ago. A failed call then says little about the node.
+func (h *Hub) Reconnecting(endpoint string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if _, ok := h.sessions[endpoint]; ok {
+		return false
+	}
+	if time.Since(h.started) < reconnectGrace {
+		return true
+	}
+	gone, ok := h.gone[endpoint]
+	return ok && time.Since(gone) < reconnectGrace
+}
 
 // SetEnroller accepts agents carrying an enroll key.
 func (h *Hub) SetEnroller(enroll EnrollFunc) { h.enroll = enroll }
@@ -150,6 +179,9 @@ func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer h.detach(session)
 	h.register(r.Context(), endpoint)
 	h.logger.Info("hatch agent connected", "endpoint", endpoint, "hostname", hello.Hostname, "version", hello.AgentVersion, "registered", known, "enrolled", enrolled)
+	if known && h.onConnect != nil {
+		go h.onConnect(endpoint)
+	}
 
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
@@ -229,6 +261,7 @@ func (h *Hub) detach(session *Session) {
 	h.mu.Lock()
 	if h.sessions[session.endpoint] == session {
 		delete(h.sessions, session.endpoint)
+		h.gone[session.endpoint] = time.Now()
 		go h.unregister(session.endpoint)
 	}
 	h.mu.Unlock()
