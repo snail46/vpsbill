@@ -61,7 +61,7 @@ fib daddr type local tcp dport 20022 dnat to 10.20.30.254:22
 - **LXD**：网桥必须设置静态 `ipv4.address`（例如 `lxc network set lxdbr0 ipv4.address 10.20.30.1/24`）。Agent 从子网高位向下分配静态 IP，低位留给网桥 DHCP。在 LXD 中导入可售镜像并设置别名（`lxc image copy images:debian/12 local: --alias debian12`），别名就是套餐里的系统模板 ID。`images:` 上的官方镜像（包括 `/cloud` 变体）都不带 SSH 服务端；Agent 设置 root 密码时发现没有 sshd，会用镜像自带的包管理器（apt / dnf / apk）安装 `openssh-server`，所以实例需要能访问软件源，首次开通会多花半分钟左右。已经预装 sshd 的自制镜像不受影响。
 - **与 Docker 同机**：Docker 会把 iptables 的 FORWARD 默认策略改成 DROP，这会同时挡住端口转发和 LXC 实例的全部网络（Podman 自带规则不受影响），而 Agent 自己的 nftables 表里的放行无法覆盖别的表里的 DROP。所以 Agent 每次更新端口转发时，会在 iptables FORWARD 链里补上带 `hatch-agent` 注释的放行规则，只放行两类流量：一是原始目标端口在端口段内的转发连接，二是 LXD/Incus 网桥经默认路由网卡的出入流量。实例依然访问不到 Docker 容器。没有安装 iptables 的主机跳过这一步。
 - **Incus**：与 LXD 相同，网桥也要有静态 `ipv4.address`（例如 `incus network create hatchbr0 ipv4.address=10.77.0.1/24 ipv4.nat=true ipv6.address=none`）。安装 Agent 时用 `--runtime incus --lxd-network hatchbr0`。
-- **Podman**：安装脚本（`--runtime podman`）会自动完成：安装 Podman，在一个预分配文件里建 XFS 数据盘并以项目配额（prjquota）挂载到 `/var/lib/hatch-podman`、把 Podman 存储移过去（任何宿主机文件系统都行，大小用 `--podman-disk 20G` 指定，默认剩余空间减 2 GiB）；启用 API 套接字和开机拉起；网络不存在时按 `10.89.0.0/24` 创建；构建两个最小镜像 `localhost/hatch-debian12:latest`（systemd）和 `localhost/hatch-alpine:latest`（OpenRC），空闲占用只有几 MB，**1 核 / 64 MB / 1 GB** 的实例可以正常运行和 SSH 登录。自带镜像需要以 init 为入口并带 sshd。
+- **Podman**：安装脚本（`--runtime podman`）会自动完成：安装 Podman，在一个预分配文件里建 XFS 数据盘并以项目配额（prjquota）挂载到 `/var/lib/hatch-podman`、把 Podman 存储移过去（任何宿主机文件系统都行，大小用 `--podman-disk 20G` 指定，默认剩余空间减 2 GiB）；启用 API 套接字和开机拉起；网络不存在时按 `10.89.0.0/24` 创建；构建两个最小镜像 `localhost/hatch-debian12:latest`（systemd）和 `localhost/hatch-alpine3.22:latest`（OpenRC，另有别名 `localhost/hatch-alpine:latest`），空闲占用只有几 MB，**1 核 / 64 MB / 1 GB** 的实例可以正常运行和 SSH 登录。自带镜像需要以 init 为入口并带 sshd，并命名为 `localhost/hatch-*`：套餐只能选这个前缀的 Podman 镜像，`docker.io/...` 等原始镜像没有 init 和 sshd，不会列出。
 - **硬盘限额是强制的**：每台实例都有硬盘上限，不能开启时 Agent 拒绝创建实例，并在上报里标明原因，平台随即暂停该母机销售。LXD/Incus 的存储池必须是 zfs、btrfs 或 lvm（`dir` 无法限制）；Podman 必须是上面的 XFS 数据盘。
 - **zram**（默认开启，`--no-zram` 关闭）：用一半内存做压缩交换，实例最多还能用与内存限额相同大小的交换，小内存母机更稳。
 - 宿主机的 FORWARD 策略需要放行 DNAT 后的流量（Agent 自己的 forward 链已放行 `ct status dnat`）。
@@ -79,7 +79,7 @@ fib daddr type local tcp dport 20022 dnat to 10.20.30.254:22
    这条命令直接从后台「节点对接 → 接入教程」（托管机主在「托管中心 → 我的母机」）复制，接入码已经填好，所有母机通用。
 
    - `--enroll`：账户接入码，装好后母机自动出现在待接入列表，不用复制令牌。不带时按老办法用令牌接入。
-   - `--runtime`：默认 `auto`：装了 Incus 用 Incus，装了 LXD 用 LXD，再加上 Podman（没装会自动安装）。也可以写 `lxd`、`incus`、`podman` 的任意组合。
+   - `--runtime`：后台生成的命令会按所选方式带上 `podman` 或 `lxc`。`lxc` 使用已装的 Incus 或 LXD，都没有时安装 Incus 并建存储池（`--lxc-disk`）、网桥和 Debian 12 / Ubuntu 22.04 / Alpine 3.22 镜像（`--lxc-images skip` 不导入）；两种都要写 `lxc,podman`。也可以写 `lxd`、`incus`、`podman` 的任意组合。不写时为 `auto`：装了 Incus 用 Incus，装了 LXD 用 LXD，再加上 Podman（没装会自动安装）。
    - `--public-ip`：默认自动识别（见上文），一般不用填。
    - 手动写 `--runtime` 时：宿主机用 Incus 时写 `incus`，Agent 会固定使用 `/var/lib/incus/unix.socket`；同一台机器同时装了 LXD snap 和 Incus 时必须这样写，否则自动探测会优先选中 LXD。
    - `--lxd-network`、`--podman-network`：实例接入的网桥 / Podman 网络，默认 `lxdbr0`（Incus 为 `incusbr0`）和 `podman`。

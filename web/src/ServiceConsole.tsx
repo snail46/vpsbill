@@ -3,7 +3,7 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import RFBModule from '@novnc/novnc/lib/rfb'
-import { Monitor, RefreshCw, Send, TerminalSquare, X } from 'lucide-react'
+import { Maximize2, Minimize2, Minus, Monitor, RefreshCw, Send, TerminalSquare, X } from 'lucide-react'
 import { api, ConsoleTicketRecord } from './api'
 
 type RFBInstance = EventTarget & {
@@ -47,6 +47,52 @@ export function ServiceConsole({
   const rfb = useRef<RFBInstance | null>(null)
   const [status, setStatus] = useState('正在连接…')
   const [error, setError] = useState('')
+  const panel = useRef<HTMLElement>(null)
+  // minimized docks the console in a corner with the session still open;
+  // full fills the screen (the browser's full screen where it has one, else
+  // the whole window).
+  const [minimized, setMinimized] = useState(false)
+  const [full, setFull] = useState(false)
+
+  useEffect(() => {
+    const sync = () => {
+      if (!document.fullscreenElement) setFull(false)
+      requestAnimationFrame(() => fit.current?.fit())
+    }
+    document.addEventListener('fullscreenchange', sync)
+    return () => document.removeEventListener('fullscreenchange', sync)
+  }, [])
+
+  const refit = () =>
+    requestAnimationFrame(() => {
+      fit.current?.fit()
+      terminal.current?.focus()
+    })
+
+  // The layout switches at once; the browser's full screen follows when it
+  // grants it (iOS Safari has none, and the window-filling layout stands in).
+  function toggleFull() {
+    setMinimized(false)
+    if (full) {
+      setFull(false)
+      if (document.fullscreenElement) void document.exitFullscreen().catch(() => undefined)
+    } else {
+      setFull(true)
+      void panel.current?.requestFullscreen?.().catch(() => undefined)
+    }
+    refit()
+  }
+
+  function minimize() {
+    setFull(false)
+    setMinimized(true)
+    if (document.fullscreenElement) void document.exitFullscreen().catch(() => undefined)
+  }
+
+  function restore() {
+    setMinimized(false)
+    refit()
+  }
 
   const cleanup = () => {
     socket.current?.close()
@@ -157,24 +203,40 @@ export function ServiceConsole({
   }, [serviceID, kind])
 
   return (
-    <div className="modal-backdrop">
-      <section className="console-modal">
-        <header>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+    <div className={minimized ? 'console-dock-host' : 'modal-backdrop'}>
+      <section ref={panel} className={['console-modal', minimized && 'minimized', full && 'full'].filter(Boolean).join(' ')}>
+        <header onDoubleClick={() => (minimized ? restore() : undefined)}>
+          <div className="console-title">
             {kind === 'ssh' ? <TerminalSquare size={18} /> : <Monitor size={18} />}
             <strong>{kind.toUpperCase()} 控制台 · {name}</strong>
             <span className={status === '已连接' ? 'status-badge online' : status === '连接失败' ? 'status-badge error' : 'status-badge'}>{status}</span>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            {kind === 'vnc' && (
+          <div className="console-actions">
+            {kind === 'vnc' && !minimized && (
               <button className="secondary-button" onClick={() => rfb.current?.sendCtrlAltDel()}>
                 <Send size={13} />Ctrl+Alt+Del
               </button>
             )}
-            <button className="icon-button" onClick={() => void connect()} title="重新连接">
-              <RefreshCw size={15} />
-            </button>
-            <button className="icon-button" onClick={onClose} title="关闭控制台">
+            {!minimized && (
+              <button className="icon-button" onClick={() => void connect()} title="重新连接" aria-label="重新连接">
+                <RefreshCw size={15} />
+              </button>
+            )}
+            {minimized ? (
+              <button className="icon-button" onClick={restore} title="还原" aria-label="还原控制台">
+                <Maximize2 size={15} />
+              </button>
+            ) : (
+              <>
+                <button className="icon-button" onClick={minimize} title="缩小（连接保持）" aria-label="缩小控制台">
+                  <Minus size={16} />
+                </button>
+                <button className="icon-button" onClick={toggleFull} title={full ? '退出全屏' : '全屏'} aria-label={full ? '退出全屏' : '全屏'}>
+                  {full ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+                </button>
+              </>
+            )}
+            <button className="icon-button" onClick={onClose} title="关闭控制台" aria-label="关闭控制台">
               <X size={16} />
             </button>
           </div>

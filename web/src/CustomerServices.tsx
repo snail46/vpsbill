@@ -642,7 +642,7 @@ function ServiceDialog({
             {mappings.map((m, index) => (
               <div key={`${m.host_port}-${m.protocol}`}>
                 <code>{m.host_ip || service.primary_ipv4 || '宿主 IP'}:{m.host_port}</code>
-                <span>→ {m.container_port}/{m.protocol.toUpperCase()} · {m.description || '未命名'}</span>
+                <span>→ {m.container_port}/{m.protocol === 'both' ? 'TCP+UDP' : m.protocol.toUpperCase()} · {m.description || '未命名'}</span>
                 <button
                   className="icon-button danger"
                   disabled={m.description.toLowerCase() === 'ssh'}
@@ -710,6 +710,7 @@ function ServiceDialog({
                 <select name="protocol" defaultValue="tcp">
                   <option value="tcp">TCP</option>
                   <option value="udp">UDP</option>
+                  <option value="both">TCP+UDP</option>
                 </select>
               </label>
               <label>

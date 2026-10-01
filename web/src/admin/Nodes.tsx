@@ -253,8 +253,8 @@ function ConnectGuide({
             自研 Agent，支持 LXC（LXD / Incus）和 Podman 容器，适合 NAT 小鸡。Agent 从母机主动连到本站，母机不用开放任何端口，也不用公网 API。
           </p>
           <ul className="auto-list">
-            <li>自动识别公网 IP、CPU / 内存 / 硬盘和已安装的运行时</li>
-            <li>自动安装 Podman、nftables、lxcfs，自动做内核网络调优和磁盘测速</li>
+            <li>自动识别公网 IP、CPU / 内存 / 硬盘</li>
+            <li>按你选的虚拟化自动安装 Podman 或 Incus（含存储池、网桥和系统镜像），自动做内核网络调优和磁盘测速</li>
             <li>自动出现在下方待接入列表，不用复制令牌；镜像列表和容量自动同步</li>
           </ul>
           {enrollments ? (

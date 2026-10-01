@@ -27,18 +27,45 @@ export function InstallCommand({ command }: { command: string }) {
   )
 }
 
+type RuntimeChoice = 'podman' | 'lxc'
+
+const runtimeChoices: { id: RuntimeChoice; title: string; detail: string }[] = [
+  {
+    id: 'podman',
+    title: 'Podman 容器',
+    detail: '最省资源：1 核 64 MB 也能开机。脚本自动安装 Podman、建数据盘和网络，并构建 Debian 12、Alpine 3.22 两个镜像。适合 NAT 小鸡。',
+  },
+  {
+    id: 'lxc',
+    title: 'LXC 系统容器',
+    detail: '完整的 Linux 系统（systemd、软件包与普通 VPS 一致），兼容性更好，空闲内存比 Podman 略多。使用已装的 Incus / LXD；都没有时自动安装 Incus，建存储池和网桥，并导入 Debian 12、Ubuntu 22.04、Alpine 3.22。',
+  },
+]
+
 // ConnectSteps explains the one-command install; the same text serves the
-// hosting center and the node page.
+// hosting center and the node page. The installer is told which runtime to
+// set up, so nobody gets Podman when they meant LXC.
 export function ConnectSteps({ command, where, actionLabel }: { command: string; where: string; actionLabel: string }) {
+  const [runtime, setRuntime] = useState<RuntimeChoice | null>(null)
   return (
     <div className="install-step">
       <ol className="step-list">
-        <li>
-          在母机上以 root 运行下面这条命令（所有母机通用，不用改任何内容）。脚本会自动识别公网 IP 和已安装的 LXD / Incus，并安装 Podman、做好网络调优。
-        </li>
+        <li>选择这台母机用哪种虚拟化（一台母机选一种；装好后不能直接切换，换方式需要重新安装）。</li>
+        <li>在母机上以 root 运行生成的命令。脚本会自动识别公网 IP，安装所选虚拟化并做好网络调优。</li>
         <li>装好后约半分钟，母机会出现在{where}的「待接入」列表里，点「{actionLabel}」补充名称和地域即可，不用复制令牌。</li>
       </ol>
-      <InstallCommand command={command} />
+      <div className="runtime-choice" role="radiogroup" aria-label="虚拟化方式">
+        {runtimeChoices.map(choice => (
+          <label key={choice.id} className={runtime === choice.id ? 'runtime-option selected' : 'runtime-option'}>
+            <input type="radio" name="agent-runtime" checked={runtime === choice.id} onChange={() => setRuntime(choice.id)} />
+            <span>
+              <strong>{choice.title}</strong>
+              <small>{choice.detail}</small>
+            </span>
+          </label>
+        ))}
+      </div>
+      {runtime ? <InstallCommand command={`${command} --runtime ${runtime}`} /> : <p className="muted-text">先选择虚拟化方式，再复制安装命令。</p>}
       {command.includes('--server http://') && (
         <p className="muted-text">
           当前站点还没有启用 HTTPS。Agent 只允许经回环地址用 HTTP 连接，所以现在只有与计费站同机的服务器能接入；外部母机需要站点先配置域名和 HTTPS。

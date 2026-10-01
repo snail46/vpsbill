@@ -59,7 +59,26 @@ CLOUDFLARE_TUNNEL_TOKEN=从 Cloudflare 复制的令牌
 
 `deploy.sh` 会启动 `cloudflared` 容器，服务器不需要开放任何入站端口。
 
-隧道的服务地址必须是 `web:7080` / `web:7081`（或自己装的 cloudflared 指向 `127.0.0.1` 上的可信端口）。如果指向了直连端口（如 `http://localhost:8088`），所有访客都会被识别成 Docker 内网地址：登录限流互相影响，审计日志和登录记录看不到真实 IP。系统检测到这种情况时，会在后台「站点设置」顶部提示。建议在 Cloudflare Access 里给后台域名加一层登录保护。
+隧道的服务地址必须是 `web:7080` / `web:7081`（或自己装的 cloudflared 指向 `127.0.0.1` 上的可信端口，见下一节）。如果指向了直连端口（如 `http://localhost:8088`），所有访客都会被识别成 Docker 内网地址：登录限流互相影响，审计日志和登录记录看不到真实 IP。系统检测到这种情况时，会在后台「站点设置」顶部提示。建议在 Cloudflare Access 里给后台域名加一层登录保护。
+
+### cloudflared 装在宿主机上（不在 Docker 里）
+
+例如 Mac mini 上用 OrbStack 跑 Docker、cloudflared 用 Homebrew 或安装包直接装在 macOS 上。这时 cloudflared 不在 Docker 网络里，解析不到 `web` 这个名字，只能连宿主机端口。不要用 `ACCESS_MODE=cloudflare`（它会再起一个 cloudflared 容器，和本机的 cloudflared 抢同一条隧道），改用 `proxy`：
+
+```dotenv
+ACCESS_MODE=proxy
+PORTAL_PORT=8080
+ADMIN_PORT=8081
+```
+
+运行 `./deploy.sh` 后，`127.0.0.1:8080` 和 `127.0.0.1:8081` 分别指向 Web 容器的可信端口 7080 / 7081。在 Cloudflare 隧道的 Public Hostname 里：
+
+- 前台域名，服务 `HTTP`，URL `localhost:8080`
+- 后台域名，服务 `HTTP`，URL `localhost:8081`
+
+用 `docker compose` 直接部署预构建镜像（不用 `deploy.sh`）时，在 `.env` 里加上 `PORTAL_BIND=127.0.0.1`、`ADMIN_BIND=127.0.0.1`、`PORTAL_TARGET=7080`、`ADMIN_TARGET=7081`，再 `docker compose up -d`。检查：`docker compose ps` 里 web 的端口应显示为 `127.0.0.1:8080->7080/tcp`、`127.0.0.1:8081->7081/tcp`；如果还是 `->80` / `->81`，就是没有生效。
+
+后台「站点设置」顶部的直连端口提示，在下一个经 Cloudflare 正确转发的请求到达后会自动消失（之前的版本要等 24 小时或重启 API）。
 
 ### proxy：自己的反向代理
 

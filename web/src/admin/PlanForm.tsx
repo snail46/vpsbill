@@ -18,6 +18,7 @@ import { cycleName, CyclePriceFields, namedCycles, readCyclePrices } from '../sh
 import { readStock, StockField } from '../shared/stock'
 import { DiskIOFields, readDiskIO } from '../shared/diskio'
 import { confirmDialog, promptDialog } from '../shared/dialog'
+import { TagInput } from '../shared/tags'
 import { virtualizationLabel } from './Nodes'
 
 type Virtualization = PlanRecord['virtualization']
@@ -49,7 +50,7 @@ export function placementText(plan: Pick<PlanRecord, 'node_selection' | 'node_id
 
 // Settings a series of plans shares; a preset stores these.
 const sharedKeys = [
-  'provider_type', 'virtualization', 'category_id', 'node_selection', 'node_ids',
+  'provider_type', 'virtualization', 'category_id', 'node_selection', 'node_ids', 'tags',
   'traffic_gb', 'network_down_mbps', 'network_up_mbps', 'snapshot_limit',
   'assign_nat', 'port_mapping_count', 'assign_ipv4', 'ipv4_count', 'assign_ipv6', 'ipv6_count',
   'allowed_template_ids', 'default_template_id',
@@ -238,6 +239,7 @@ export function PlanForm({
   // New plans default to listed nodes; saved plans keep their way.
   const [selection, setSelection] = useState<NodeSelection>(init.node_selection || (plan ? 'pack' : 'nodes'))
   const [nodeIds, setNodeIds] = useState<string[]>(init.node_ids || [])
+  const [tags, setTags] = useState<string[]>(init.tags || [])
   const [presetID, setPresetID] = useState('')
 
   // Batch mode: one row per plan, the cycles they sell and the formula.
@@ -288,6 +290,8 @@ export function PlanForm({
       provider_type: providerType,
       virtualization,
       category_id: String(data.get('category_id') || ''),
+      description: String(data.get('description') || '').trim(),
+      tags,
       node_selection: selection,
       node_ids: selection === 'nodes' ? nodeIds : [],
       snapshot_limit: Number(data.get('snapshot_limit')),
@@ -452,6 +456,7 @@ export function PlanForm({
     setDefaultTemplate(next.default_template_id || '')
     setSelection(next.node_selection || 'nodes')
     setNodeIds(next.node_ids || [])
+    setTags(next.tags || [])
     if (settings.formula) setFormula({ ...defaultFormula, ...settings.formula, discounts: { ...defaultFormula.discounts, ...settings.formula.discounts } })
     if (settings.cycles?.length) setCycles(settings.cycles.filter(cycle => cycleMonths[cycle]))
     if (batch && settings.traffic_gb !== undefined) {
@@ -654,6 +659,15 @@ export function PlanForm({
         <label>
           <span>快照配额</span>
           <input name="snapshot_limit" type="number" min="0" defaultValue={init.snapshot_limit ?? 1} />
+        </label>
+
+        <label className="wide">
+          <span>套餐描述{batch ? '（每个套餐都用这段）' : ''}（显示在「选购 VPS」的套餐卡片上，可留空）</span>
+          <textarea name="description" rows={2} maxLength={500} placeholder="如：CN2 GIA 回程，晚高峰稳定，适合建站和代理" defaultValue={init.description ?? ''} />
+        </label>
+        <label className="wide">
+          <span>标签（显示在套餐卡片上）</span>
+          <TagInput value={tags} onChange={setTags} placeholder="如：CN2 GIA、原生 IP、解锁流媒体" />
         </label>
 
         <NodePicker

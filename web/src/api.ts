@@ -164,6 +164,8 @@ export type PlanRecord = {
   node_selection?: NodeSelection
   node_ids?: string[]
   region_ids?: string[]
+  // tags are short labels on the plan's shop card.
+  tags?: string[]
 }
 
 export type NodeSelection = 'nodes' | 'pack' | 'spread'

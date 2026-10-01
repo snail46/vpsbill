@@ -256,6 +256,8 @@ type Plan struct {
 	// NodeSelections); NodeIDs are the nodes a "nodes" plan sells on.
 	NodeSelection string   `json:"node_selection"`
 	NodeIDs       []string `json:"node_ids"`
+	// Tags are short labels shown on the plan's card in the shop.
+	Tags []string `json:"tags"`
 	// RegionIDs are the regions of the nodes the plan can be placed on.
 	RegionIDs []string  `json:"region_ids"`
 	Enabled   bool      `json:"enabled"`
@@ -272,7 +274,7 @@ func (s *CatalogStore) ListPlans(ctx context.Context) ([]Plan, error) {
 		       default_template_id, allowed_template_ids, enabled, version, created_at,
 		       coalesce(owner_account_id::text,''), coalesce(node_id::text,''), description, purchase_limit, early_refund,
 		       stock_limit, `+planHeldSQL+`, disk_io,
-		       coalesce(category_id::text,''), node_selection, node_ids, `+planRegionsSQL+`
+		       coalesce(category_id::text,''), node_selection, node_ids, `+planRegionsSQL+`, tags
 		FROM plans p ORDER BY created_at DESC
 	`)
 	if err != nil {
@@ -286,7 +288,7 @@ func (s *CatalogStore) ListPlans(ctx context.Context) ([]Plan, error) {
 			&plan.AssignNAT, &plan.PortMappingCount, &plan.AssignIPv4, &plan.IPv4Count, &plan.AssignIPv6, &plan.IPv6Count,
 			&plan.DefaultTemplateID, &plan.AllowedTemplateIDs, &plan.Enabled, &plan.Version, &plan.CreatedAt, &plan.OwnerAccountID, &plan.NodeID, &plan.Description, &plan.PurchaseLimit, &plan.EarlyRefund,
 			&plan.StockLimit, &plan.StockHeld, &plan.DiskIO,
-			&plan.CategoryID, &plan.NodeSelection, &plan.NodeIDs, &plan.RegionIDs); err != nil {
+			&plan.CategoryID, &plan.NodeSelection, &plan.NodeIDs, &plan.RegionIDs, &plan.Tags); err != nil {
 			return nil, err
 		}
 		plan.Prices = []Price{}
@@ -406,14 +408,14 @@ func createPlan(ctx context.Context, tx pgx.Tx, input Plan) (Plan, error) {
 		                  network_down_mbps, network_up_mbps, snapshot_limit,
 		                  assign_nat, port_mapping_count, assign_ipv4, ipv4_count, assign_ipv6, ipv6_count,
 		                  default_template_id, allowed_template_ids, enabled, provider_type, owner_account_id, node_id, description, purchase_limit, early_refund, stock_limit, disk_io,
-		                  category_id, node_selection, node_ids)
+		                  category_id, node_selection, node_ids, tags)
 		VALUES(upper($1), $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, nullif($21,'')::uuid, nullif($22,'')::uuid, $23, $24, $25, $26, $27,
-		       nullif($28,'')::uuid, $29, $30)
+		       nullif($28,'')::uuid, $29, $30, $31)
 		RETURNING id, code, version, created_at
 	`, input.Code, input.Name, input.Virtualization, input.VCPU, input.RAMMB, input.DiskGB, input.TrafficGB, input.NetworkDownMbps, input.NetworkUpMbps, input.SnapshotLimit,
 		input.AssignNAT, input.PortMappingCount, input.AssignIPv4, input.IPv4Count, input.AssignIPv6, input.IPv6Count,
 		input.DefaultTemplateID, input.AllowedTemplateIDs, input.Enabled, input.ProviderType, input.OwnerAccountID, input.NodeID, input.Description, input.PurchaseLimit, input.EarlyRefund, input.StockLimit, input.DiskIO,
-		input.CategoryID, input.NodeSelection, input.NodeIDs).Scan(&input.ID, &input.Code, &input.Version, &input.CreatedAt); err != nil {
+		input.CategoryID, input.NodeSelection, input.NodeIDs, input.Tags).Scan(&input.ID, &input.Code, &input.Version, &input.CreatedAt); err != nil {
 		return Plan{}, fmt.Errorf("create plan: %w", err)
 	}
 	for i := range input.Prices {
@@ -477,14 +479,14 @@ func updatePlan(ctx context.Context, tx pgx.Tx, id string, input Plan) (Plan, er
 		       assign_nat=$12, port_mapping_count=$13, assign_ipv4=$14, ipv4_count=$15,
 		       assign_ipv6=$16, ipv6_count=$17, default_template_id=$18, allowed_template_ids=$19,
 		       enabled=$20, provider_type=$21, description=$22, purchase_limit=$23, early_refund=$24, stock_limit=$25, disk_io=$26,
-		       category_id=nullif($27,'')::uuid, node_selection=$28, node_ids=$29, version=version+1, updated_at=now()
+		       category_id=nullif($27,'')::uuid, node_selection=$28, node_ids=$29, tags=$30, version=version+1, updated_at=now()
 		WHERE id=$1
 		RETURNING id, code, version, created_at
 	`, id, input.Code, input.Name, input.Virtualization, input.VCPU, input.RAMMB, input.DiskGB, input.TrafficGB,
 		input.NetworkDownMbps, input.NetworkUpMbps, input.SnapshotLimit, input.AssignNAT, input.PortMappingCount,
 		input.AssignIPv4, input.IPv4Count, input.AssignIPv6, input.IPv6Count, input.DefaultTemplateID,
 		input.AllowedTemplateIDs, input.Enabled, input.ProviderType, input.Description, input.PurchaseLimit, input.EarlyRefund, input.StockLimit, input.DiskIO,
-		input.CategoryID, input.NodeSelection, input.NodeIDs).Scan(&input.ID, &input.Code, &input.Version, &input.CreatedAt); err != nil {
+		input.CategoryID, input.NodeSelection, input.NodeIDs, input.Tags).Scan(&input.ID, &input.Code, &input.Version, &input.CreatedAt); err != nil {
 		return Plan{}, fmt.Errorf("update plan: %w", err)
 	}
 	now := time.Now().UTC()
@@ -540,6 +542,9 @@ func withPlanNetworkDefaults(input Plan) Plan {
 	}
 	if input.NodeID != "" {
 		input.NodeSelection, input.CategoryID = "pack", ""
+	}
+	if input.Tags == nil {
+		input.Tags = []string{}
 	}
 	if input.IPv4Count < 1 {
 		input.IPv4Count = 1

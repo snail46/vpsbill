@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from 'react'
 import { api, cached, CustomerCatalogRecord, CustomerIdentity, OrderRecord, PaymentIntentRecord } from '../api'
-import { osOptions } from '../shared/nav'
+import { ArrowLeftRight, ArrowRight, Store } from 'lucide-react'
+import { navigatePortal, osOptions } from '../shared/nav'
 import { CouponField } from '../Coupons'
 import { cycleLabel, money, bandwidthLabel } from '../shared/ui'
 import { cycleOrder, priceLeft } from '../shared/cycles'
@@ -136,6 +137,26 @@ export function CustomerShop({ customer }: { customer: CustomerIdentity }) {
         </div>
       </div>
 
+      {/* Platform plans are not the only way to get a VPS here. */}
+      <div className="shop-markets">
+        <button type="button" className="shop-market-link" onClick={() => navigatePortal('/portal/hosting?tab=market')}>
+          <Store size={18} aria-hidden />
+          <span>
+            <strong>托管市场</strong>
+            <small>机主自营的母机，地区和价格更多样，平台担保资金</small>
+          </span>
+          <ArrowRight size={16} aria-hidden />
+        </button>
+        <button type="button" className="shop-market-link" onClick={() => navigatePortal('/portal/trade')}>
+          <ArrowLeftRight size={18} aria-hidden />
+          <span>
+            <strong>交易市场</strong>
+            <small>其他用户转让的现成实例，余额购买，即买即用</small>
+          </span>
+          <ArrowRight size={16} aria-hidden />
+        </button>
+      </div>
+
       {error && <div className="form-error">{error}</div>}
 
       {groups.length > 1 && (
@@ -162,120 +183,126 @@ export function CustomerShop({ customer }: { customer: CustomerIdentity }) {
         </div>
       )}
 
-      <div className="shop-grid">
-        {plans.map(plan => {
-          const price = cardPrice(plan.prices, customer.default_currency)
-          return (
-            <button
-              type="button"
-              key={plan.id}
-              className={selectedID === plan.id ? 'shop-plan selected' : 'shop-plan'}
-              onClick={() => setSelectedID(plan.id)}
-            >
-              <div>
-                <span className="tag">{plan.virtualization.toUpperCase()}</span>
-                <StockTag plan={plan} />
-                {selectedID === plan.id && <span className="selected-mark">已选定</span>}
-              </div>
-              <h3>{plan.name}</h3>
-              <small>{plan.code}</small>
-              <div className="shop-specs">
-                <span>{plan.vcpu} vCPU</span>
-                <span>{plan.ram_mb} MB 内存</span>
-                <span>{plan.disk_gb} GB SSD</span>
-                <span>{plan.traffic_gb ? `${plan.traffic_gb} GB 流量` : '不限流量'}</span>
-                <span>{bandwidthLabel(plan.network_down_mbps)}</span>
-              </div>
-              <div className="shop-price">
-                {price ? money(price.amount_minor, price.currency) : '暂无报价'}
-                <small>/ {price ? cycleLabel(price.billing_cycle) : ''}</small>
-              </div>
-            </button>
-          )
-        })}
-        {catalog && !plans.length && <div className="empty-card" style={{ gridColumn: '1 / -1' }}>当前币种暂无可售套餐</div>}
-      </div>
-
-      {selected && (
-        <form className="checkout-config panel" onSubmit={submit}>
-          <div className="panel-heading">
-            <div>
-              <p className="eyebrow">ORDER CONFIGURATION</p>
-              <h3>配置实例选项：{selected.name}</h3>
-            </div>
-            <span className="tag">SERVER PRICED</span>
-          </div>
-          <div className="form-grid">
-            <label>
-              <span>部署地域</span>
-              <select key={selected.id} name="region_id" required>
-                {!regions.length && <option value="">该套餐暂无可售地域</option>}
-                {regions.map(region => (
-                  <option key={region.id} value={region.id}>
-                    {region.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              <span>计费周期</span>
-              <select name="billing_cycle" value={cycle} onChange={event => setCycle(event.target.value)}>
-                {prices.map(price => (
-                  <option key={price.billing_cycle} value={price.billing_cycle} disabled={priceLeft(price) === 0}>
-                    {cycleLabel(price.billing_cycle)} 付款 · {money(price.amount_minor, price.currency)}
-                    {priceLeft(price) === 0 ? '（已达限购次数）' : priceLeft(price) !== null ? `（限购剩 ${priceLeft(price)} 次）` : ''}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              <span>购买数量</span>
-              <input name="quantity" type="number" min="1" max={Math.max(1, Math.min(20, stockLeft(selected) ?? 20))} defaultValue="1" />
-            </label>
-            <label>
-              <span>操作系统镜像</span>
-              <select key={selected.id} name="template_id" defaultValue={selected.default_template_id}>
-                {osOptions(selected.allowed_template_ids).map(template => (
-                  <option key={template.id} value={template.id}>
-                    {template.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <CouponField planId={selected.id} cycle={cycle} onApplied={(code, discount) => { setCoupon(code); setDiscount(discount) }} />
-            <div className="order-total">
-              <span>每台应付{currentPrice?.setup_fee_minor ? '（含开通费）' : ''}{discount ? '（已扣优惠）' : ''}</span>
-              <strong>
-                {money(
-                  (currentPrice?.amount_minor || 0) + (currentPrice?.setup_fee_minor || 0) - discount,
-                  customer.default_currency
+      <div className={selected ? 'shop-layout with-order' : 'shop-layout'}>
+        <div className="shop-grid">
+          {plans.map(plan => {
+            const price = cardPrice(plan.prices, customer.default_currency)
+            return (
+              <button
+                type="button"
+                key={plan.id}
+                className={selectedID === plan.id ? 'shop-plan selected' : 'shop-plan'}
+                onClick={() => setSelectedID(plan.id)}
+              >
+                <div>
+                  <span className="tag">{plan.virtualization.toUpperCase()}</span>
+                  <StockTag plan={plan} />
+                  {selectedID === plan.id && <span className="selected-mark">已选定</span>}
+                </div>
+                <h3>{plan.name}</h3>
+                <small>{plan.code}</small>
+                {!!plan.tags?.length && (
+                  <div className="shop-tags">
+                    {plan.tags.map(tag => <span key={tag}>{tag}</span>)}
+                  </div>
                 )}
-              </strong>
-            </div>
-            <div className="form-actions wide">
-              <button className="primary-button compact" disabled={saving || !regions.length || stockLeft(selected) === 0}>
-                {saving ? '正在生成订单…' : '立即下单'}
+                {plan.description && <p className="shop-description">{plan.description}</p>}
+                <div className="shop-specs">
+                  <span>{plan.vcpu} vCPU</span>
+                  <span>{plan.ram_mb} MB 内存</span>
+                  <span>{plan.disk_gb} GB SSD</span>
+                  <span>{plan.traffic_gb ? `${plan.traffic_gb} GB 流量` : '不限流量'}</span>
+                  <span>{bandwidthLabel(plan.network_down_mbps)}</span>
+                </div>
+                <div className="shop-price">
+                  {price ? money(price.amount_minor, price.currency) : '暂无报价'}
+                  <small>/ {price ? cycleLabel(price.billing_cycle) : ''}</small>
+                </div>
               </button>
-            </div>
-          </div>
-        </form>
-      )}
-
-      {created && (
-        <div className="checkout-success">
-          <div>
-            <strong>订单 {created.number} 已生成</strong>
-            <span>应付总额 {money(created.total_minor, created.currency)}{created.discount_minor ? `（已优惠 ${money(created.discount_minor, created.currency)}）` : ''}，关联账单 {created.invoice_number}</span>
-          </div>
-          {catalog?.checkout_enabled ? (
-            <button className="primary-button compact" disabled={paying} onClick={checkout}>
-              {paying ? '正在前往收银台…' : '前往在线支付'}
-            </button>
-          ) : (
-            <span>当前未配置在线支付渠道，请联系商家后台完成入账。</span>
-          )}
+            )
+          })}
+          {catalog && !plans.length && <div className="empty-card" style={{ gridColumn: '1 / -1' }}>当前币种暂无可售套餐</div>}
         </div>
-      )}
+
+        {selected && (
+          <aside className="shop-order">
+            <form className="shop-order-card" onSubmit={submit}>
+              <header>
+                <p className="eyebrow">ORDER</p>
+                <h3>{selected.name}</h3>
+                <small>
+                  {selected.vcpu} 核 · {selected.ram_mb >= 1024 ? `${+(selected.ram_mb / 1024).toFixed(1)} GB` : `${selected.ram_mb} MB`} · {selected.disk_gb} GB · {bandwidthLabel(selected.network_down_mbps)}
+                </small>
+              </header>
+              <label>
+                <span>地域</span>
+                <select key={selected.id} name="region_id" required>
+                  {!regions.length && <option value="">该套餐暂无可售地域</option>}
+                  {regions.map(region => (
+                    <option key={region.id} value={region.id}>
+                      {region.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>计费周期</span>
+                <select name="billing_cycle" value={cycle} onChange={event => setCycle(event.target.value)}>
+                  {prices.map(price => (
+                    <option key={price.billing_cycle} value={price.billing_cycle} disabled={priceLeft(price) === 0}>
+                      {cycleLabel(price.billing_cycle)} · {money(price.amount_minor, price.currency)}
+                      {priceLeft(price) === 0 ? '（已达限购次数）' : priceLeft(price) !== null ? `（限购剩 ${priceLeft(price)} 次）` : ''}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>系统</span>
+                <select key={selected.id} name="template_id" defaultValue={selected.default_template_id}>
+                  {osOptions(selected.allowed_template_ids).map(template => (
+                    <option key={template.id} value={template.id}>
+                      {template.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>数量</span>
+                <input name="quantity" type="number" min="1" max={Math.max(1, Math.min(20, stockLeft(selected) ?? 20))} defaultValue="1" />
+              </label>
+              <CouponField planId={selected.id} cycle={cycle} onApplied={(code, discount) => { setCoupon(code); setDiscount(discount) }} />
+              <div className="shop-order-total">
+                <span>每台应付{currentPrice?.setup_fee_minor ? '（含开通费）' : ''}{discount ? '（已扣优惠）' : ''}</span>
+                <strong>
+                  {money(
+                    (currentPrice?.amount_minor || 0) + (currentPrice?.setup_fee_minor || 0) - discount,
+                    customer.default_currency
+                  )}
+                </strong>
+              </div>
+              <button className="primary-button" disabled={saving || !regions.length || stockLeft(selected) === 0}>
+                {saving ? '正在生成订单…' : stockLeft(selected) === 0 ? '已售罄' : '立即下单'}
+              </button>
+            </form>
+
+            {created && (
+              <div className="checkout-success shop-order-result">
+                <div>
+                  <strong>订单 {created.number} 已生成</strong>
+                  <span>应付总额 {money(created.total_minor, created.currency)}{created.discount_minor ? `（已优惠 ${money(created.discount_minor, created.currency)}）` : ''}，关联账单 {created.invoice_number}</span>
+                </div>
+                {catalog?.checkout_enabled ? (
+                  <button className="primary-button compact" disabled={paying} onClick={checkout}>
+                    {paying ? '正在前往收银台…' : '前往在线支付'}
+                  </button>
+                ) : (
+                  <span>当前未配置在线支付渠道，请联系商家后台完成入账。</span>
+                )}
+              </div>
+            )}
+          </aside>
+        )}
+      </div>
     </section>
   )
 }

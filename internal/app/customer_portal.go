@@ -430,11 +430,25 @@ func (p *customerPortal) mutatePortMapping(w http.ResponseWriter, r *http.Reques
 			writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "invalid_mapping", "message": "公网端口需为 1-65535，留空自动分配"})
 			return
 		}
-		if input.ContainerPort < 1 || input.ContainerPort > 65535 || (input.Protocol != "tcp" && input.Protocol != "udp") || len(input.Description) > 80 {
-			writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "invalid_mapping", "message": "端口需为 1-65535，协议仅支持 TCP/UDP，备注最多 80 字符"})
+		if input.Protocol == "tcp+udp" {
+			input.Protocol = "both"
+		}
+		if input.ContainerPort < 1 || input.ContainerPort > 65535 || (input.Protocol != "tcp" && input.Protocol != "udp" && input.Protocol != "both") || len(input.Description) > 80 {
+			writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "invalid_mapping", "message": "端口需为 1-65535，协议仅支持 TCP、UDP 或 TCP+UDP，备注最多 80 字符"})
+			return
+		}
+		// Hatch forwards both protocols in one rule; other backends get a
+		// TCP and a UDP rule on the same public port.
+		_, native := driver.(interface{ BothProtocols() bool })
+		split := input.Protocol == "both" && !native
+		if split && action != "add" {
+			writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "invalid_mapping", "message": "该节点的一条规则只能是 TCP 或 UDP；需要两种协议时请再添加一条映射"})
 			return
 		}
 		mapping := provider.PortMapping{ContainerPort: input.ContainerPort, Protocol: input.Protocol, Description: input.Description}
+		if split {
+			mapping.Protocol = "tcp"
+		}
 		if action == "add" && input.PublicPort > 0 {
 			mapping.HostPort = input.PublicPort
 			mappings, err = mapper.AddPortMapping(r.Context(), access.InstanceName, mapping)
@@ -461,6 +475,9 @@ func (p *customerPortal) mutatePortMapping(w http.ResponseWriter, r *http.Reques
 				mapping.Protocol, mapping.Description = existing.Protocol, "SSH"
 			}
 			mappings, err = mapper.UpdatePortMapping(r.Context(), access.InstanceName, index, mapping)
+		}
+		if split && err == nil {
+			mappings, err = addUDPTwin(r.Context(), mapper, access.InstanceName, mapping, mappings)
 		}
 	}
 	if err != nil {
@@ -724,4 +741,29 @@ func (p *customerPortal) watchAccess(ctx context.Context, cancel context.CancelF
 			}
 		}
 	}
+}
+
+// addUDPTwin adds the UDP half of a TCP+UDP mapping on a backend whose rules
+// carry one protocol, on the public port the TCP rule got. If it fails the
+// TCP rule is removed again, so the customer never keeps half a mapping.
+func addUDPTwin(ctx context.Context, mapper provider.PortMapper, name string, tcp provider.PortMapping, mappings []provider.PortMapping) ([]provider.PortMapping, error) {
+	index := -1
+	for i, existing := range mappings {
+		if existing.Protocol == "tcp" && existing.ContainerPort == tcp.ContainerPort && (tcp.HostPort == 0 || existing.HostPort == tcp.HostPort) {
+			index = i
+		}
+	}
+	if index < 0 {
+		return mappings, errors.New("TCP 规则已添加，但没找到它的公网端口，请手动添加 UDP 规则")
+	}
+	udp := tcp
+	udp.Protocol, udp.HostPort, udp.HostIP = "udp", mappings[index].HostPort, mappings[index].HostIP
+	next, err := mapper.AddPortMapping(ctx, name, udp)
+	if err != nil {
+		if _, undoErr := mapper.DeletePortMapping(ctx, name, index); undoErr != nil {
+			return mappings, fmt.Errorf("UDP 规则添加失败，TCP 规则也未能撤销：%w", err)
+		}
+		return nil, err
+	}
+	return next, nil
 }

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"vpsbill/internal/provider"
 	"vpsbill/internal/security"
@@ -310,7 +311,7 @@ func (a *adminCatalog) listTemplates(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		for _, image := range response.images {
-			if !image.Enabled || !image.Downloaded || !validVirtualization(image.Virtualization) {
+			if !image.Enabled || !image.Downloaded || !validVirtualization(image.Virtualization) || !offeredImage(response.node.ProviderType, image) {
 				continue
 			}
 			// Same-named images on different backends are separate templates:
@@ -471,6 +472,9 @@ func preparePlan(plan *postgres.Plan, nodes []postgres.Node) string {
 	}
 	if plan.CategoryID = strings.TrimSpace(plan.CategoryID); plan.CategoryID != "" && !uuidPattern.MatchString(plan.CategoryID) {
 		return "套餐分类无效"
+	}
+	if message := cleanPlanLabels(plan); message != "" {
+		return message
 	}
 	return validatePlacement(plan, nodes)
 }
@@ -733,4 +737,51 @@ func validNodeBilling(w http.ResponseWriter, expiresAt *string, trafficQuotaGB i
 		return false
 	}
 	return true
+}
+
+// podmanAliases are second names of Hatch Podman images, still accepted for
+// plans made before but not offered for new ones.
+var podmanAliases = map[string]bool{"localhost/hatch-alpine:latest": true}
+
+// offeredImage reports whether a node image may be chosen for a plan. Hatch
+// Podman lists every image in the host's store, including upstream images
+// pulled by other programs (docker.io/library/debian and the like), which
+// have no init system or SSH server and cannot run as a VPS; only the
+// images the installer builds (localhost/hatch-*) are offered.
+func offeredImage(providerType string, image provider.Image) bool {
+	if providerType != "hatch" || image.Virtualization != "podman" {
+		return true
+	}
+	return strings.HasPrefix(image.ID, "localhost/hatch-") && !podmanAliases[image.ID]
+}
+
+const (
+	maxPlanTags      = 8
+	maxPlanTagRunes  = 16
+	maxPlanDescRunes = 500
+)
+
+// cleanPlanLabels trims a plan's description and tags, drops empty and
+// repeated tags, and returns why they are too long.
+func cleanPlanLabels(plan *postgres.Plan) string {
+	plan.Description = strings.TrimSpace(plan.Description)
+	if utf8.RuneCountInString(plan.Description) > maxPlanDescRunes {
+		return fmt.Sprintf("套餐描述最多 %d 个字", maxPlanDescRunes)
+	}
+	tags := make([]string, 0, len(plan.Tags))
+	for _, tag := range plan.Tags {
+		tag = strings.Join(strings.Fields(tag), " ")
+		if tag == "" || containsString(tags, tag) {
+			continue
+		}
+		if utf8.RuneCountInString(tag) > maxPlanTagRunes {
+			return fmt.Sprintf("标签「%s」太长，每个标签最多 %d 个字", tag, maxPlanTagRunes)
+		}
+		tags = append(tags, tag)
+	}
+	if len(tags) > maxPlanTags {
+		return fmt.Sprintf("标签最多 %d 个", maxPlanTags)
+	}
+	plan.Tags = tags
+	return ""
 }

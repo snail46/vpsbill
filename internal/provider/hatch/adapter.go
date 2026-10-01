@@ -196,6 +196,9 @@ func (d *Driver) FreePort(ctx context.Context, name string) (int, error) {
 	return result.Port, err
 }
 
+// BothProtocols reports that one rule can forward TCP and UDP together.
+func (d *Driver) BothProtocols() bool { return true }
+
 func (d *Driver) AddPortMapping(ctx context.Context, name string, mapping provider.PortMapping) ([]provider.PortMapping, error) {
 	return d.mutate(ctx, protocol.MethodAddPortMapping, name, -1, mapping)
 }

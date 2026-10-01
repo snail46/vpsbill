@@ -2,6 +2,7 @@ import { ReactNode, useEffect, useState } from 'react'
 import { X } from 'lucide-react'
 import { api, imageLabel, AvailableTemplateRecord, NodeRecord, NodeSelection, PlanCategoryRecord, PlanRecord } from '../api'
 import { NodePicker, nodeFits } from './PlanForm'
+import { TagInput } from '../shared/tags'
 
 // planBody is what PUT expects for a saved platform plan.
 export function planBody(plan: PlanRecord) {
@@ -42,6 +43,8 @@ export function planBody(plan: PlanRecord) {
     category_id: plan.category_id ?? '',
     node_selection: plan.node_selection ?? 'pack',
     node_ids: plan.node_ids ?? [],
+    description: plan.description ?? '',
+    tags: plan.tags ?? [],
   }
 }
 
@@ -80,6 +83,8 @@ export function PlanBatchEdit({
   const [selection, setSelection] = useState<NodeSelection>('nodes')
   const [nodeIds, setNodeIds] = useState<string[]>([])
   const [percent, setPercent] = useState('')
+  const [tags, setTags] = useState<string[]>([])
+  const [description, setDescription] = useState('')
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
 
@@ -104,6 +109,8 @@ export function PlanBatchEdit({
       const body = planBody(plan)
       if (on.category) body.category_id = category
       if (on.enabled) body.enabled = enabled
+      if (on.tags) body.tags = tags
+      if (on.description) body.description = description.trim()
       for (const { field } of numberFields) {
         if (!on[field]) continue
         const value = Number(numbers[field])
@@ -199,6 +206,16 @@ export function PlanBatchEdit({
               <option value="off">下架</option>
             </select>
           ),
+        })}
+        {Row({
+          id: 'tags',
+          title: '标签（替换为）',
+          children: <TagInput value={tags} onChange={setTags} placeholder="留空表示清除标签" />,
+        })}
+        {Row({
+          id: 'description',
+          title: '套餐描述（替换为）',
+          children: <textarea rows={2} maxLength={500} value={description} placeholder="留空表示清除描述" onChange={event => setDescription(event.target.value)} />,
         })}
         {numberFields.map(({ field, label: title, min, max }) =>
           Row({

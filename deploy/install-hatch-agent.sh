@@ -19,9 +19,15 @@
 # Options:
 #   --enroll KEY            account key from the billing site; lists the host
 #                           there so nobody has to copy the agent token
-#   --runtime LIST          lxd, incus and/or podman, comma separated; "auto"
-#                           (default) uses Incus or LXD when installed, plus
-#                           Podman (installed if missing)
+#   --runtime LIST          what instances run on: podman, lxc, or both as
+#                           lxc,podman (the billing site's install command
+#                           asks which). lxc uses Incus, or an existing LXD,
+#                           and installs Incus with a storage pool, a bridge
+#                           and the Debian 12 / Ubuntu 22.04 / Alpine 3.22
+#                           templates when neither is there. lxd and incus
+#                           name one directly. "auto" (default when the
+#                           option is left out) uses Incus or LXD when
+#                           installed, plus Podman (installed if missing)
 #   --public-ip ADDRESS     the IPv4 customers reach; detected by default
 #   --lxd-network NAME      bridge LXC instances attach to (lxdbr0 / incusbr0)
 #   --podman-network NAME   Podman network for instances (created if missing)
@@ -29,6 +35,11 @@
 #                           (default) uses the free space minus 2 GiB
 #   --podman-images MODE    build (default) the Debian 12 and Alpine images
 #                           that run in 64 MB, or skip
+#   --lxc-disk SIZE         size of the Incus storage pool the script creates
+#                           when there is none, e.g. 50G; "auto" (default)
+#                           uses the free space minus 2 GiB
+#   --lxc-images MODE       import (default) the LXC templates into Incus, or
+#                           skip
 #   --no-zram               do not set up compressed swap in RAM
 #   --no-tune               leave kernel network, conntrack and OOM settings as
 #                           they are (see "Host tuning")
@@ -57,6 +68,9 @@ EXTRA=""
 PODMAN_NETWORK="podman"
 PODMAN_DISK="auto"
 PODMAN_IMAGES="build"
+LXC_DISK="auto"
+LXC_IMAGES="import"
+LXC_NETWORK=""
 ZRAM=1
 TUNE=1
 AUTO_UPGRADE=true
@@ -69,10 +83,12 @@ while [ $# -gt 0 ]; do
     --runtime) RUNTIME="$2"; shift 2 ;;
     --public-ip) PUBLIC_IP="$2"; shift 2 ;;
     --enroll) ENROLL="$2"; shift 2 ;;
-    --lxd-network) EXTRA="$EXTRA $1 $2"; shift 2 ;;
+    --lxd-network) LXC_NETWORK="$2"; EXTRA="$EXTRA $1 $2"; shift 2 ;;
     --podman-network) PODMAN_NETWORK="$2"; EXTRA="$EXTRA $1 $2"; shift 2 ;;
     --podman-disk) PODMAN_DISK="$2"; shift 2 ;;
     --podman-images) PODMAN_IMAGES="$2"; shift 2 ;;
+    --lxc-disk) LXC_DISK="$2"; shift 2 ;;
+    --lxc-images) LXC_IMAGES="$2"; shift 2 ;;
     --no-zram) ZRAM=0; shift ;;
     --no-tune) TUNE=0; shift ;;
     --no-auto-upgrade) AUTO_UPGRADE=false; shift ;;
@@ -94,8 +110,38 @@ if [ "$RUNTIME" = "auto" ]; then
   fi
   echo "Runtimes: $RUNTIME"
 fi
+# "lxc" picks the LXC manager on the host: Incus, else an existing LXD, else
+# Incus installed below.
+INSTALL_INCUS=0
+case ",$RUNTIME," in
+  *,lxc,*)
+    if command -v incus >/dev/null 2>&1; then
+      LXC_CLI=incus
+    elif command -v lxd >/dev/null 2>&1 || [ -S /var/snap/lxd/common/lxd/unix.socket ] || [ -S /var/lib/lxd/unix.socket ]; then
+      LXC_CLI=lxd
+    else
+      LXC_CLI=incus
+      INSTALL_INCUS=1
+    fi
+    RUNTIME=$(echo ",$RUNTIME," | sed "s/,lxc,/,$LXC_CLI,/; s/^,//; s/,$//")
+    echo "Runtimes: $RUNTIME"
+    ;;
+esac
+for runtime in $(echo "$RUNTIME" | tr ',' ' '); do
+  case "$runtime" in
+    podman|incus|lxd) ;;
+    *) echo "unknown runtime: $runtime (use podman, lxc or lxc,podman)" >&2; exit 2 ;;
+  esac
+done
 case ",$RUNTIME," in *,podman,*) USE_PODMAN=1 ;; *) USE_PODMAN=0 ;; esac
 case ",$RUNTIME," in *,lxd,*|*,incus,*) USE_LXC=1 ;; *) USE_LXC=0 ;; esac
+case ",$RUNTIME," in *,incus,*) LXC_CLI=incus ;; *,lxd,*) LXC_CLI=lxd ;; *) LXC_CLI="" ;; esac
+LXC_NETWORK=${LXC_NETWORK:-incusbr0}
+# A new Incus pool and the Podman data disk share the free space.
+NEED_LXC_POOL=0
+if [ "$LXC_CLI" = incus ]; then
+  if [ "$INSTALL_INCUS" = 1 ] || ! incus storage show default >/dev/null 2>&1; then NEED_LXC_POOL=1; fi
+fi
 
 fetch() {
   if command -v curl >/dev/null 2>&1; then
@@ -391,6 +437,7 @@ setup_podman_disk() {
     if [ "$SIZE" = "auto" ]; then
       FREE=$(df -P -BG /var/lib | awk 'NR == 2 { sub("G", "", $4); print $4 }')
       SIZE=$((FREE - 2))
+      [ "$NEED_LXC_POOL" = 0 ] || SIZE=$((SIZE / 2))
       [ "$SIZE" -ge 2 ] || { echo "only ${FREE} GiB free under /var/lib; need at least 4" >&2; exit 1; }
       SIZE="${SIZE}G"
     fi
@@ -483,6 +530,78 @@ EOF
 }
 
 WORK=$(mktemp -d)
+# install_incus adds the Zabbly Incus packages (Debian 11-13, Ubuntu
+# 20.04-24.04).
+install_incus() {
+  echo "Installing Incus from pkgs.zabbly.com"
+  command -v curl >/dev/null 2>&1 || command -v wget >/dev/null 2>&1 || apt_install curl ca-certificates
+  CODENAME=$(. /etc/os-release && echo "${VERSION_CODENAME:-}")
+  [ -n "$CODENAME" ] || { echo "cannot tell the distribution release; install Incus yourself" >&2; exit 1; }
+  mkdir -p /etc/apt/keyrings
+  fetch https://pkgs.zabbly.com/key.asc /etc/apt/keyrings/zabbly.asc
+  cat > /etc/apt/sources.list.d/zabbly-incus-stable.sources <<EOF
+Enabled: yes
+Types: deb
+URIs: https://pkgs.zabbly.com/incus/stable
+Suites: $CODENAME
+Components: main
+Architectures: $(dpkg --print-architecture)
+Signed-By: /etc/apt/keyrings/zabbly.asc
+EOF
+  APT_UPDATED=0
+  apt_install incus btrfs-progs
+}
+
+# setup_lxc gives Incus what the agent needs when it is missing: the
+# "default" storage pool (btrfs in a file, so every instance has a disk
+# limit), a NAT bridge and the templates. An existing LXD is used as set up.
+setup_lxc() {
+  [ "$INSTALL_INCUS" = 0 ] || install_incus
+  [ "$LXC_CLI" = incus ] || return 0
+  systemctl enable --now incus.socket >/dev/null 2>&1 || true
+  if ! incus storage show default >/dev/null 2>&1; then
+    command -v mkfs.btrfs >/dev/null 2>&1 || apt_install btrfs-progs
+    SIZE=$(echo "$LXC_DISK" | sed 's/[Gg][Ii]*[Bb]*$//')
+    if [ "$SIZE" = "auto" ]; then
+      FREE=$(df -P -BG /var/lib | awk 'NR == 2 { sub("G", "", $4); print $4 }')
+      SIZE=$((FREE - 2))
+    fi
+    [ "$SIZE" -ge 2 ] 2>/dev/null || { echo "need at least 2 GiB for the Incus storage pool (--lxc-disk)" >&2; exit 1; }
+    echo "Creating a ${SIZE} GiB btrfs storage pool 'default' for Incus"
+    incus storage create default btrfs size="${SIZE}GiB" >/dev/null
+  fi
+  if ! incus network show "$LXC_NETWORK" >/dev/null 2>&1; then
+    N=0
+    while [ "$N" -lt 255 ]; do
+      if ! ip -4 route | grep -q "^10\.78\.$N\." && incus network create "$LXC_NETWORK" ipv4.address="10.78.$N.1/24" ipv4.nat=true ipv6.address=none >/dev/null 2>&1; then
+        echo "Created Incus network $LXC_NETWORK (10.78.$N.0/24)"
+        break
+      fi
+      N=$((N + 1))
+    done
+    incus network show "$LXC_NETWORK" >/dev/null 2>&1 || { echo "Could not create Incus network $LXC_NETWORK" >&2; exit 1; }
+  fi
+  [ "$LXC_IMAGES" = "skip" ] || import_lxc_images
+}
+
+# The alias is the template ID plans use, and the billing site names it:
+# debian12 is "Debian 12", ubuntu2204 "Ubuntu 22.04", alpine3.22 "Alpine
+# 3.22". Cloud variants come first; the agent installs an SSH server in
+# instances whose image has none.
+import_lxc_images() {
+  for pair in debian12=debian/12 ubuntu2204=ubuntu/22.04 alpine3.22=alpine/3.22; do
+    alias=${pair%%=*}
+    source=${pair#*=}
+    if incus image alias list local: --format csv 2>/dev/null | cut -d, -f1 | grep -qx "$alias"; then
+      continue
+    fi
+    echo "Importing LXC template $alias (images:$source)"
+    incus image copy "images:$source/cloud" local: --alias "$alias" >/dev/null 2>&1 ||
+      incus image copy "images:$source" local: --alias "$alias" >/dev/null 2>&1 ||
+      echo "warning: could not download images:$source; import it later with: incus image copy images:$source local: --alias $alias" >&2
+  done
+}
+
 trap 'rm -rf "$WORK"' EXIT
 BASE="${DOWNLOAD_FROM:-$SERVER}"
 BASE="${BASE%/}/api/v1/agent/download"
@@ -497,6 +616,7 @@ if [ "$USE_PODMAN" = 1 ]; then
   [ "$PODMAN_IMAGES" = "skip" ] || build_podman_images
 fi
 if [ "$USE_LXC" = 1 ]; then
+  setup_lxc
   for cli in incus lxc; do
     command -v "$cli" >/dev/null 2>&1 || continue
     DRIVER=$("$cli" storage show default 2>/dev/null | awk '$1 == "driver:" { print $2 }')
@@ -556,6 +676,9 @@ systemctl restart hatch-agent
 systemctl --no-pager --lines=5 status hatch-agent || true
 if [ "$USE_PODMAN" = 1 ] && [ "$PODMAN_IMAGES" != "skip" ]; then
   echo "Podman templates: localhost/hatch-debian12:latest and localhost/hatch-alpine3.22:latest (also tagged localhost/hatch-alpine:latest)"
+fi
+if [ "$LXC_CLI" = incus ] && [ "$LXC_IMAGES" != "skip" ]; then
+  echo "LXC templates: $(incus image alias list local: --format csv 2>/dev/null | cut -d, -f1 | tr '\n' ' ')"
 fi
 if [ "$UPGRADE" = 1 ]; then
   echo

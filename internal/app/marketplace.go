@@ -425,7 +425,7 @@ func (a *marketplaceAPI) hostedTemplates(w http.ResponseWriter, r *http.Request)
 	}
 	ready := make([]provider.Image, 0, len(images))
 	for _, image := range images {
-		if image.Enabled && image.Downloaded {
+		if image.Enabled && image.Downloaded && offeredImage(node.ProviderType, image) {
 			ready = append(ready, image)
 		}
 	}

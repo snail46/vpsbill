@@ -61,7 +61,14 @@ curl -fsS http://127.0.0.1:8088/health/ready
 
 ### 4A. Hatch + Incus（LXC 系统容器）
 
-安装 Incus（Zabbly 官方源，Debian 12/13、Ubuntu 22.04/24.04 通用）：
+后台「节点对接 → 接入教程」（托管用户在「托管中心 → 我的母机」）生成安装命令时先选虚拟化方式。选「LXC 系统容器」时命令带 `--runtime lxc`，脚本自动完成：
+
+- 已装 Incus 就用 Incus，已装 LXD 就用 LXD（按现有配置，不再改动）；都没有时从 Zabbly 源安装 Incus；
+- Incus 没有 `default` 存储池时建 btrfs 存储池（放在一个文件里，每台实例都有硬盘上限），大小用 `--lxc-disk 50G` 指定，默认剩余空间减 2 GiB（同时装 Podman 时两者各占一半）；
+- 没有网桥时建 `incusbr0`（`10.78.N.0/24`，开启 NAT）；
+- 导入三个系统镜像：`debian12`（Debian 12）、`ubuntu2204`（Ubuntu 22.04）、`alpine3.22`（Alpine 3.22），已有同名镜像时跳过；不需要时加 `--lxc-images skip`。镜像从 images.linuxcontainers.org 下载，下载失败只给警告，之后可以手动导入。
+
+想自己准备（或在已有 Incus 上自定义）时，按下面的手动步骤。安装 Incus（Zabbly 官方源，Debian 12/13、Ubuntu 22.04/24.04 通用）：
 
 ```sh
 mkdir -p /etc/apt/keyrings
@@ -83,20 +90,23 @@ apt-get update && apt-get install -y incus btrfs-progs
 ```sh
 incus storage create default btrfs size=20GiB
 incus network create hatchbr0 ipv4.address=10.77.0.1/24 ipv4.nat=true ipv6.address=none
-incus image copy images:debian/12/cloud local: --alias debian12-cloud
-incus image copy images:ubuntu/24.04/cloud local: --alias ubuntu2404-cloud
+incus image copy images:debian/12/cloud local: --alias debian12
+incus image copy images:ubuntu/22.04/cloud local: --alias ubuntu2204
+incus image copy images:alpine/3.22/cloud local: --alias alpine3.22
 ```
 
-镜像别名就是套餐里的系统模板 ID。`images:` 官方镜像不带 SSH 服务端，Agent 首次设置密码时会自动安装 `openssh-server`，实例需要能访问软件源。
+镜像别名就是套餐里的系统模板 ID，前台按别名显示系统名（`debian12` 显示为 Debian 12）。LXC 的可选镜像只列出有别名的镜像，不会因为缓存了别的镜像而变多。`images:` 官方镜像不带 SSH 服务端，Agent 首次设置密码时会自动安装 `openssh-server`，实例需要能访问软件源。
 
 ### 4B. Hatch + Podman（OCI 容器）
 
-Podman 不用手动准备：下一步的安装脚本带 `--runtime podman`（或 `incus,podman`）时会自动安装 Podman，在 `/var/lib/hatch-podman.img` 建 XFS 数据盘（开启项目配额，每台实例都有硬盘上限），创建网络，并构建两个最小镜像：
+Podman 不用手动准备：生成安装命令时选「Podman 容器」（命令带 `--runtime podman`；两种都要时写 `--runtime lxc,podman`），脚本会自动安装 Podman，在 `/var/lib/hatch-podman.img` 建 XFS 数据盘（开启项目配额，每台实例都有硬盘上限），创建网络，并构建两个最小镜像：
 
 - `localhost/hatch-debian12:latest`：Debian 12 + systemd + sshd；
+- `localhost/hatch-alpine3.22:latest`（同一镜像也叫 `localhost/hatch-alpine:latest`）：Alpine 3.22 + OpenRC + sshd，前台显示为「Alpine 3.22」。
 
 两个镜像都预装了 bash、curl、wget、nano、less、tar、unzip 等常用工具。LXC 实例（Incus / LXD 镜像）在开通和重装后，Agent 会在后台把缺少的这些工具装上（需要实例能访问软件源，装不上不影响开通）。
-- `localhost/hatch-alpine3.22:latest`（同一镜像也叫 `localhost/hatch-alpine:latest`）：Alpine 3.22 + OpenRC + sshd。带版本号的名字在前台显示为「Alpine 3.22」，新建套餐建议选它。
+
+**套餐里只能选这两个镜像。** Podman 会列出母机上所有本地镜像，包括别的程序拉取的 `docker.io/library/debian:12`、`docker.io/library/postgres` 之类。`docker.io/...` 是 Docker Hub 上的官方原始镜像，只有最小的文件系统，没有 init（systemd / OpenRC）和 SSH 服务，跑起来只是一个进程，不能当 VPS 用；`localhost/hatch-*` 是安装脚本在本机以它们为基础构建的（`localhost/` 表示本机构建、不来自任何镜像仓库），加了 init、sshd、常用工具和适合小内存的配置。所以后台和托管中心只列出 `localhost/hatch-*`，别名 `localhost/hatch-alpine:latest` 也不再单列（升级时已有套餐里的这个别名自动换成 `localhost/hatch-alpine3.22:latest`，已开通的实例不受影响）。
 
 脚本还会为 Podman 实例单独运行一份 lxcfs（`hatch-lxcfs.service`，挂载在 `/var/lib/hatch-lxcfs`，开启 CPU 配额和负载虚拟化），实例里的 `free`、`top`、`uptime`、`/proc/cpuinfo`、`lscpu` 显示的是实例自己的核心数、内存、swap、负载和开机时长，而不是母机的。系统自带的 lxcfs 低于 6.0（Debian 12、Ubuntu 22.04/24.04）时识别不了 cgroup v2 的 swap 限额，脚本会改用计费站自带的 lxcfs 6.0.5（安装到 `/opt/hatch-lxcfs`，LGPL-2.1+，源码见 github.com/lxc/lxcfs）。已有的 lxcfs 不会被重启，以免正在运行的实例丢失 /proc 文件；已有实例重装系统后改用新的挂载。两点限制：`nproc` 读的是 CPU 亲和性，仍显示母机核数；`top` 等工具的 CPU 占用率来自 /proc/stat，cgroup v2 下 lxcfs 无法虚拟化，显示的是母机整体占用（计费站实例详情页的探针按实例自身的 cgroup 计算，不受影响）。
 
@@ -108,8 +118,8 @@ Podman 不用手动准备：下一步的安装脚本带 `--runtime podman`（或
 
 ```sh
 curl -fsSL http://127.0.0.1:8088/api/v1/agent/download/install.sh | sh -s -- \
-  --server http://127.0.0.1:8088 --enroll <接入码> \
-  --lxd-network hatchbr0 --podman-network hatchpod --podman-disk 20G
+  --server http://127.0.0.1:8088 --enroll <接入码> --runtime podman \
+  --podman-network hatchpod --podman-disk 20G
 ```
 
 接入码在后台「节点对接 → 接入教程」的命令里（外部母机直接复制那条命令即可，服务器地址也已填好）。公网 IP 和已安装的 Incus / LXD 自动识别。
@@ -117,7 +127,7 @@ curl -fsSL http://127.0.0.1:8088/api/v1/agent/download/install.sh | sh -s -- \
 - 脚本默认开启 zram（一半内存做压缩交换），小内存母机更稳；不需要时加 `--no-zram`。
 - 母机最低配置：只跑 Podman 时 1 核 / 256 MB 内存可以运行（实测：Agent、Podman 和系统空闲时共用约 30 MB，两台 64 MB 实例同时运行正常；单个实例内存超限只会杀掉该实例内的进程，母机和其他实例不受影响），硬盘建议 10 GB 起（Podman 数据盘、两个基础镜像和系统）。宿主机本身是容器（LXC 等小 NAT 机）时，需要能使用 /dev/fuse 和 loop 设备，否则实例内 `free` 看到的是宿主机内存，且无法建立带配额的 Podman 数据盘；跑 LXD/Incus 建议 1 GB 内存以上，存储池用 btrfs 比 zfs 省内存（ZFS 缓存会占用不少内存）。
 
-- 只想用其中一种时，加 `--runtime incus` 或 `--runtime podman`（用 LXD snap 时写 `lxd`）。
+- `--runtime`：`podman`、`lxc` 或 `lxc,podman`（后台生成的命令按所选方式填好）；也可以直接写 `incus` 或 `lxd` 指定一个。不写时按旧行为（auto）：装了 Incus / LXD 就用，再加上 Podman。
 - 母鸡在另一台机器上时，`--server` 必须是 `https://计费域名`，下载地址同理。
 - 同机还有 LXDAPI 等 NAT 面板时，编辑 `/etc/hatch/agent.json` 把 `port_range_start`/`port_range_end` 改为 `20000`/`29999`，然后 `systemctl restart hatch-agent`。
 

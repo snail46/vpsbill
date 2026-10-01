@@ -72,7 +72,7 @@ func TestPlanPlacementIntegration(t *testing.T) {
 	draft := func(code, selection string, nodes ...string) Plan {
 		return Plan{Code: code, Name: code, ProviderType: "hatch", Virtualization: "lxc", VCPU: 1, RAMMB: 512, DiskGB: 5,
 			AssignNAT: true, PortMappingCount: 1, DefaultTemplateID: "debian12", AllowedTemplateIDs: []string{"debian12"}, Enabled: true,
-			CategoryID: category.ID, NodeSelection: selection, NodeIDs: nodes,
+			CategoryID: category.ID, NodeSelection: selection, NodeIDs: nodes, Tags: []string{"CN2", "原生 IP"}, Description: "说明",
 			Prices: []Price{{Currency: "CNY", BillingCycle: "monthly", AmountMinor: 100}}}
 	}
 
@@ -127,6 +127,9 @@ func TestPlanPlacementIntegration(t *testing.T) {
 		}
 		t.Fatalf("plan %s not listed", id)
 		return Plan{}
+	}
+	if got := listed(pinned.ID); !slices.Equal(got.Tags, []string{"CN2", "原生 IP"}) || got.Description != "说明" {
+		t.Fatalf("pinned plan tags %q description %q", got.Tags, got.Description)
 	}
 	if got := listed(pinned.ID); got.CategoryID != category.ID || got.NodeSelection != "nodes" || !slices.Equal(got.RegionIDs, []string{hk}) {
 		t.Fatalf("pinned plan = category %q selection %q regions %v", got.CategoryID, got.NodeSelection, got.RegionIDs)
