@@ -146,11 +146,19 @@ func hostedTermsAndCoupons(t *testing.T, ctx context.Context, db *pgxpool.Pool, 
 	now := time.Now()
 	small := int64(100 << 20)
 	big := int64(2 << 30)
+	// The first period is one calendar month (28-31 days) with its first day
+	// used; the renewal period is untouched.
+	var firstStart, firstEnd time.Time
+	if err := db.QueryRow(ctx, `SELECT period_start,period_end FROM marketplace_escrows WHERE service_id=$1 ORDER BY period_start LIMIT 1`, serviceID).Scan(&firstStart, &firstEnd); err != nil {
+		t.Fatal(err)
+	}
+	days, _ := EscrowDays(firstStart, firstEnd, now)
+	prorated := 2400*int64(days-1)/int64(days) + 2400
 	for _, c := range []struct {
 		traffic *int64
 		full    bool
 		refund  int64
-	}{{nil, false, 2400*29/30 + 2400}, {&big, false, 2400*29/30 + 2400}, {&small, true, 4800}} {
+	}{{nil, false, prorated}, {&big, false, prorated}, {&small, true, 4800}} {
 		q, err := market.QuoteRefund(ctx, buyerID, serviceID, now, c.traffic)
 		if err != nil || !q.Available || q.Full != c.full || q.RefundMinor != c.refund || q.PaidMinor != 4800 {
 			t.Fatalf("refund quote traffic=%v: %+v err=%v", c.traffic, q, err)
