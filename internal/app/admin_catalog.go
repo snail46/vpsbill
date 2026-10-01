@@ -476,6 +476,9 @@ func preparePlan(plan *postgres.Plan, nodes []postgres.Node) string {
 	if message := cleanPlanLabels(plan); message != "" {
 		return message
 	}
+	if plan.SortOrder < -9999 || plan.SortOrder > 9999 {
+		return "排序需在 -9999 到 9999 之间"
+	}
 	return validatePlacement(plan, nodes)
 }
 

@@ -290,6 +290,7 @@ export function PlanForm({
       provider_type: providerType,
       virtualization,
       category_id: String(data.get('category_id') || ''),
+      sort_order: Number(data.get('sort_order') || 0),
       description: String(data.get('description') || '').trim(),
       tags,
       node_selection: selection,
@@ -399,6 +400,8 @@ export function PlanForm({
       if (stock !== '' && !(Number.isInteger(Number(stock)) && Number(stock) >= 0)) return `${label}：库存需为非负整数，留空不限`
       plans.push({
         ...base,
+        // Rows keep their order after the number typed.
+        sort_order: base.sort_order + index,
         code: row.code.trim(),
         name: row.name.trim(),
         vcpu: row.vcpu,
@@ -596,6 +599,11 @@ export function PlanForm({
             <option value="">未分类</option>
             {categories.map(category => <option key={category.id} value={category.id}>{category.name}</option>)}
           </select>
+        </label>
+        <label>
+          <span>排序{batch ? '（起始值，逐行加 1）' : ''}</span>
+          <input name="sort_order" type="number" min="-9999" max="9999" step="1" defaultValue={init.sort_order ?? 0} title="数字小的排在前面，相同时新建的在前" />
+          <small className="field-hint">数字小的排在前面</small>
         </label>
         <label>
           <span>对接方式</span>

@@ -613,6 +613,7 @@ func (a *marketplaceAPI) updateHostedPlan(w http.ResponseWriter, r *http.Request
 	for _, existing := range plans {
 		if existing.ID == planID {
 			plan.Code = existing.Code
+			plan.SortOrder = existing.SortOrder
 		}
 	}
 	if !a.hostedStockAllowed(w, r, plan, planID) {

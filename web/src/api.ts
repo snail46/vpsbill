@@ -166,6 +166,8 @@ export type PlanRecord = {
   region_ids?: string[]
   // tags are short labels on the plan's shop card.
   tags?: string[]
+  // sort_order orders plans in the admin list and the shop, smaller first.
+  sort_order?: number
 }
 
 export type NodeSelection = 'nodes' | 'pack' | 'spread'

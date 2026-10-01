@@ -45,6 +45,7 @@ export function planBody(plan: PlanRecord) {
     node_ids: plan.node_ids ?? [],
     description: plan.description ?? '',
     tags: plan.tags ?? [],
+    sort_order: plan.sort_order ?? 0,
   }
 }
 
