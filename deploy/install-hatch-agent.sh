@@ -289,8 +289,9 @@ PODMAN_IMG=/var/lib/hatch-podman.img
 #
 # A running lxcfs is never restarted here: every container using it would
 # lose its /proc files. A newer library is loaded with a reload instead.
+# lxcfs prints its version on stderr.
 lxcfs_major() {
-  "$1" --version 2>/dev/null | tr -dc '0-9.\n' | cut -d. -f1
+  "$1" --version 2>&1 | head -n 1 | tr -dc '0-9.\n' | cut -d. -f1
 }
 
 setup_lxcfs() {
@@ -334,7 +335,7 @@ setup_lxcfs() {
       [ -n "$SYSTEM_LXCFS" ] || apt_install lxcfs
       LXCFS_BIN=$(command -v lxcfs)
       [ "$(lxcfs_major "$LXCFS_BIN")" -ge 6 ] 2>/dev/null ||
-        echo "warning: using lxcfs $("$LXCFS_BIN" --version 2>/dev/null | tr -d '"'); instances will show 0 swap" >&2
+        echo "warning: using lxcfs $("$LXCFS_BIN" --version 2>&1 | head -n 1 | tr -d '"'); instances will show 0 swap" >&2
     fi
   fi
   cat > "$WORK/hatch-lxcfs.service" <<UNIT
@@ -371,7 +372,7 @@ UNIT
     sleep 1
   fi
   if [ -e /var/lib/hatch-lxcfs/proc/meminfo ]; then
-    echo "lxcfs: $("$LXCFS_BIN" --version 2>/dev/null | tr -d '"') at /var/lib/hatch-lxcfs"
+    echo "lxcfs: $("$LXCFS_BIN" --version 2>&1 | head -n 1 | tr -d '"') at /var/lib/hatch-lxcfs"
   else
     echo "warning: hatch-lxcfs did not start; instances will see the host's CPU count and memory (journalctl -u hatch-lxcfs)" >&2
   fi
