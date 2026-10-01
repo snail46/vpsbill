@@ -122,7 +122,7 @@ curl -fsSL http://127.0.0.1:8088/api/v1/agent/download/install.sh | sh -s -- \
   --podman-network hatchpod --podman-disk 20G
 ```
 
-接入码在后台「节点对接 → 接入教程」的命令里（外部母机直接复制那条命令即可，服务器地址也已填好）。公网 IP 和已安装的 Incus / LXD 自动识别。
+接入码在后台「节点对接 → 接入教程」的命令里：先选「Podman 容器」或「LXC 系统容器」，再复制生成的命令（外部母机直接用这条命令，服务器地址也已填好）。公网 IP 自动识别；虚拟化按命令里的 `--runtime` 安装和配置。
 
 - 脚本默认开启 zram（一半内存做压缩交换），小内存母机更稳；不需要时加 `--no-zram`。
 - 母机最低配置：只跑 Podman 时 1 核 / 256 MB 内存可以运行（实测：Agent、Podman 和系统空闲时共用约 30 MB，两台 64 MB 实例同时运行正常；单个实例内存超限只会杀掉该实例内的进程，母机和其他实例不受影响），硬盘建议 10 GB 起（Podman 数据盘、两个基础镜像和系统）。宿主机本身是容器（LXC 等小 NAT 机）时，需要能使用 /dev/fuse 和 loop 设备，否则实例内 `free` 看到的是宿主机内存，且无法建立带配额的 Podman 数据盘；跑 LXD/Incus 建议 1 GB 内存以上，存储池用 btrfs 比 zfs 省内存（ZFS 缓存会占用不少内存）。
@@ -165,7 +165,7 @@ curl -fsSL http://127.0.0.1:8088/api/v1/agent/download/install.sh | sh -s -- \
 1. 「选购 VPS」下单，生成订单和账单；
 2. 后台「账单与交易」点「确认到账并开通」（没接在线支付时只能人工确认）；
 3. 半分钟到两分钟后，客户「我的 VPS」显示运行中，卡片上有 SSH 地址和端口，root 密码可以查看和复制；
-4. 在自己电脑上 `ssh root@203.0.113.10 -p 端口` 登录；再试 WebSSH、开关机、重启、重置密码、重装系统和端口映射；
+4. 在自己电脑上 `ssh root@203.0.113.10 -p 端口` 登录；再试 WebSSH（右上角可缩小到页面角落或全屏）、开关机和重启（都会先弹出确认，完成后右上角提示结果）、重置密码、重装系统和端口映射（协议可选 TCP、UDP 或 TCP+UDP）；
 5. 续费链路（可选）：到期前 7 天生成续费账单；到期未付服务变为「已逾期」，客户仍可正常使用；宽限期（默认 72 小时）过后自动暂停（LXDAPI、Hatch 为冻结，内存不丢）；付款后自动恢复；
 6. 后台「VPS 服务」可以对服务开关机、重启或立即终止，终止后容器、端口映射和节点资源一并释放。
 
@@ -177,10 +177,16 @@ curl -fsSL http://127.0.0.1:8088/api/v1/agent/download/install.sh | sh -s -- \
 cd /opt/vpsbill
 curl -fsSL -o docker-compose.yml https://raw.githubusercontent.com/snail46/vpsbill/main/deploy/docker-compose.image.yml
 docker compose up -d --pull always
-curl -fsSL http://127.0.0.1:8088/api/v1/agent/download/install.sh | sh -s -- --server http://127.0.0.1:8088
 ```
 
-第一条命令更新编排文件（新版本可能增加了卷，例如数据备份用的 `backups`），`.env` 不受影响；最后一条同步升级 Hatch Agent，已有配置会保留。
+第一条命令更新编排文件（新版本可能增加了卷，例如数据备份用的 `backups`），`.env` 不受影响。
+
+Hatch Agent 会自动升级到站点自带的版本，不用逐台操作（见 [Hatch Agent](HATCH-AGENT.md)「自动升级」）。只有两种情况需要在母机上重新运行一次安装命令（已有配置和实例会保留）：
+
+- 2026-09-30 之前安装的 Agent 还不会自动升级；
+- 想用上安装脚本新增的宿主机设置，例如 Podman 母机的 `hatch-lxcfs`（实例里 `free`、`top` 显示自己的核数、内存和 swap）。
+
+重新运行时带上当初选的虚拟化，例如 `--runtime podman`：不带 `--runtime` 时按旧行为自动识别，会给只跑 LXC 的母机加装 Podman。
 
 改用域名 HTTPS、Cloudflare Tunnel 或自己的反向代理：见 [访问方式](ACCESS.md)。改完后到后台「站点设置」更新公开访问地址和后台访问地址。
 
@@ -223,8 +229,15 @@ curl -fsSL http://127.0.0.1:8088/api/v1/agent/download/install.sh | sh -s -- --s
 
 站点没有 HTTPS 时，只有与计费站同机的服务器能作为托管母机接入。
 
+## 常见问题
+
+- **后台提示「检测到经 Cloudflare 转发的请求进入了直连端口」**：隧道指向了直连端口。cloudflared 跑在 Docker 里时隧道填 `web:7080` / `web:7081`；装在宿主机上（Linux 服务，或 Mac 上配合 OrbStack / Docker Desktop）时 `.env` 设 `ACCESS_MODE=proxy`、重新运行 `./deploy.sh`，隧道填 `localhost:8080` / `localhost:8081`。改对后提示自动消失。完整排查见 [访问方式](ACCESS.md#常见问题)。
+- **套餐的 Podman 镜像里没有 `docker.io/...`**：这些是 Docker Hub 的原始镜像，没有 init 和 SSH 服务，不能当 VPS 卖，所以不列出，见上文 4B。
+- **LXC 镜像导入很慢**：安装脚本会在官方镜像站和清华 TUNA 镜像之间测速选快的；仍然慢时用 `--lxc-image-server URL` 指定镜像站，或加 `--lxc-images skip`，之后再手动 `incus image copy`。
+- **开关机后没有提示**：提示在操作真正完成（节点报告实例已开机、已关机或重启回来）后才出现，通常十几秒到一分钟；超过 3 分钟还没完成会提示「仍在进行」，可以稍后刷新查看。
+
 ## 已知限制
 
-- Podman 实例磁盘占用每分钟测量一次；
+- Podman 实例磁盘占用每分钟测量一次；实例里 `nproc` 显示母机核数，`top` 的 CPU 占用率是母机整体的（客户中心的探针按实例自身计算，不受影响），见 4B；
 - LXDAPI 和 Hatch 没有历史监控曲线和 VNC；
 - 在线支付未接入时只能后台人工确认到账；正式收款必须使用 HTTPS。

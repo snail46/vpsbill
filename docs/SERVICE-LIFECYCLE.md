@@ -11,6 +11,8 @@
 
 付款与异步停机存在竞态时，付款事务会取消尚未执行的欠费停机任务；若停机已经开始或完成，则追加去重的恢复启动任务，保证已付款服务最终回到运行状态。
 
+客户自己关机不会暂停计费，到期时间照常计算（关机确认框里会说明）。
+
 找不到当前币种与周期价格时，系统不会生成错误金额或直接停机，而是把服务置为 `review` 并发送 `service.renewal_price_missing` 通知。
 
 CLICD 删除使用官方接口 `DELETE /api/v1/containers/{id-or-name}/delete`，节点 API Key 需要 `container:delete` 权限。关机和恢复需要 `container:power` 权限。

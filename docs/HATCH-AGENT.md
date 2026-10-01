@@ -1,6 +1,6 @@
 # Hatch Agent
 
-Hatch 是 VPSBill 自研的宿主机 Agent。它运行在母鸡上，驱动本机的 **LXD**（系统容器）和 **Podman**（OCI 容器），由计费系统通过 `hatch` 对接方式统一管理。
+Hatch 是 VPSBill 自研的宿主机 Agent。它运行在母鸡上，驱动本机的 **Incus / LXD**（LXC 系统容器）和 **Podman**（OCI 容器），由计费系统通过 `hatch` 对接方式统一管理。
 
 ## 架构
 
@@ -35,7 +35,7 @@ Hatch 是 VPSBill 自研的宿主机 Agent。它运行在母鸡上，驱动本�
 | 开关机、重启、暂停/恢复 | ✅ | ✅ |
 | 重装（保留内网 IP 与端口映射） | ✅ | ✅ |
 | root 密码设置 / 重置 | ✅ exec `chpasswd` | ✅ exec `chpasswd` |
-| NAT 端口映射（TCP/UDP） | ✅ nftables | ✅ nftables |
+| NAT 端口映射（TCP / UDP / TCP+UDP） | ✅ nftables | ✅ nftables |
 | 实时用量（CPU/内存/网络/磁盘 IO） | ✅ | ✅（磁盘占用每分钟测量一次） |
 | 月流量累计（跨重启、按自然月清零） | ✅ | ✅ |
 | WebSSH（客户中心网页终端） | ✅ 交互式 exec，经 Agent 连接复用传输 | ✅ TTY exec，经 Agent 连接复用传输 |
@@ -53,15 +53,15 @@ Agent 独占 nftables 的 `table ip hatch`，每次变更都整表原子替换�
 fib daddr type local tcp dport 20022 dnat to 10.20.30.254:22
 ```
 
-匹配发往本机任意地址的流量，所以宿主机自带公网 IP、云厂商 1:1 NAT 都适用。Agent 启动时会重放全部规则。如果 nft 拒绝了新规则集，这次变更会回滚。
+匹配发往本机任意地址的流量，所以宿主机自带公网 IP、云厂商 1:1 NAT 都适用。协议为 TCP+UDP（`both`）的映射是一条规则、占一个端口配额，写成 tcp 和 udp 两行 nft 规则。Agent 启动时会重放全部规则。如果 nft 拒绝了新规则集，这次变更会回滚。
 
 ## 宿主机准备
 
 - Linux + systemd + nftables（`nft` 命令）。Podman 限速还需要 `tc` 和 `nsenter`（iproute2、util-linux）。
 - **LXD**：网桥必须设置静态 `ipv4.address`（例如 `lxc network set lxdbr0 ipv4.address 10.20.30.1/24`）。Agent 从子网高位向下分配静态 IP，低位留给网桥 DHCP。在 LXD 中导入可售镜像并设置别名（`lxc image copy images:debian/12 local: --alias debian12`），别名就是套餐里的系统模板 ID。`images:` 上的官方镜像（包括 `/cloud` 变体）都不带 SSH 服务端；Agent 设置 root 密码时发现没有 sshd，会用镜像自带的包管理器（apt / dnf / apk）安装 `openssh-server`，所以实例需要能访问软件源，首次开通会多花半分钟左右。已经预装 sshd 的自制镜像不受影响。
 - **与 Docker 同机**：Docker 会把 iptables 的 FORWARD 默认策略改成 DROP，这会同时挡住端口转发和 LXC 实例的全部网络（Podman 自带规则不受影响），而 Agent 自己的 nftables 表里的放行无法覆盖别的表里的 DROP。所以 Agent 每次更新端口转发时，会在 iptables FORWARD 链里补上带 `hatch-agent` 注释的放行规则，只放行两类流量：一是原始目标端口在端口段内的转发连接，二是 LXD/Incus 网桥经默认路由网卡的出入流量。实例依然访问不到 Docker 容器。没有安装 iptables 的主机跳过这一步。
-- **Incus**：与 LXD 相同，网桥也要有静态 `ipv4.address`（例如 `incus network create hatchbr0 ipv4.address=10.77.0.1/24 ipv4.nat=true ipv6.address=none`）。安装 Agent 时用 `--runtime incus --lxd-network hatchbr0`。
-- **Podman**：安装脚本（`--runtime podman`）会自动完成：安装 Podman，在一个预分配文件里建 XFS 数据盘并以项目配额（prjquota）挂载到 `/var/lib/hatch-podman`、把 Podman 存储移过去（任何宿主机文件系统都行，大小用 `--podman-disk 20G` 指定，默认剩余空间减 2 GiB）；启用 API 套接字和开机拉起；网络不存在时按 `10.89.0.0/24` 创建；构建两个最小镜像 `localhost/hatch-debian12:latest`（systemd）和 `localhost/hatch-alpine3.22:latest`（OpenRC，另有别名 `localhost/hatch-alpine:latest`），空闲占用只有几 MB，**1 核 / 64 MB / 1 GB** 的实例可以正常运行和 SSH 登录。自带镜像需要以 init 为入口并带 sshd，并命名为 `localhost/hatch-*`：套餐只能选这个前缀的 Podman 镜像，`docker.io/...` 等原始镜像没有 init 和 sshd，不会列出。
+- **Incus**：与 LXD 相同，网桥也要有静态 `ipv4.address`。安装命令选「LXC 系统容器」（`--runtime lxc`）时，脚本会在缺少时自动安装 Incus、建 btrfs 存储池 `default`（`--lxc-disk`）、网桥 `incusbr0`（`10.78.N.0/24`），并导入 `debian12`、`ubuntu2204`、`alpine3.22` 三个镜像（在官方镜像站和清华 TUNA 镜像之间测速选快的，`--lxc-image-server` 可指定）。自己建的网桥用 `--lxd-network 网桥名` 指定。
+- **Podman**：安装脚本（`--runtime podman`）会自动完成：安装 Podman，在一个预分配文件里建 XFS 数据盘并以项目配额（prjquota）挂载到 `/var/lib/hatch-podman`、把 Podman 存储移过去（任何宿主机文件系统都行，大小用 `--podman-disk 20G` 指定，默认剩余空间减 2 GiB）；启用 API 套接字和开机拉起；网络不存在时按 `10.89.0.0/24` 创建；构建两个最小镜像 `localhost/hatch-debian12:latest`（systemd）和 `localhost/hatch-alpine3.22:latest`（OpenRC，另有别名 `localhost/hatch-alpine:latest`），空闲占用只有几 MB，**1 核 / 64 MB / 1 GB** 的实例可以正常运行和 SSH 登录；另外单独运行一份 lxcfs（`hatch-lxcfs.service`），让实例里的 `free`、`uptime`、`/proc/cpuinfo` 显示实例自己的资源（详见 [部署教程](DEPLOYMENT.md) 4B）。自带镜像需要以 init 为入口并带 sshd，并命名为 `localhost/hatch-*`：套餐只能选这个前缀的 Podman 镜像，`docker.io/...` 等原始镜像没有 init 和 sshd，不会列出。
 - **硬盘限额是强制的**：每台实例都有硬盘上限，不能开启时 Agent 拒绝创建实例，并在上报里标明原因，平台随即暂停该母机销售。LXD/Incus 的存储池必须是 zfs、btrfs 或 lvm（`dir` 无法限制）；Podman 必须是上面的 XFS 数据盘。
 - **zram**（默认开启，`--no-zram` 关闭）：用一半内存做压缩交换，实例最多还能用与内存限额相同大小的交换，小内存母机更稳。
 - 宿主机的 FORWARD 策略需要放行 DNAT 后的流量（Agent 自己的 forward 链已放行 `ct status dnat`）。
@@ -89,9 +89,9 @@ fib daddr type local tcp dport 20022 dnat to 10.20.30.254:22
 
    脚本会写入 `/etc/hatch/agent.json`，打印令牌，并启用 `hatch-agent.service`。已有配置时保留原配置并重新打印令牌，所以同一条命令也用于升级 Agent。启动日志里的 `lxd_socket`、`lxd_network`、`podman_network` 是实际生效的值。
 
-3. 约半分钟后，母机出现在后台「节点对接 → 接入教程 → 待接入的母机」里（显示主机名、公网 IP、运行时和检测到的配置）。点「接入」，填名称和地域（可以直接输入新地域），虚拟化类型按运行时预选好。接入时会实时调用 Agent 验证连接。没带接入码安装的老母机，用「手动填写令牌接入」（令牌在母机上运行 `hatch-agent token` 查看）。
+2. 约半分钟后，母机出现在后台「节点对接 → 接入教程 → 待接入的母机」里（显示主机名、公网 IP、运行时和检测到的配置）。点「接入」，填名称和地域（可以直接输入新地域），虚拟化类型按运行时预选好。接入时会实时调用 Agent 验证连接。没带接入码安装的老母机，用「手动填写令牌接入」（令牌在母机上运行 `hatch-agent token` 查看）。
 
-4. 新建套餐时选择对应的虚拟化类型（LXC 或 Podman），模板从在线节点的镜像中勾选。
+3. 新建套餐时选择对应的虚拟化类型（LXC 或 Podman），模板从在线节点的镜像中勾选（Podman 只列出 `localhost/hatch-*` 镜像）。
 
 轮换令牌：`hatch-agent init --force --server ...`，然后在后台用新令牌重新接入节点。已安装的母机改用接入码：`hatch-agent enroll <接入码> && systemctl restart hatch-agent`。
 
@@ -168,5 +168,5 @@ IOPS 上限按磁盘实际收到的请求计，文件系统的元数据和日志
 ## 反向代理
 
 - 域名 + Caddy（`--profile tls`）：Caddy 直连 API，天然支持 WebSocket。
-- 纯 HTTP 模式经过 `web` 容器的 nginx：`web/nginx.conf` 已为 `/api/v1/agent/connect` 开启 WebSocket 升级和长连接超时。
+- 纯 HTTP 模式经过 `web` 容器的 nginx：`web/nginx/default.conf` 已为 `/api/v1/agent/connect` 开启 WebSocket 升级和长连接超时。
 - API 进程每 30 秒对 Agent 发送一次 ping，自定义反向代理的读超时必须大于 30 秒。

@@ -4646,3 +4646,118 @@ a.hero-signal:hover {
 .tag-chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 4px 2px 9px; border-radius: var(--radius-full); color: var(--text-primary); background: var(--bg-active); font-size: 12.5px; }
 .tag-chip button { display: inline-grid; place-items: center; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--text-muted); cursor: pointer; }
 .tag-chip button:hover { color: var(--text-primary); background: var(--bg-hover); }
+
+/* ==========================================================================
+   Compact density: the whole site (portal and admin) uses tighter spacing,
+   smaller controls and a narrower sidebar. It comes last so it overrides
+   the roomier values above; phone layouts keep their own rules.
+   ========================================================================== */
+
+html, body { font-size: 13.5px; line-height: 1.45; }
+
+@media (min-width: 901px) {
+  .app-shell { grid-template-columns: 200px minmax(0, 1fr); }
+  .sidebar { padding: 14px 10px; }
+  .brand { gap: 10px; padding: 2px 6px 14px; }
+  .brand-mark { width: 30px; height: 30px; font-size: 13px; border-radius: var(--radius-sm); }
+  .brand-logo { height: 30px; min-width: 30px; max-width: 120px; }
+  .brand-wordmark-logo { height: 30px; }
+  .brand strong { font-size: 14px; }
+  .brand span { font-size: 11.5px; }
+  nav { gap: 1px; }
+  .nav-item { gap: 10px; padding: 7px 10px; font-size: 13px; border-radius: var(--radius-sm); }
+  .nav-item svg { width: 16px; height: 16px; }
+  .sidebar-status { gap: 8px; padding: 8px 10px; }
+}
+
+main { padding: 18px clamp(16px, 2.2vw, 32px) 40px; max-width: 1600px; }
+.topbar { margin-bottom: 16px; padding-bottom: 12px; }
+.topbar h1 { font-size: 20px; }
+.avatar, .icon-button { width: 30px; height: 30px; }
+.avatar { font-size: 13px; }
+.eyebrow { font-size: 10.5px; margin-bottom: 2px; }
+
+.workspace-panel { gap: 14px; }
+.page-actions { gap: 14px; padding-bottom: 12px; }
+.page-actions h2 { font-size: 18px; }
+.page-actions p:last-child { font-size: 12.5px; }
+.section-heading { margin: 18px 0 10px; }
+.section-heading h3 { font-size: 15px; }
+
+.hero-card { gap: 18px; padding: 16px 20px; margin-bottom: 14px; }
+.hero-card h2 { font-size: 19px; margin-bottom: 4px; }
+.hero-card p:not(.eyebrow) { font-size: 13px; }
+.hero-signal { flex-basis: 84px; height: 84px; border-width: 3px; }
+.hero-signal span { font-size: 18px; }
+.metrics { gap: 10px; margin-bottom: 14px; }
+.metrics article { gap: 3px; padding: 12px 14px; }
+.metrics article svg { margin-bottom: 2px; }
+.metrics strong { font-size: 19px; }
+.content-grid { gap: 12px; }
+
+.panel { padding: 16px; }
+.panel-heading { margin-bottom: 12px; }
+.panel-heading h3, .inline-form-heading h3 { font-size: 15px; }
+.inline-form { padding: 16px; }
+.inline-form-heading { margin-bottom: 14px; padding-bottom: 10px; }
+.tag { padding: 2px 6px; font-size: 10.5px; }
+.status-badge { padding-block: 2px; }
+
+th, td { padding: 8px 10px; font-size: 13px; }
+th { font-size: 11.5px; }
+
+.form-grid { gap: 0 12px; }
+.field, .form-grid > label { gap: 5px; margin-bottom: 12px; font-size: 12.5px; }
+.form-grid fieldset { margin-bottom: 12px; }
+input, select, textarea { min-height: 34px; padding: 6px 10px; font-size: 13px; border-radius: var(--radius-sm); }
+.primary-button { min-height: 34px; padding: 6px 14px; }
+.primary-button.compact { min-height: 30px; padding: 4px 12px; }
+.secondary-button { min-height: 32px; padding: 5px 12px; }
+.danger-button { min-height: 32px; padding: 5px 14px; }
+.form-actions { gap: 10px; }
+
+.plan-grid, .shop-grid { gap: 12px; }
+.plan-card, .empty-card, .shop-plan, .service-card, .host-card { padding: 16px; }
+.plan-card-top { margin-bottom: 12px; }
+.plan-card h3 { font-size: 16px; }
+.spec-line { margin: 12px 0 10px; }
+.price-line { margin: 12px 0; }
+.price-line strong { font-size: 21px; }
+.shop-plan h3 { margin-top: 12px; font-size: 16px; }
+.shop-specs { gap: 6px; margin: 12px 0; }
+.shop-specs span { padding: 6px 8px; font-size: 12px; }
+.shop-price { font-size: 21px; }
+.empty-card { min-height: 120px; }
+.empty-state { padding: 28px 16px; }
+.template-empty { padding: 16px; }
+.template-option, .node-mode, .runtime-option { padding: 10px 12px; }
+
+.modal-backdrop { padding: 16px; }
+.action-modal > header, .console-modal > header { padding: 12px 16px; gap: 12px; }
+.action-modal h3 { font-size: 16px; }
+.dialog-form { padding: 16px; }
+.mapping-list { padding: 12px 16px 0; }
+.probe-content, .profile-panel > div { padding: 16px; }
+.console-screen { padding: 6px; }
+
+/* Toasts: outcomes of actions, top right, leaving by themselves */
+.toast-stack { position: fixed; top: 16px; right: 16px; z-index: 90; display: grid; gap: 8px; width: min(360px, calc(100vw - 32px)); pointer-events: none; }
+.toast { pointer-events: auto; display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border: 1px solid var(--border-default); border-left-width: 3px; border-radius: var(--radius-md); background: var(--bg-card); box-shadow: var(--shadow-lg); animation: toast-in 0.18s ease-out; }
+.toast > svg { flex: none; margin-top: 1px; }
+.toast > div { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.toast strong { color: var(--text-primary); font-size: 13.5px; }
+.toast p { margin: 0; color: var(--text-muted); font-size: 12.5px; overflow-wrap: anywhere; }
+.toast button { flex: none; display: grid; place-items: center; width: 22px; height: 22px; border-radius: var(--radius-sm); color: var(--text-muted); }
+.toast button:hover { color: var(--text-primary); background: var(--bg-hover); }
+.toast-success { border-left-color: var(--success); }
+.toast-success > svg { color: var(--success-text); }
+.toast-error { border-left-color: #e11d48; }
+.toast-error > svg { color: var(--danger-text); }
+.toast-info { border-left-color: var(--accent-admin); }
+.toast-info > svg { color: var(--accent-text); }
+@keyframes toast-in { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .toast { animation: none; } }
+/* Cards fill wide screens instead of stopping at three columns. */
+.plan-grid { grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); }
+.shop-grid { grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); }
+.shop-layout.with-order .shop-grid { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }

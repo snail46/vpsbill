@@ -18,6 +18,8 @@
 
 没有浏览器兼容 WebSocket 的后端实现 `Terminal`，由本站终止客户的 WebSocket 并桥接（同一套帧格式：二进制为按键、文本 JSON 为 resize），控制台票据为 HMAC 签名、60 秒有效、绑定服务与类型。
 
+端口映射的协议为 `tcp`、`udp` 或 `both`（TCP+UDP）。实现了 `BothProtocols()` 的驱动（目前是 Hatch）把 `both` 当作一条规则；其他驱动收到客户的 TCP+UDP 请求时，本站在同一公网端口上先建 TCP、再建 UDP 两条规则，UDP 失败就撤回 TCP，客户不会只剩半条映射。
+
 可选能力通过类型断言发现，`provider.CapabilitiesOf` 由同一断言生成能力标志，随客户实例运行时接口返回（`capabilities` 字段），前端据此显示或隐藏操作。
 
 适配器必须遵守：
@@ -36,7 +38,7 @@
 |---|---|---|---|
 | `clicd` | [CLICD](https://cli.cd) `/api/v1`，`X-API-Key` | LXC / KVM | 重装、重置密码、端口映射、监控、WebSSH/VNC、宿主机探针 |
 | `lxdapi` | [xkatld/lxdapi-web-server](https://github.com/xkatld/lxdapi-web-server) 系统接口 `/api/system`，`X-API-Hash` | LXC | 重装、重置密码、端口映射、监控（无历史曲线）、暂停/恢复、WebSSH、IPv6 |
-| `hatch` | 自研 [Hatch Agent](HATCH-AGENT.md)，Agent 主动 WebSocket 连入 | LXC（LXD）/ Podman | 重装、重置密码、端口映射、监控（无历史曲线）、暂停/恢复、WebSSH、IPv6 |
+| `hatch` | 自研 [Hatch Agent](HATCH-AGENT.md)，Agent 主动 WebSocket 连入 | LXC（Incus / LXD）/ Podman | 重装、重置密码、端口映射、监控（无历史曲线）、暂停/恢复、WebSSH、IPv6 |
 
 ### LXDAPI 说明
 

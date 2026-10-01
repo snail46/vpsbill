@@ -31,10 +31,29 @@ import { cycleUnit } from './shared/cycles'
 import ChatRoom from './ChatRoom'
 import { confirmDialog } from './shared/dialog'
 import { PasswordInput } from './shared/password'
-import { bandwidthLabel } from './shared/ui'
+import { bandwidthLabel, statusLabel } from './shared/ui'
+import { toast } from './shared/toast'
 
 // The console (xterm.js and noVNC) is loaded on demand; the detail page
 // fetches it in the background so the first click opens it at once.
+// powerActions describe the start, stop and restart buttons: what the
+// confirmation says and which state means the action is done.
+const powerActions: Record<string, { title: string; message: string; danger?: boolean; done: string; expect: string }> = {
+  start: { title: '开机', message: '实例将启动，通常十几秒后可以登录。', done: '实例已开机', expect: 'running' },
+  stop: {
+    title: '关机',
+    message: '实例将关机，正在运行的程序和连接会中断。关机期间服务照常计费，到期时间不变。',
+    danger: true,
+    done: '实例已关机',
+    expect: 'stopped',
+  },
+  restart: { title: '重启', message: '实例将重启，正在运行的程序和连接会中断，通常一分钟内恢复。', danger: true, done: '实例已重启', expect: 'running' },
+}
+
+// A power action that has not finished after this long is reported as
+// still running rather than watched forever.
+const powerWatchLimit = 3 * 60 * 1000
+
 const loadConsole = () => import('./ServiceConsole')
 const ServiceConsole = lazy(() => loadConsole().then(module => ({ default: module.ServiceConsole })))
 
@@ -103,6 +122,9 @@ function ServiceManager({ service, onReload }: { service: CustomerServiceRecord;
   // the card tracks it until it has seen the instance leave and return to
   // running (or a minute passes).
   const [restart, setRestart] = useState<{ until: number; sawDown: boolean } | null>(null)
+  // The power action the card is waiting on, to tell the customer how it
+  // ended; sawBusy turns true once the pending state has shown up.
+  const [watching, setWatching] = useState<{ action: string; since: number; sawBusy: boolean } | null>(null)
   // The latest reinstall: it runs in the background and the card follows it.
   const [reinstall, setReinstall] = useState<ReinstallRecord | null>(null)
   const reinstalling = reinstall?.status === 'running'
@@ -193,14 +215,27 @@ function ServiceManager({ service, onReload }: { service: CustomerServiceRecord;
   }
 
   const action = async (value: string) => {
+    const spec = powerActions[value]
+    if (spec) {
+      const confirmed = await confirmDialog({
+        title: `确认${spec.title}「${service.instance_name}」？`,
+        message: spec.message,
+        confirmText: `确认${spec.title}`,
+        danger: spec.danger,
+      })
+      if (!confirmed) return
+    }
     setActing(value)
     setError('')
     try {
       await api(`/api/v1/customer/services/${service.id}/actions/${value}`, { method: 'POST' })
       if (value === 'restart') setRestart({ until: Date.now() + 60000, sawDown: false })
+      if (spec) setWatching({ action: value, since: Date.now(), sawBusy: value === 'restart' })
       onReload()
     } catch (err) {
-      setError(err instanceof Error ? err.message : '操作失败')
+      const message = err instanceof Error ? err.message : '操作失败'
+      setError(message)
+      if (spec) toast('error', `${spec.title}失败`, message)
     } finally {
       setActing('')
     }
@@ -225,6 +260,27 @@ function ServiceManager({ service, onReload }: { service: CustomerServiceRecord;
   const liveStatus = (runtime?.container.status || service.runtime_status).toLowerCase()
   const available = usable && !busy
   const formatWhen = (value?: string) => (value ? formatTime(value) : '—')
+
+  useEffect(() => {
+    if (!watching) return
+    const spec = powerActions[watching.action]
+    const age = Date.now() - watching.since
+    if (busy) {
+      if (!watching.sawBusy) setWatching({ ...watching, sawBusy: true })
+      if (age > powerWatchLimit) {
+        setWatching(null)
+        toast('info', `${spec.title}仍在进行`, '节点还在处理，请稍后刷新查看实例状态。')
+      }
+      return
+    }
+    // The list may not show the pending state yet right after the request.
+    if (!watching.sawBusy && age < 15000) return
+    setWatching(null)
+    if (liveStatus === spec.expect) toast('success', spec.done, service.instance_name)
+    else toast('error', `${spec.title}未完成`, service.last_reconcile_error || `实例当前状态：${statusLabel(liveStatus)}`)
+    // runtime is a dependency so each poll re-checks the state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [busy, liveStatus, runtime, watching])
 
   return (
     <article className="service-card enhanced service-manager">

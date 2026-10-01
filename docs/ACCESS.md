@@ -78,7 +78,7 @@ ADMIN_PORT=8081
 
 用 `docker compose` 直接部署预构建镜像（不用 `deploy.sh`）时，在 `.env` 里加上 `PORTAL_BIND=127.0.0.1`、`ADMIN_BIND=127.0.0.1`、`PORTAL_TARGET=7080`、`ADMIN_TARGET=7081`，再 `docker compose up -d`。检查：`docker compose ps` 里 web 的端口应显示为 `127.0.0.1:8080->7080/tcp`、`127.0.0.1:8081->7081/tcp`；如果还是 `->80` / `->81`，就是没有生效。
 
-后台「站点设置」顶部的直连端口提示，在下一个经 Cloudflare 正确转发的请求到达后会自动消失（之前的版本要等 24 小时或重启 API）。
+后台「站点设置」顶部的直连端口提示，在下一个经 Cloudflare 正确转发的请求到达后会自动消失，排查步骤见下文「常见问题」。
 
 ### proxy：自己的反向代理
 
@@ -120,6 +120,26 @@ Web 容器的 nginx 在返回页面时，通过 SSI 把 `/api/v1/boot`（站点�
 | caddy | `PORTAL_BIND=127.0.0.1`、`ADMIN_BIND=127.0.0.1`、`PORTAL_TARGET=7080`、`ADMIN_TARGET=7081` | `docker compose --profile tls up -d` |
 | cloudflare | 同上 | `docker compose --profile tunnel up -d` |
 | proxy | 同上 | `docker compose up -d` |
+
+## 常见问题
+
+### 后台提示「检测到经 Cloudflare 转发的请求进入了直连端口」
+
+意思是：有请求带着 Cloudflare 的 `CF-Connecting-IP` 头，却进了直连端口（Web 容器的 80 / 81）。直连端口不信任转发头，所以所有访客都被记成内网地址：登录限流按同一个 IP 计算、互相影响，审计日志和登录记录看不到真实 IP。按 cloudflared 装在哪里处理：
+
+| cloudflared 在哪 | `.env` | 隧道 Public Hostname 的服务地址 |
+|---|---|---|
+| Docker 里，由 `deploy.sh` 启动 | `ACCESS_MODE=cloudflare` + `CLOUDFLARE_TUNNEL_TOKEN` | `http://web:7080`（前台）、`http://web:7081`（后台） |
+| 宿主机上（Linux 的 systemd 服务、Mac 的 Homebrew / 安装包，包括 OrbStack、Docker Desktop 跑计费站的情况） | `ACCESS_MODE=proxy`（不要用 `cloudflare`，否则会多起一个 cloudflared 容器抢同一条隧道） | `http://localhost:8080`、`http://localhost:8081`（即 `PORTAL_PORT`、`ADMIN_PORT`） |
+| 同一 Docker 网络里自己起的 cloudflared 容器 | 任意 | `http://web:7080`、`http://web:7081` |
+
+改完 `.env` 后重新运行 `./deploy.sh`。不用 `deploy.sh`、直接 `docker compose` 部署时，在 `.env` 里写上 `PORTAL_BIND=127.0.0.1`、`ADMIN_BIND=127.0.0.1`、`PORTAL_TARGET=7080`、`ADMIN_TARGET=7081` 再 `docker compose up -d`。
+
+确认是否生效：
+
+1. `docker compose ps` 里 web 的端口应为 `127.0.0.1:8080->7080/tcp`、`127.0.0.1:8081->7081/tcp`；还是 `->80`、`->81` 就说明 `.env` 没生效。
+2. 在 Cloudflare 后台核对隧道的服务地址，注意前台、后台两条都要改；多个连接器（connector）连着同一条隧道时，每个连接器所在的机器都要能访问这个地址。
+3. 打开一次前台和后台页面。下一个经 Cloudflare 正确转发的请求到达时，提示自动消失（2026-10-01 之前的版本要等 24 小时或重启 API 才消失）。后台「审计日志」里新的记录应显示访客的公网 IP。
 
 ## 从旧版本升级
 

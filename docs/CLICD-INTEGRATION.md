@@ -42,6 +42,8 @@
 | `POST` | `/api/v1/ssh-ticket`、`/api/v1/vnc-ticket` | 60 秒一次性控制台票据 |
 | `DELETE` | `/api/v1/containers/{id-or-name}/delete` | 欠费延期删除 |
 
+客户选 TCP+UDP 协议的端口映射时，本系统在同一公网端口上分别创建一条 TCP 和一条 UDP 映射（CLICD 的每条映射只有一种协议）。
+
 电源操作由 CLICD 异步执行。本系统收到任务后仅记录“期望状态”，最终运行状态由定时对账确认。
 
 创建实例默认使用 CLICD 的 `auto_password` 模式，由节点生成初始 SSH 密码，避免声明自定义密码却未提供 `ssh_password`。确定性的 4xx 参数错误会直接进入任务错误信息；只有超时、网络中断和服务端错误等结果不确定的情况才按实例名对账。

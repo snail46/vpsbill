@@ -70,6 +70,25 @@ chmod +x deploy.sh backup.sh restore.sh rotate-key.sh
 
 脚本停止 API，在单个数据库事务中重新加密全部 CLICD API Key、服务 root 密码、已启用及待确认的 TOTP 密钥，以及安装页保存的支付、通知和 Metrics 密钥；任一记录解密失败则整体回滚。成功后原子替换 `.env` 并重建 API 容器。
 
+## 更新
+
+镜像部署：
+
+```sh
+cd /opt/vpsbill
+curl -fsSL -o docker-compose.yml https://raw.githubusercontent.com/snail46/vpsbill/main/deploy/docker-compose.image.yml
+docker compose up -d --pull always
+```
+
+先更新编排文件（新版本可能加了卷，例如数据备份用的 `backups`），`.env` 不受影响。API 启动时自动执行数据库迁移。固定了 `IMAGE_TAG=sha-...` 的，先备份，再改成新的提交标签。源码部署运行 `./deploy.sh`。
+
+Hatch Agent 随站点自动升级，例外情况见 [全新服务器部署教程](DEPLOYMENT.md)「日常运维」。
+
+## 常见问题
+
+- 后台「站点设置」提示「检测到经 Cloudflare 转发的请求进入了直连端口」：见 [访问方式](ACCESS.md#常见问题)。cloudflared 装在宿主机上（例如 Mac mini 上的 OrbStack 部署）时用 `ACCESS_MODE=proxy`，隧道指向 `localhost:8080` / `localhost:8081`。
+- 页面提示「备份目录没有挂载持久卷」：编排文件是旧版，按上文「更新」重新下载。
+
 ## 日常检查
 
 - `/health/live`：进程存活。
