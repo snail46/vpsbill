@@ -2,7 +2,7 @@ import { FormEvent, useEffect, useState } from 'react'
 import { api, cached, CustomerCatalogRecord, CustomerIdentity, OrderRecord, PaymentIntentRecord } from '../api'
 import { osOptions } from '../shared/nav'
 import { CouponField } from '../Coupons'
-import { cycleLabel, money , bandwidthLabel } from '../shared/ui'
+import { cycleLabel, money, bandwidthLabel } from '../shared/ui'
 import { cycleOrder, priceLeft } from '../shared/cycles'
 import { stockLeft, StockTag } from '../shared/stock'
 
@@ -16,6 +16,7 @@ function cardPrice<T extends { currency: string; billing_cycle: string }>(prices
 export function CustomerShop({ customer }: { customer: CustomerIdentity }) {
   const [catalog, setCatalog] = useState<CustomerCatalogRecord | null>(() => cached<CustomerCatalogRecord>('/api/v1/customer/catalog') ?? null)
   const [selectedID, setSelectedID] = useState('')
+  const [categoryID, setCategoryID] = useState<string | null>(null)
   const [cycle, setCycle] = useState('monthly')
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
@@ -29,7 +30,9 @@ export function CustomerShop({ customer }: { customer: CustomerIdentity }) {
       .then(value => {
         for (const plan of value.plans) plan.prices.sort((a, b) => cycleOrder(a.billing_cycle) - cycleOrder(b.billing_cycle))
         setCatalog(value)
-        const first = value.plans.find(plan => plan.prices.some(price => price.currency === customer.default_currency))
+        const usable = value.plans.filter(plan => plan.prices.some(price => price.currency === customer.default_currency))
+        // Start in the first category that has something to sell.
+        const first = (value.categories ?? []).map(category => usable.find(plan => plan.category_id === category.id)).find(Boolean) ?? usable[0]
         if (first) {
           setSelectedID(first.id)
           const price = cardPrice(first.prices, customer.default_currency)
@@ -39,10 +42,34 @@ export function CustomerShop({ customer }: { customer: CustomerIdentity }) {
       .catch(err => setError(err.message))
   }, [customer.default_currency])
 
-  const plans = (catalog?.plans || []).filter(plan =>
+  const sellable = (catalog?.plans || []).filter(plan =>
     plan.prices.some(price => price.currency === customer.default_currency)
   )
+  // Plans are shown by category; plans outside every category go under
+  // "其他" once there are categories at all.
+  const categories = (catalog?.categories ?? []).filter(category => sellable.some(plan => plan.category_id === category.id))
+  const groups = [
+    ...categories.map(category => ({ id: category.id, name: category.name, description: category.description })),
+    ...(categories.length && sellable.some(plan => !categories.some(category => category.id === plan.category_id))
+      ? [{ id: '', name: '其他', description: '' }]
+      : []),
+  ]
+  const activeGroup = groups.find(group => group.id === (categoryID ?? sellable.find(plan => plan.id === selectedID)?.category_id ?? groups[0]?.id)) ?? groups[0]
+  const inGroup = (plan: { category_id?: string }) =>
+    !activeGroup || (activeGroup.id ? plan.category_id === activeGroup.id : !categories.some(category => category.id === plan.category_id))
+  const plans = sellable.filter(inGroup)
   const selected = plans.find(plan => plan.id === selectedID)
+  // A plan sells where its nodes are; one limited to some nodes offers only
+  // their regions.
+  const regions = (catalog?.regions ?? []).filter(region =>
+    selected?.region_ids?.length ? selected.region_ids.includes(region.id) : selected?.node_selection !== 'nodes'
+  )
+
+  function chooseGroup(id: string) {
+    setCategoryID(id)
+    const first = sellable.find(plan => (id ? plan.category_id === id : !categories.some(category => category.id === plan.category_id)))
+    if (first) setSelectedID(first.id)
+  }
   const prices = selected?.prices.filter(price => price.currency === customer.default_currency) || []
 
   useEffect(() => {
@@ -111,6 +138,30 @@ export function CustomerShop({ customer }: { customer: CustomerIdentity }) {
 
       {error && <div className="form-error">{error}</div>}
 
+      {groups.length > 1 && (
+        <div className="filter-chips shop-categories" role="tablist">
+          {groups.map(group => (
+            <button
+              type="button"
+              role="tab"
+              key={group.id || 'other'}
+              aria-selected={activeGroup?.id === group.id}
+              className={activeGroup?.id === group.id ? 'chip-button active' : 'chip-button'}
+              onClick={() => chooseGroup(group.id)}
+            >
+              {group.name}
+              <small>{sellable.filter(plan => (group.id ? plan.category_id === group.id : !categories.some(category => category.id === plan.category_id))).length}</small>
+            </button>
+          ))}
+        </div>
+      )}
+      {activeGroup && (activeGroup.description || groups.length === 1) && (
+        <div className="shop-category-intro">
+          {groups.length === 1 && <strong>{activeGroup.name}</strong>}
+          {activeGroup.description && <p>{activeGroup.description}</p>}
+        </div>
+      )}
+
       <div className="shop-grid">
         {plans.map(plan => {
           const price = cardPrice(plan.prices, customer.default_currency)
@@ -157,8 +208,9 @@ export function CustomerShop({ customer }: { customer: CustomerIdentity }) {
           <div className="form-grid">
             <label>
               <span>部署地域</span>
-              <select name="region_id" required>
-                {catalog?.regions.map(region => (
+              <select key={selected.id} name="region_id" required>
+                {!regions.length && <option value="">该套餐暂无可售地域</option>}
+                {regions.map(region => (
                   <option key={region.id} value={region.id}>
                     {region.name}
                   </option>
@@ -201,7 +253,7 @@ export function CustomerShop({ customer }: { customer: CustomerIdentity }) {
               </strong>
             </div>
             <div className="form-actions wide">
-              <button className="primary-button compact" disabled={saving || !catalog?.regions.length || stockLeft(selected) === 0}>
+              <button className="primary-button compact" disabled={saving || !regions.length || stockLeft(selected) === 0}>
                 {saving ? '正在生成订单…' : '立即下单'}
               </button>
             </div>

@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"sort"
 	"strings"
@@ -346,36 +347,176 @@ func (a *adminCatalog) createPlan(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &input) {
 		return
 	}
-	// Hosted plans are created by their owners in the hosting center.
-	input.OwnerAccountID, input.NodeID = "", ""
-	if input.ProviderType = strings.TrimSpace(input.ProviderType); input.ProviderType == "" {
-		input.ProviderType = "clicd"
-	}
-	if message := validatePlan(input); message != "" {
-		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "validation_error", "message": message})
+	a.savePlans(w, r, []postgres.Plan{input}, false)
+}
+
+func (a *adminCatalog) replacePlan(w http.ResponseWriter, r *http.Request) {
+	var input postgres.Plan
+	if !decodeJSON(w, r, &input) {
 		return
 	}
-	input.DefaultTemplateID = strings.TrimSpace(input.DefaultTemplateID)
-	for index := range input.AllowedTemplateIDs {
-		input.AllowedTemplateIDs[index] = strings.TrimSpace(input.AllowedTemplateIDs[index])
+	input.ID = r.PathValue("id")
+	a.savePlans(w, r, []postgres.Plan{input}, true)
+}
+
+// createPlans and replacePlans save a series of plans at once: all of
+// them or, when one is refused, none.
+func (a *adminCatalog) createPlans(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		Plans []postgres.Plan `json:"plans"`
 	}
-	if message := validatePriceLimits(input.Prices); message != "" {
-		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "validation_error", "message": message})
+	if !decodeJSON(w, r, &input) {
 		return
 	}
-	if message, err := checkPlanStock(r.Context(), a.store, input, ""); err != nil {
+	a.savePlans(w, r, input.Plans, false)
+}
+
+func (a *adminCatalog) replacePlans(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		Plans []postgres.Plan `json:"plans"`
+	}
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	a.savePlans(w, r, input.Plans, true)
+}
+
+const maxPlanBatch = 100
+
+func (a *adminCatalog) savePlans(w http.ResponseWriter, r *http.Request, plans []postgres.Plan, replace bool) {
+	single := !strings.HasSuffix(r.URL.Path, "/batch")
+	if len(plans) == 0 || len(plans) > maxPlanBatch {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "validation_error", "message": fmt.Sprintf("一次需保存 1-%d 个套餐", maxPlanBatch)})
+		return
+	}
+	nodes, err := a.store.ListNodes(r.Context())
+	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "internal_error"})
 		return
-	} else if message != "" {
-		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "stock_exceeded", "message": message})
+	}
+	label := func(index int) string {
+		if single {
+			return ""
+		}
+		name := strings.TrimSpace(plans[index].Name)
+		if name == "" {
+			name = strings.TrimSpace(plans[index].Code)
+		}
+		return fmt.Sprintf("第 %d 个套餐（%s）：", index+1, name)
+	}
+	codes := map[string]int{}
+	for index := range plans {
+		plan := &plans[index]
+		// Hosted plans are created by their owners in the hosting center.
+		plan.OwnerAccountID, plan.NodeID = "", ""
+		if replace && !uuidPattern.MatchString(plan.ID) {
+			writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "validation_error", "message": label(index) + "缺少套餐 ID"})
+			return
+		}
+		if message := preparePlan(plan, nodes); message != "" {
+			writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "validation_error", "message": label(index) + message})
+			return
+		}
+		code := strings.ToUpper(strings.TrimSpace(plan.Code))
+		if previous, seen := codes[code]; seen {
+			writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "validation_error", "message": fmt.Sprintf("%s套餐编码与第 %d 个重复", label(index), previous+1)})
+			return
+		}
+		codes[code] = index
+	}
+	var saved []postgres.Plan
+	if replace {
+		saved, err = a.store.UpdatePlans(r.Context(), plans, checkPlanStock)
+	} else {
+		saved, err = a.store.CreatePlans(r.Context(), plans, checkPlanStock)
+	}
+	var batchErr *postgres.PlanBatchError
+	switch {
+	case errors.As(err, &batchErr):
+		code := "plan_save_failed"
+		if strings.HasPrefix(batchErr.Message, "库存") {
+			code = "stock_exceeded"
+		}
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": code, "message": label(batchErr.Index) + batchErr.Message})
+		return
+	case err != nil:
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "internal_error"})
 		return
 	}
-	plan, err := a.store.CreatePlan(r.Context(), input)
-	if err != nil {
-		writeJSON(w, http.StatusConflict, map[string]any{"error": "plan_create_failed", "message": "套餐编码可能已存在或参数无效"})
+	status := http.StatusOK
+	if !replace {
+		status = http.StatusCreated
+	}
+	if single {
+		writeJSON(w, status, map[string]any{"data": saved[0]})
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{"data": plan})
+	writeJSON(w, status, map[string]any{"data": saved})
+}
+
+// preparePlan normalises a platform plan and returns why it is invalid.
+func preparePlan(plan *postgres.Plan, nodes []postgres.Node) string {
+	if plan.ProviderType = strings.TrimSpace(plan.ProviderType); plan.ProviderType == "" {
+		plan.ProviderType = "clicd"
+	}
+	if message := validatePlan(*plan); message != "" {
+		return message
+	}
+	plan.DefaultTemplateID = strings.TrimSpace(plan.DefaultTemplateID)
+	for index := range plan.AllowedTemplateIDs {
+		plan.AllowedTemplateIDs[index] = strings.TrimSpace(plan.AllowedTemplateIDs[index])
+	}
+	if message := validatePriceLimits(plan.Prices); message != "" {
+		return message
+	}
+	if plan.CategoryID = strings.TrimSpace(plan.CategoryID); plan.CategoryID != "" && !uuidPattern.MatchString(plan.CategoryID) {
+		return "套餐分类无效"
+	}
+	return validatePlacement(plan, nodes)
+}
+
+// validatePlacement checks a plan's node selection; a "nodes" plan must
+// list at least one live platform node that runs its provider and
+// virtualization.
+func validatePlacement(plan *postgres.Plan, nodes []postgres.Node) string {
+	if plan.NodeSelection == "" {
+		plan.NodeSelection = "pack"
+	}
+	if !containsString(postgres.NodeSelections, plan.NodeSelection) {
+		return "节点选择方式无效"
+	}
+	if plan.NodeSelection != "nodes" {
+		plan.NodeIDs = []string{}
+		return ""
+	}
+	byID := make(map[string]postgres.Node, len(nodes))
+	for _, node := range nodes {
+		byID[node.ID] = node
+	}
+	ids := make([]string, 0, len(plan.NodeIDs))
+	for _, id := range plan.NodeIDs {
+		id = strings.TrimSpace(id)
+		if containsString(ids, id) {
+			continue
+		}
+		node, ok := byID[id]
+		switch {
+		case !ok || node.OwnerAccountID != "":
+			return "指定的节点不存在或是托管节点"
+		case node.RetiredAt != nil:
+			return "节点 " + node.Name + " 已退役，不能再指定"
+		case node.ProviderType != plan.ProviderType:
+			return "节点 " + node.Name + " 的对接方式与套餐不一致"
+		case !containsString(node.VirtualizationTypes, plan.Virtualization):
+			return "节点 " + node.Name + " 不支持 " + strings.ToUpper(plan.Virtualization) + " 虚拟化"
+		}
+		ids = append(ids, id)
+	}
+	if len(ids) == 0 {
+		return "「指定节点」方式需至少选择一个节点"
+	}
+	plan.NodeIDs = ids
+	return ""
 }
 
 func (a *adminCatalog) updatePlan(w http.ResponseWriter, r *http.Request) {
@@ -394,41 +535,6 @@ func (a *adminCatalog) updatePlan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
-}
-
-func (a *adminCatalog) replacePlan(w http.ResponseWriter, r *http.Request) {
-	var input postgres.Plan
-	if !decodeJSON(w, r, &input) {
-		return
-	}
-	if input.ProviderType = strings.TrimSpace(input.ProviderType); input.ProviderType == "" {
-		input.ProviderType = "clicd"
-	}
-	if message := validatePlan(input); message != "" {
-		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "validation_error", "message": message})
-		return
-	}
-	input.DefaultTemplateID = strings.TrimSpace(input.DefaultTemplateID)
-	for index := range input.AllowedTemplateIDs {
-		input.AllowedTemplateIDs[index] = strings.TrimSpace(input.AllowedTemplateIDs[index])
-	}
-	if message := validatePriceLimits(input.Prices); message != "" {
-		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "validation_error", "message": message})
-		return
-	}
-	if message, err := checkPlanStock(r.Context(), a.store, input, r.PathValue("id")); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "internal_error"})
-		return
-	} else if message != "" {
-		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "stock_exceeded", "message": message})
-		return
-	}
-	plan, err := a.store.UpdatePlan(r.Context(), r.PathValue("id"), input)
-	if err != nil {
-		writeJSON(w, http.StatusConflict, map[string]any{"error": "plan_update_failed", "message": "套餐不存在、编码重复或参数无效"})
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": plan})
 }
 
 // planStockCapacity previews the stock ceiling for a platform plan draft;

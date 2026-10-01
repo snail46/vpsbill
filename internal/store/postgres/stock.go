@@ -93,8 +93,9 @@ type queryer interface {
 
 func planStockCapacity(ctx context.Context, db queryer, plan Plan, excludeID string) (StockCapacity, error) {
 	var result StockCapacity
-	// The nodes the plan sells on: its own node for a hosted plan, or every
-	// platform node of its provider and virtualization.
+	// The nodes the plan sells on: its own node for a hosted plan, the
+	// listed nodes for a "nodes" plan, or every platform node of its
+	// provider and virtualization.
 	poolSQL := `SELECT n.id::text, n.name, n.disk_perf, coalesce(n.machine_id, n.id::text), n.capacity_vcpu, n.capacity_ram_mb, n.capacity_disk_gb,
 		CASE WHEN coalesce(n.traffic_quota_gb,0)=0 THEN NULL ELSE
 		  floor(n.traffic_quota_gb * least(n.overcommit_traffic, coalesce((SELECT max_overcommit_traffic FROM system_settings WHERE singleton=true), n.overcommit_traffic)))::bigint END
@@ -106,6 +107,10 @@ func planStockCapacity(ctx context.Context, db queryer, plan Plan, excludeID str
 	} else {
 		poolSQL += `n.owner_account_id IS NULL AND n.provider_type=$1 AND $2=ANY(n.virtualization_types)`
 		args = []any{plan.ProviderType, plan.Virtualization}
+		if plan.NodeSelection == "nodes" {
+			poolSQL += ` AND n.id::text = ANY($3)`
+			args = append(args, nodeIDsArg(plan.NodeIDs))
+		}
 	}
 	rows, err := db.Query(ctx, poolSQL, args...)
 	if err != nil {
@@ -153,11 +158,19 @@ func planStockCapacity(ctx context.Context, db queryer, plan Plan, excludeID str
 		groupKeys = append(groupKeys, key)
 	}
 
-	// Plans sharing these nodes: hosted plans on any node of the machines,
-	// or the platform plans of the same provider.
+	// Plans sharing these nodes: hosted plans on any node of the machines;
+	// for a "nodes" plan, the platform plans listing a node of the machines;
+	// otherwise the platform plans of the same provider. Instances of plans
+	// outside the scope still count below, by where they were placed.
 	scope := `p.node_id::text IN (SELECT m.id::text FROM nodes m WHERE coalesce(m.machine_id, m.id::text) = ANY($1))`
 	scopeArgs := []any{groupKeys}
-	if plan.NodeID == "" {
+	switch {
+	case plan.NodeID != "":
+	case plan.NodeSelection == "nodes":
+		scope = `p.owner_account_id IS NULL AND p.provider_type=$1 AND p.node_selection='nodes'
+			AND EXISTS (SELECT 1 FROM nodes m WHERE m.id::text = ANY(p.node_ids) AND coalesce(m.machine_id, m.id::text) = ANY($2))`
+		scopeArgs = []any{plan.ProviderType, groupKeys}
+	default:
 		scope = `p.owner_account_id IS NULL AND p.provider_type=$1`
 		scopeArgs = []any{plan.ProviderType}
 	}
@@ -274,10 +287,22 @@ func checkPlanLimits(ctx context.Context, tx pgx.Tx, planID, cycle string, quant
 // PlanStockLimit returns a saved plan's stock (nil when unset or the plan
 // does not exist).
 func (s *CatalogStore) PlanStockLimit(ctx context.Context, id string) (*int, error) {
+	return planStockLimit(ctx, s.db, id)
+}
+
+func planStockLimit(ctx context.Context, db queryer, id string) (*int, error) {
 	var stock *int
-	err := s.db.QueryRow(ctx, `SELECT stock_limit FROM plans WHERE id::text=$1`, id).Scan(&stock)
+	err := db.QueryRow(ctx, `SELECT stock_limit FROM plans WHERE id::text=$1`, id).Scan(&stock)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
 	return stock, err
+}
+
+// nodeIDsArg passes a node list to "= ANY($n)" as text[] even when empty.
+func nodeIDsArg(ids []string) []string {
+	if ids == nil {
+		return []string{}
+	}
+	return ids
 }

@@ -67,6 +67,10 @@ export type NodeRecord = NodeSupply & {
   expires_at?: string
   traffic_quota_gb?: number
   traffic_used_bytes?: number
+  // owner_account_id marks a hosted node; retired nodes take no new
+  // instances.
+  owner_account_id?: string
+  retired_at?: string
 }
 
 export type ProviderOptionField = {
@@ -152,6 +156,33 @@ export type PlanRecord = {
   disk_write_mbps?: number
   disk_read_iops?: number
   disk_write_iops?: number
+  // category_id groups a platform plan ( = uncategorised).
+  category_id?: string
+  // node_selection is how a platform plan picks a node: only node_ids
+  // (nodes), the fullest node that fits (pack) or the emptiest
+  // (spread). region_ids are where the plan can be ordered.
+  node_selection?: NodeSelection
+  node_ids?: string[]
+  region_ids?: string[]
+}
+
+export type NodeSelection = nodes | pack | spread
+
+export type PlanCategoryRecord = {
+  id: string
+  name: string
+  description: string
+  sort_order: number
+  plans: number
+}
+
+// PlanPresetRecord keeps the settings a series of plans shares; the admin
+// plan form defines their shape.
+export type PlanPresetRecord = {
+  id: string
+  name: string
+  settings: Record<string, unknown>
+  updated_at: string
 }
 
 export type StockCapacityRecord = {
@@ -404,6 +435,7 @@ export type CustomerTransactionRecord = {
 export type CustomerCatalogRecord = {
   plans: PlanRecord[]
   regions: RegionRecord[]
+  categories?: PlanCategoryRecord[]
   checkout_enabled: boolean
 }
 

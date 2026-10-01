@@ -1,28 +1,75 @@
-import { FormEvent, useEffect, useState } from 'react'
-import { X } from 'lucide-react'
-import { api, cached, imageLabel, AvailableTemplateRecord, ProviderTypeRecord, PlanRecord } from '../api'
+import { FormEvent, useEffect, useRef, useState } from 'react'
+import { Copy, FolderPlus, Layers, ListChecks, Pencil, Trash2, X } from 'lucide-react'
+import { api, cached, NodeRecord, PlanCategoryRecord, PlanPresetRecord, PlanRecord } from '../api'
 import { CouponManager } from '../Coupons'
-import { PageActions, StatusBadge, cycleLabel } from '../shared/ui'
-import { cycleOrder, CyclePriceFields, readCyclePrices } from '../shared/cycles'
-import { readStock, StockField, StockTag } from '../shared/stock'
-import { DiskIOFields, diskIOText, readDiskIO } from '../shared/diskio'
-import type { StockCapacityRecord } from '../api'
-import { virtualizationLabel } from './Nodes'
+import { PageActions, StatusBadge, bandwidthLabel, cycleLabel } from '../shared/ui'
+import { cycleOrder } from '../shared/cycles'
+import { StockTag } from '../shared/stock'
+import { diskIOText } from '../shared/diskio'
+import { confirmDialog } from '../shared/dialog'
+import { placementText, PlanForm, PlanSeed } from './PlanForm'
+import { PlanBatchEdit } from './PlanBatchEdit'
+
+type FormState = { mode: 'single' | 'batch'; plan: PlanRecord | null; seed: PlanSeed | null; key: number }
+
+// copySeed starts a new plan from a saved one: same settings, a new code,
+// no stock and nothing sold yet.
+function copySeed(plan: PlanRecord): PlanSeed {
+  const { id: _id, stock_held: _held, version: _version, region_ids: _regions, ...rest } = plan
+  return {
+    ...rest,
+    name: `${plan.name}（副本）`,
+    code: `${plan.code}-COPY`,
+    stock_limit: null,
+    enabled: true,
+    prices: plan.prices.map(price => ({ ...price, sold: 0 })),
+  }
+}
 
 export function PlansView() {
   const [plans, setPlans] = useState<PlanRecord[]>(() => cached<PlanRecord[]>('/api/v1/admin/plans') ?? [])
-  const [showForm, setShowForm] = useState(false)
-  const [editing, setEditing] = useState<PlanRecord | null>(null)
+  const [categories, setCategories] = useState<PlanCategoryRecord[]>(() => cached<PlanCategoryRecord[]>('/api/v1/admin/plan-categories') ?? [])
+  const [presets, setPresets] = useState<PlanPresetRecord[]>([])
+  // null when the admin may not read nodes; the node picker says so.
+  const [nodes, setNodes] = useState<NodeRecord[] | null>(() => cached<NodeRecord[]>('/api/v1/admin/nodes') ?? [])
+  const [form, setForm] = useState<FormState | null>(null)
+  const [categoryForm, setCategoryForm] = useState<PlanCategoryRecord | 'new' | null>(null)
+  const [selecting, setSelecting] = useState(false)
+  const [selected, setSelected] = useState<string[]>([])
+  const [batchEdit, setBatchEdit] = useState(false)
   const [error, setError] = useState('')
+  const top = useRef<HTMLDivElement>(null)
 
   const load = () =>
     api<PlanRecord[]>('/api/v1/admin/plans')
       .then(setPlans)
       .catch(err => setError(err.message))
+  const loadCategories = () =>
+    api<PlanCategoryRecord[]>('/api/v1/admin/plan-categories')
+      .then(setCategories)
+      .catch(err => setError(err.message))
+  const loadPresets = () =>
+    api<PlanPresetRecord[]>('/api/v1/admin/plan-presets')
+      .then(setPresets)
+      .catch(err => setError(err.message))
 
   useEffect(() => {
     void load()
+    void loadCategories()
+    void loadPresets()
+    api<NodeRecord[]>('/api/v1/admin/nodes')
+      .then(setNodes)
+      .catch(() => setNodes(null))
   }, [])
+
+  // Forms open above the list; bring them into view.
+  const reveal = () => window.setTimeout(() => top.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0)
+  const openForm = (mode: FormState['mode'], plan: PlanRecord | null = null, seed: PlanSeed | null = null) => {
+    setBatchEdit(false)
+    setCategoryForm(null)
+    setForm(current => ({ mode, plan, seed, key: (current?.key ?? 0) + 1 }))
+    reveal()
+  }
 
   async function toggle(plan: PlanRecord) {
     try {
@@ -36,9 +83,34 @@ export function PlansView() {
     }
   }
 
-  const closeForm = () => {
-    setShowForm(false)
-    setEditing(null)
+  async function removeCategory(category: PlanCategoryRecord) {
+    const confirmed = await confirmDialog({
+      title: `删除分类「${category.name}」？`,
+      message: category.plans ? `其下 ${category.plans} 个套餐会变成「未分类」，套餐本身和已售实例都不受影响。` : '该分类下没有套餐。',
+      confirmText: '删除',
+      danger: true,
+    })
+    if (!confirmed) return
+    try {
+      await api(`/api/v1/admin/plan-categories/${category.id}`, { method: 'DELETE' })
+      await Promise.all([loadCategories(), load()])
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '删除分类失败')
+    }
+  }
+
+  const known = new Set(categories.map(category => category.id))
+  const groups: { category: PlanCategoryRecord | null; plans: PlanRecord[] }[] = [
+    ...categories.map(category => ({ category, plans: plans.filter(plan => plan.category_id === category.id) })),
+    { category: null, plans: plans.filter(plan => !plan.category_id || !known.has(plan.category_id)) },
+  ].filter(group => group.category || group.plans.length || !categories.length)
+
+  const chosen = plans.filter(plan => selected.includes(plan.id))
+  const toggleSelected = (id: string, checked: boolean) => setSelected(state => (checked ? [...new Set([...state, id])] : state.filter(item => item !== id)))
+  const stopSelecting = () => {
+    setSelecting(false)
+    setSelected([])
+    setBatchEdit(false)
   }
 
   return (
@@ -46,92 +118,221 @@ export function PlansView() {
       <PageActions
         eyebrow="PRODUCT CATALOG"
         title="商品套餐管理"
-        description="网络策略与模板随套餐统一下发，套餐修改将自增版本号且不影响历史订单明细。"
-        action={() => {
-          setEditing(null)
-          setShowForm(true)
-        }}
+        description="套餐按分类展示给客户；网络策略与模板随套餐统一下发，套餐修改将自增版本号且不影响历史订单明细。"
+        action={() => openForm('single')}
         actionLabel="创建新套餐"
       />
 
+      <div className="plan-toolbar">
+        <button className="secondary-button compact" onClick={() => openForm('batch')}>
+          <Layers size={15} />
+          批量创建
+        </button>
+        <button
+          className="secondary-button compact"
+          onClick={() => {
+            setForm(null)
+            setCategoryForm('new')
+            reveal()
+          }}
+        >
+          <FolderPlus size={15} />
+          新建分类
+        </button>
+        <button className={selecting ? 'secondary-button compact active' : 'secondary-button compact'} onClick={() => (selecting ? stopSelecting() : setSelecting(true))}>
+          <ListChecks size={15} />
+          {selecting ? '退出批量修改' : '批量修改'}
+        </button>
+      </div>
+
       {error && <div className="form-error">{error}</div>}
 
-      {showForm && (
-        <PlanForm
-          plan={editing}
-          onClose={closeForm}
+      <div ref={top} />
+      {categoryForm && (
+        <CategoryForm
+          category={categoryForm === 'new' ? null : categoryForm}
+          onClose={() => setCategoryForm(null)}
           onSaved={() => {
-            closeForm()
-            load()
+            setCategoryForm(null)
+            loadCategories()
           }}
         />
       )}
 
-      <div className="plan-grid">
-        {plans.map(plan => (
-          <article className={plan.enabled ? 'plan-card' : 'plan-card disabled'} key={plan.id}>
-            <div className="plan-card-top">
-              <span className="tag">{plan.provider_type.toUpperCase()} · {plan.virtualization.toUpperCase()}</span>
-              <StatusBadge status={plan.enabled ? 'online' : 'disabled'} />
-            </div>
-            <h3>{plan.name}</h3>
-            <small>
-              {plan.code} · 版本 v{plan.version}
-            </small>
+      {form && (
+        <PlanForm
+          key={form.key}
+          plan={form.plan}
+          seed={form.seed}
+          batch={form.mode === 'batch'}
+          categories={categories}
+          presets={presets}
+          nodes={nodes}
+          onPresetsChanged={loadPresets}
+          onClose={() => setForm(null)}
+          onSaved={() => {
+            setForm(null)
+            load()
+            loadCategories()
+          }}
+        />
+      )}
 
-            <div className="spec-line">
-              <strong>{plan.vcpu}</strong> vCPU
-              <strong>{plan.ram_mb}</strong> MB
-              <strong>{plan.disk_gb}</strong> GB
-            </div>
+      {selecting && (
+        <div className="plan-select-bar">
+          <span>已选 {selected.length} 个套餐</span>
+          <button className="secondary-button compact" onClick={() => setSelected(plans.map(plan => plan.id))}>全选</button>
+          <button className="secondary-button compact" disabled={!selected.length} onClick={() => setSelected([])}>清空</button>
+          <button
+            className="primary-button compact"
+            disabled={!selected.length}
+            onClick={() => {
+              setForm(null)
+              setBatchEdit(true)
+              reveal()
+            }}
+          >
+            修改所选套餐
+          </button>
+        </div>
+      )}
 
-            <small>默认镜像：{plan.default_template_id}</small>
-            {diskIOText(plan) && <small>{diskIOText(plan)}</small>}
-            <small className="plan-network">
-              网络：
-              {[
-                plan.assign_nat && `NAT×${plan.port_mapping_count}`,
-                plan.assign_ipv4 && `IPv4×${plan.ipv4_count}`,
-                plan.assign_ipv6 && `IPv6×${plan.ipv6_count}`,
-              ]
-                .filter(Boolean)
-                .join(' / ')}
-            </small>
+      {batchEdit && chosen.length > 0 && (
+        <PlanBatchEdit
+          plans={chosen}
+          categories={categories}
+          nodes={nodes}
+          onClose={() => setBatchEdit(false)}
+          onSaved={() => {
+            stopSelecting()
+            load()
+            loadCategories()
+          }}
+        />
+      )}
 
-            <StockTag plan={plan} />
-            <div className="price-line">
-              {plan.prices.length ? (
-                [...plan.prices]
-                  .sort((a, b) => cycleOrder(a.billing_cycle) - cycleOrder(b.billing_cycle))
-                  .map(price => (
-                    <span key={price.billing_cycle} className="price-chip">
-                      <strong>¥{(price.amount_minor / 100).toFixed(2)}</strong>
-                      <span>/ {cycleLabel(price.billing_cycle)}</span>
-                    </span>
-                  ))
-              ) : (
-                '暂无报价'
-              )}
+      {groups.map(({ category, plans: items }) => (
+        <section className="plan-group" key={category?.id ?? 'none'}>
+          {(category || categories.length > 0) && (
+            <div className="plan-group-head">
+              <div>
+                <h3>
+                  {category ? category.name : '未分类'}
+                  <span className="count">{items.length}</span>
+                </h3>
+                {category?.description && <p>{category.description}</p>}
+                {!category && <p>不属于任何分类的套餐，客户在商店的「其他」里看到它们。</p>}
+              </div>
+              <div className="plan-group-actions">
+                {selecting && items.length > 0 && (
+                  <button className="secondary-button compact" onClick={() => setSelected(state => [...new Set([...state, ...items.map(plan => plan.id)])])}>
+                    选中本组
+                  </button>
+                )}
+                {category && (
+                  <>
+                    <button
+                      className="icon-button"
+                      title="编辑分类"
+                      aria-label="编辑分类"
+                      onClick={() => {
+                        setForm(null)
+                        setCategoryForm(category)
+                        reveal()
+                      }}
+                    >
+                      <Pencil size={15} />
+                    </button>
+                    <button className="icon-button" title="删除分类" aria-label="删除分类" onClick={() => removeCategory(category)}>
+                      <Trash2 size={15} />
+                    </button>
+                  </>
+                )}
+              </div>
             </div>
+          )}
+          <div className="plan-grid">
+            {items.map(plan => (
+              <article className={['plan-card', !plan.enabled && 'disabled', selected.includes(plan.id) && 'selected'].filter(Boolean).join(' ')} key={plan.id}>
+                <div className="plan-card-top">
+                  <span className="tag">{plan.provider_type.toUpperCase()} · {plan.virtualization.toUpperCase()}</span>
+                  {selecting ? (
+                    <label className="plan-card-check">
+                      <input type="checkbox" checked={selected.includes(plan.id)} onChange={event => toggleSelected(plan.id, event.target.checked)} />
+                      选择
+                    </label>
+                  ) : (
+                    <StatusBadge status={plan.enabled ? 'online' : 'disabled'} />
+                  )}
+                </div>
+                <h3>{plan.name}</h3>
+                <small>
+                  {plan.code} · 版本 v{plan.version}
+                </small>
 
-            <div className="plan-actions">
-              <button
-                className="secondary-button"
-                onClick={() => {
-                  setEditing(plan)
-                  setShowForm(true)
-                }}
-              >
-                编辑套餐
-              </button>
-              <button className="secondary-button" onClick={() => toggle(plan)}>
-                {plan.enabled ? '下架套餐' : '重新上架'}
-              </button>
-            </div>
-          </article>
-        ))}
-        {!plans.length && <div className="empty-card" style={{ gridColumn: '1 / -1' }}>尚未创建任何商品套餐</div>}
-      </div>
+                <div className="spec-line">
+                  <strong>{plan.vcpu}</strong> vCPU
+                  <strong>{plan.ram_mb}</strong> MB
+                  <strong>{plan.disk_gb}</strong> GB
+                </div>
+
+                <small>默认镜像：{plan.default_template_id}</small>
+                <small className="plan-network">
+                  网络：
+                  {[plan.assign_nat && `NAT×${plan.port_mapping_count}`, plan.assign_ipv4 && `IPv4×${plan.ipv4_count}`, plan.assign_ipv6 && `IPv6×${plan.ipv6_count}`]
+                    .filter(Boolean)
+                    .join(' / ')}
+                  {' · '}
+                  {bandwidthLabel(plan.network_down_mbps)}
+                </small>
+                <small className="plan-network">节点：{placementText(plan, nodes)}</small>
+                {diskIOText(plan) && <small className="plan-network">{diskIOText(plan)}</small>}
+
+                <StockTag plan={plan} />
+                <div className="price-line">
+                  {plan.prices.length
+                    ? [...plan.prices]
+                        .sort((a, b) => cycleOrder(a.billing_cycle) - cycleOrder(b.billing_cycle))
+                        .map(price => (
+                          <span key={price.billing_cycle} className="price-chip">
+                            <strong>¥{(price.amount_minor / 100).toFixed(2)}</strong>
+                            <span>/ {cycleLabel(price.billing_cycle)}</span>
+                          </span>
+                        ))
+                    : '暂无报价'}
+                </div>
+
+                <div className="plan-actions">
+                  <button className="secondary-button" onClick={() => openForm('single', plan)}>
+                    编辑
+                  </button>
+                  <button className="secondary-button" title="以此套餐为基础新建" onClick={() => openForm('single', null, copySeed(plan))}>
+                    <Copy size={14} />
+                    复制
+                  </button>
+                  <button className="secondary-button" onClick={() => toggle(plan)}>
+                    {plan.enabled ? '下架' : '上架'}
+                  </button>
+                </div>
+              </article>
+            ))}
+            {!items.length && (
+              <div className="empty-card" style={{ gridColumn: '1 / -1' }}>
+                {category ? (
+                  <span>
+                    该分类下暂无套餐。
+                    <button className="link-button" onClick={() => openForm('single', null, { category_id: category.id })}>
+                      在此分类新建套餐
+                    </button>
+                  </span>
+                ) : (
+                  '尚未创建任何商品套餐'
+                )}
+              </div>
+            )}
+          </div>
+        </section>
+      ))}
 
       <CouponManager
         endpoint="/api/v1/admin/coupons"
@@ -142,318 +343,58 @@ export function PlansView() {
   )
 }
 
-export function PlanForm({
-  plan,
-  onClose,
-  onSaved,
-}: {
-  plan: PlanRecord | null
-  onClose: () => void
-  onSaved: () => void
-}) {
+function CategoryForm({ category, onClose, onSaved }: { category: PlanCategoryRecord | null; onClose: () => void; onSaved: () => void }) {
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
-  const [templates, setTemplates] = useState<AvailableTemplateRecord[]>([])
-  const [loadingTemplates, setLoadingTemplates] = useState(true)
-
-  const [providers, setProviders] = useState<ProviderTypeRecord[]>(() => cached<ProviderTypeRecord[]>('/api/v1/admin/provider-types') ?? [])
-  const [providerType, setProviderType] = useState(plan?.provider_type || 'hatch')
-  const [virtualization, setVirtualization] = useState<'lxc' | 'kvm' | 'podman'>(plan?.virtualization || 'lxc')
-  const [allowed, setAllowed] = useState<string[]>(plan?.allowed_template_ids || [])
-  const [capacity, setCapacity] = useState<StockCapacityRecord | null>(null)
-  const [defaultTemplate, setDefaultTemplate] = useState(plan?.default_template_id || '')
-
-  useEffect(() => {
-    api<ProviderTypeRecord[]>('/api/v1/admin/provider-types').then(setProviders).catch(err => setError(err.message))
-  }, [])
-
-  useEffect(() => {
-    api<AvailableTemplateRecord[]>('/api/v1/admin/templates')
-      .then(setTemplates)
-      .catch(err => setError(err.message))
-      .finally(() => setLoadingTemplates(false))
-  }, [])
-
-  const descriptor = providers.find(item => item.type === providerType)
-  const virtualizations = (descriptor?.virtualization_types ?? [virtualization]) as Array<'lxc' | 'kvm' | 'podman'>
-  const visibleTemplates = templates.filter(item => item.provider_type === providerType && item.virtualization === virtualization)
-
-  const templateLabel = (id: string) => {
-    const item = templates.find(candidate => candidate.id === id)
-    return item ? imageLabel(item) : id
-  }
-
-  function toggleTemplate(id: string, checked: boolean) {
-    const next = checked ? [...new Set([...allowed, id])] : allowed.filter(item => item !== id)
-    setAllowed(next)
-    if (!next.includes(defaultTemplate)) setDefaultTemplate(next[0] || '')
-  }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!allowed.length || !defaultTemplate) {
-      setError('请至少勾选一个可用操作系统模板并指定默认模板')
-      return
-    }
     const data = new FormData(event.currentTarget)
-    const { prices, limits, error: priceError } = readCyclePrices(data)
-    if (priceError) {
-      setError(priceError)
-      return
-    }
     setSaving(true)
     setError('')
-    const body = {
-      code: data.get('code'),
-      name: data.get('name'),
-      provider_type: providerType,
-      virtualization,
-      vcpu: Number(data.get('vcpu')),
-      ram_mb: Number(data.get('ram_mb')),
-      disk_gb: Number(data.get('disk_gb')),
-      traffic_gb: Number(data.get('traffic_gb')),
-      network_down_mbps: Number(data.get('network_down_mbps')),
-      network_up_mbps: Number(data.get('network_up_mbps')),
-      snapshot_limit: Number(data.get('snapshot_limit')),
-      assign_nat: data.get('assign_nat') === 'on',
-      port_mapping_count: Number(data.get('port_mapping_count')),
-      assign_ipv4: data.get('assign_ipv4') === 'on',
-      ipv4_count: Number(data.get('ipv4_count')),
-      assign_ipv6: data.get('assign_ipv6') === 'on',
-      ipv6_count: Number(data.get('ipv6_count')),
-      default_template_id: defaultTemplate,
-      allowed_template_ids: allowed,
-      enabled: plan?.enabled ?? true,
-      prices: Object.entries(prices).map(([billing_cycle, amount_minor]) => ({
-        currency: 'CNY',
-        billing_cycle,
-        amount_minor,
-        setup_fee_minor: 0,
-        purchase_limit: limits[billing_cycle] ?? null,
-      })),
-      stock_limit: readStock(data),
-      ...readDiskIO(data),
-    }
     try {
-      await api(plan ? `/api/v1/admin/plans/${plan.id}` : '/api/v1/admin/plans', {
-        method: plan ? 'PUT' : 'POST',
-        body: JSON.stringify(body),
+      await api(category ? `/api/v1/admin/plan-categories/${category.id}` : '/api/v1/admin/plan-categories', {
+        method: category ? 'PUT' : 'POST',
+        body: JSON.stringify({
+          name: String(data.get('name') ?? '').trim(),
+          description: String(data.get('description') ?? '').trim(),
+          sort_order: Number(data.get('sort_order') || 0),
+        }),
       })
       onSaved()
     } catch (err) {
-      setError(err instanceof Error ? err.message : '保存失败')
+      setError(err instanceof Error ? err.message : '保存分类失败')
     } finally {
       setSaving(false)
     }
   }
 
-
   return (
     <div className="inline-form">
       <div className="inline-form-heading">
         <div>
-          <h3>{plan ? '编辑' : '创建'} VPS 商品套餐</h3>
-          <p>套餐绑定一种对接方式，只会调度到该方式的节点；可用模板从这些在线节点读取，网络分配策略统一下发给实例。</p>
+          <h3>{category ? '编辑商品分类' : '新建商品分类'}</h3>
+          <p>客户在商店按分类浏览套餐，描述会显示在分类下方。排序值小的排在前面。</p>
         </div>
-        <button className="icon-button" onClick={onClose}><X size={18} /></button>
+        <button className="icon-button" onClick={onClose} aria-label="关闭"><X size={18} /></button>
       </div>
-
       <form className="form-grid" onSubmit={submit}>
         <label>
-          <span>套餐唯一编码</span>
-          <input name="code" required placeholder="LXC-START" defaultValue={plan?.code} />
+          <span>分类名称</span>
+          <input name="name" required maxLength={60} placeholder="如：香港 NAT" defaultValue={category?.name} />
         </label>
         <label>
-          <span>套餐展示名称</span>
-          <input name="name" required placeholder="轻量入门型" defaultValue={plan?.name} />
+          <span>排序</span>
+          <input name="sort_order" type="number" min="-10000" max="10000" step="1" defaultValue={category?.sort_order ?? 0} />
         </label>
-        <label>
-          <span>对接方式</span>
-          <select
-            name="provider_type"
-            value={providerType}
-            disabled={!!plan}
-            onChange={event => {
-              const next = providers.find(item => item.type === event.target.value)
-              setProviderType(event.target.value)
-              setVirtualization((next?.virtualization_types[0] ?? 'lxc') as 'lxc' | 'kvm' | 'podman')
-              setAllowed([])
-              setDefaultTemplate('')
-            }}
-          >
-            {providers.map(item => <option key={item.type} value={item.type}>{item.name}</option>)}
-          </select>
-        </label>
-        <label>
-          <span>底层虚拟化</span>
-          <select
-            name="virtualization"
-            value={virtualization}
-            onChange={event => {
-              const value = event.target.value as 'lxc' | 'kvm' | 'podman'
-              setVirtualization(value)
-              setAllowed([])
-              setDefaultTemplate('')
-            }}
-          >
-            {virtualizations.map(kind => <option key={kind} value={kind}>{virtualizationLabel(kind)}</option>)}
-          </select>
-        </label>
-        <label>
-          <span>vCPU 核心</span>
-          <input name="vcpu" type="number" min="1" defaultValue={plan?.vcpu || 1} required />
-        </label>
-        <label>
-          <span>内存容量 MB</span>
-          <input name="ram_mb" type="number" min="64" defaultValue={plan?.ram_mb || 512} required />
-        </label>
-        <label>
-          <span>磁盘空间 GB</span>
-          <input name="disk_gb" type="number" min="1" defaultValue={plan?.disk_gb || 10} required />
-        </label>
-        <label>
-          <span>月度流量 GB</span>
-          <input name="traffic_gb" type="number" min="0" defaultValue={plan?.traffic_gb ?? 1024} />
-        </label>
-        <label>
-          <span>下行带宽 Mbps</span>
-          <input name="network_down_mbps" type="number" min="0" defaultValue={plan?.network_down_mbps ?? 100} />
-        </label>
-        <label>
-          <span>上行带宽 Mbps</span>
-          <input name="network_up_mbps" type="number" min="0" defaultValue={plan?.network_up_mbps ?? 100} />
-        </label>
-        <label>
-          <span>快照配额</span>
-          <input name="snapshot_limit" type="number" min="0" defaultValue={plan?.snapshot_limit ?? 1} />
-        </label>
-        <CyclePriceFields prices={plan?.prices ?? (plan ? [] : [{ billing_cycle: 'monthly', amount_minor: 1900 }])} />
-        <StockField
-          plan={plan ?? undefined}
-          preview={form => {
-            const data = new FormData(form)
-            return api<StockCapacityRecord>('/api/v1/admin/plans/stock-capacity', {
-              method: 'POST',
-              body: JSON.stringify({
-                id: plan?.id ?? '',
-                provider_type: data.get('provider_type') || providerType,
-                virtualization: data.get('virtualization') || virtualization,
-                vcpu: Number(data.get('vcpu')),
-                ram_mb: Number(data.get('ram_mb')),
-                disk_gb: Number(data.get('disk_gb')),
-                traffic_gb: Number(data.get('traffic_gb')),
-              }),
-            })
-          }}
-          onCapacity={setCapacity}
-        />
-        {providerType === 'hatch' && <DiskIOFields plan={plan ?? undefined} capacity={capacity} />}
-
-        <fieldset className="wide network-policy">
-          <legend>网络策略配置</legend>
-          <label className="checkbox">
-            <input name="assign_nat" type="checkbox" defaultChecked={plan?.assign_nat ?? true} />
-            分配 NAT 共享 IPv4
-          </label>
-          <label>
-            <span>NAT 端口映射配额</span>
-            <input
-              name="port_mapping_count"
-              type="number"
-              min="0"
-              max="64"
-              defaultValue={plan?.port_mapping_count ?? 0}
-            />
-          </label>
-          <label className="checkbox">
-            <input name="assign_ipv4" type="checkbox" defaultChecked={plan?.assign_ipv4 ?? false} />
-            分配独立公网 IPv4
-          </label>
-          <label>
-            <span>公网 IPv4 数量</span>
-            <input name="ipv4_count" type="number" min="1" max="64" defaultValue={plan?.ipv4_count ?? 1} />
-          </label>
-          <label className="checkbox">
-            <input name="assign_ipv6" type="checkbox" defaultChecked={plan?.assign_ipv6 ?? true} />
-            分配独立 IPv6
-          </label>
-          <label>
-            <span>独立 IPv6 数量</span>
-            <input name="ipv6_count" type="number" min="1" max="64" defaultValue={plan?.ipv6_count ?? 1} />
-          </label>
-        </fieldset>
-
-        <fieldset className="wide">
-          <legend>允许客户选择的系统镜像（动态读取自节点就绪镜像）</legend>
-          {loadingTemplates ? (
-            <div className="template-empty">正在向在线 CLICD 节点检索可用系统镜像…</div>
-          ) : (
-            <div className="template-picker">
-              {visibleTemplates.map(item => (
-                <label
-                  className={allowed.includes(item.id) ? 'template-option selected' : 'template-option'}
-                  key={`${item.virtualization}:${item.id}`}
-                >
-                  <input
-                    type="checkbox"
-                    checked={allowed.includes(item.id)}
-                    onChange={event => toggleTemplate(item.id, event.target.checked)}
-                  />
-                  <span>
-                    <strong>{templateLabel(item.id)}</strong>
-                    <small>{item.description || item.id}</small>
-                    <em>部署节点：{item.node_names.join('、')}</em>
-                  </span>
-                </label>
-              ))}
-              {!visibleTemplates.length && (
-                <div className="template-empty">
-                  在线集群中暂无已启用且已就绪的 {virtualization.toUpperCase()} 系统镜像。
-                </div>
-              )}
-              {plan?.allowed_template_ids
-                .filter(id => !visibleTemplates.some(item => item.id === id))
-                .map(id => (
-                  <label className="template-option unavailable" key={id}>
-                    <input
-                      type="checkbox"
-                      checked={allowed.includes(id)}
-                      onChange={event => toggleTemplate(id, event.target.checked)}
-                    />
-                    <span>
-                      <strong>{id}</strong>
-                      <small>该镜像当前节点未上报，保留后仍可保存供历史实例使用。</small>
-                    </span>
-                  </label>
-                ))}
-            </div>
-          )}
-        </fieldset>
-
         <label className="wide">
-          <span>默认系统镜像</span>
-          <select
-            name="default_template_id"
-            value={defaultTemplate}
-            onChange={event => setDefaultTemplate(event.target.value)}
-            required
-          >
-            <option value="">请先在上方勾选镜像</option>
-            {allowed.map(id => (
-              <option key={id} value={id}>
-                {templateLabel(id)}
-              </option>
-            ))}
-          </select>
+          <span>备注描述</span>
+          <textarea name="description" rows={3} maxLength={500} placeholder="如：CN2 GIA 线路，适合建站和代理" defaultValue={category?.description} />
         </label>
-
         {error && <div className="form-error wide">{error}</div>}
-
         <div className="form-actions wide">
           <button type="button" className="secondary-button" onClick={onClose}>取消</button>
-          <button className="primary-button" disabled={saving}>
-            {saving ? '正在保存…' : plan ? '保存修改' : '创建商品套餐'}
-          </button>
+          <button className="primary-button" disabled={saving}>{saving ? '正在保存…' : category ? '保存分类' : '创建分类'}</button>
         </div>
       </form>
     </div>

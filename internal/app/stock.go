@@ -11,7 +11,7 @@ import (
 // checkPlanStock refuses a stock above what the plan's nodes can hold.
 // Keeping or lowering a saved stock is always allowed, so a smaller oversell
 // ratio does not block unrelated edits. It returns a message for the user.
-func checkPlanStock(ctx context.Context, catalog *postgres.CatalogStore, plan postgres.Plan, existingID string) (string, error) {
+func checkPlanStock(ctx context.Context, catalog postgres.PlanStockSource, plan postgres.Plan, existingID string) (string, error) {
 	if plan.StockLimit == nil {
 		return "", nil
 	}

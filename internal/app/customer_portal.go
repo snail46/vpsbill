@@ -600,9 +600,14 @@ func (p *customerPortal) catalogData(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	available := make([]postgres.Plan, 0)
+	inUse := map[string]bool{}
 	for _, plan := range postgres.PlatformPlans(plans) {
 		if plan.Enabled && len(plan.Prices) > 0 {
+			// Which nodes sell the plan is the operator's business; the
+			// regions it can be ordered in are enough.
+			plan.NodeIDs = nil
 			available = append(available, plan)
+			inUse[plan.CategoryID] = true
 		}
 	}
 	regions, err := p.billing.ListRegions(r.Context())
@@ -610,7 +615,19 @@ func (p *customerPortal) catalogData(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "internal_error"})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": map[string]any{"plans": available, "regions": regions, "checkout_enabled": p.settings.Current().PaymentGateway.Type != "disabled"}})
+	allCategories, err := p.catalog.ListPlanCategories(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "internal_error"})
+		return
+	}
+	categories := make([]postgres.PlanCategory, 0, len(allCategories))
+	for _, category := range allCategories {
+		if inUse[category.ID] {
+			category.Plans = 0
+			categories = append(categories, category)
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": map[string]any{"plans": available, "regions": regions, "categories": categories, "checkout_enabled": p.settings.Current().PaymentGateway.Type != "disabled"}})
 }
 
 func (p *customerPortal) listOrders(w http.ResponseWriter, r *http.Request) {

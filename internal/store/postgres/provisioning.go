@@ -145,7 +145,9 @@ func (s *ProvisioningStore) RecoverStaleJobs(ctx context.Context, staleAfter tim
 
 // ReserveNode serializes assignment through a service row and candidate node
 // lock. Reservations, rather than observed VM state, are the source of truth
-// for available sellable capacity.
+// for available sellable capacity. The plan's node selection limits the
+// candidates ("nodes") and orders them: the fullest node that still fits
+// first, or the emptiest first for "spread".
 func (s *ProvisioningStore) ReserveNode(ctx context.Context, serviceID string, excludedNodeIDs ...string) (string, error) {
 	if excludedNodeIDs == nil {
 		excludedNodeIDs = []string{}
@@ -156,13 +158,15 @@ func (s *ProvisioningStore) ReserveNode(ctx context.Context, serviceID string, e
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	var currentNode *string
-	var regionID, virtualization, providerType, planNode string
+	var regionID, virtualization, providerType, planNode, selection string
 	var vcpu, ramMB, diskGB, trafficGB int
+	var planNodes []string
 	if err := tx.QueryRow(ctx, `
-		SELECT s.node_id, s.region_id, p.virtualization, p.provider_type, p.vcpu, p.ram_mb, p.disk_gb, coalesce(p.node_id::text,''), coalesce(p.traffic_gb,0)
+		SELECT s.node_id, s.region_id, p.virtualization, p.provider_type, p.vcpu, p.ram_mb, p.disk_gb, coalesce(p.node_id::text,''), coalesce(p.traffic_gb,0),
+		       p.node_selection, p.node_ids
 		FROM services s JOIN plans p ON p.id=s.plan_id
 		WHERE s.id=$1 FOR UPDATE OF s
-	`, serviceID).Scan(&currentNode, &regionID, &virtualization, &providerType, &vcpu, &ramMB, &diskGB, &planNode, &trafficGB); err != nil {
+	`, serviceID).Scan(&currentNode, &regionID, &virtualization, &providerType, &vcpu, &ramMB, &diskGB, &planNode, &trafficGB, &selection, &planNodes); err != nil {
 		return "", err
 	}
 	if currentNode != nil {
@@ -174,7 +178,8 @@ func (s *ProvisioningStore) ReserveNode(ctx context.Context, serviceID string, e
 		SELECT n.id
 		FROM nodes n
 		WHERE n.region_id=$1 AND n.status='online' AND $2=ANY(n.virtualization_types) AND n.provider_type=$6 AND NOT (n.id::text = ANY($7::text[]))
-		  AND n.retired_at IS NULL AND (($8='' AND n.owner_account_id IS NULL AND n.health_hold_reason IS NULL) OR n.id::text=$8)
+		  AND n.retired_at IS NULL AND (($8='' AND n.owner_account_id IS NULL AND n.health_hold_reason IS NULL
+		                                AND ($10<>'nodes' OR n.id::text = ANY($11::text[]))) OR n.id::text=$8)
 		  AND ($9=0 OR coalesce(n.traffic_quota_gb,0)=0 OR
 		       coalesce((SELECT sum(tp.traffic_gb) FROM services ts JOIN plans tp ON tp.id=ts.plan_id
 		                 WHERE ts.node_id IN (SELECT m.id FROM nodes m WHERE m.id=n.id OR m.machine_id=n.machine_id)
@@ -183,9 +188,10 @@ func (s *ProvisioningStore) ReserveNode(ctx context.Context, serviceID string, e
 		  AND n.capacity_vcpu - coalesce((SELECT sum(r.vcpu) FROM inventory_reservations r WHERE r.node_id IN (SELECT m.id FROM nodes m WHERE m.id=n.id OR m.machine_id=n.machine_id) AND r.status='reserved'),0) >= $3
 		  AND n.capacity_ram_mb - coalesce((SELECT sum(r.ram_mb) FROM inventory_reservations r WHERE r.node_id IN (SELECT m.id FROM nodes m WHERE m.id=n.id OR m.machine_id=n.machine_id) AND r.status='reserved'),0) >= $4
 		  AND n.capacity_disk_gb - coalesce((SELECT sum(r.disk_gb) FROM inventory_reservations r WHERE r.node_id IN (SELECT m.id FROM nodes m WHERE m.id=n.id OR m.machine_id=n.machine_id) AND r.status='reserved'),0) >= $5
-		ORDER BY n.capacity_ram_mb - coalesce((SELECT sum(r.ram_mb) FROM inventory_reservations r WHERE r.node_id IN (SELECT m.id FROM nodes m WHERE m.id=n.id OR m.machine_id=n.machine_id) AND r.status='reserved'),0)
+		ORDER BY (n.capacity_ram_mb - coalesce((SELECT sum(r.ram_mb) FROM inventory_reservations r WHERE r.node_id IN (SELECT m.id FROM nodes m WHERE m.id=n.id OR m.machine_id=n.machine_id) AND r.status='reserved'),0))
+		         * CASE WHEN $10='spread' THEN -1 ELSE 1 END, n.created_at
 		FOR UPDATE OF n SKIP LOCKED LIMIT 1
-	`, regionID, virtualization, vcpu, ramMB, diskGB, providerType, excludedNodeIDs, planNode, trafficGB).Scan(&nodeID)
+	`, regionID, virtualization, vcpu, ramMB, diskGB, providerType, excludedNodeIDs, planNode, trafficGB, selection, nodeIDsArg(planNodes)).Scan(&nodeID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", ErrNoCapacity
 	}
@@ -221,7 +227,8 @@ func (s *ProvisioningStore) PlacementCandidates(ctx context.Context, serviceID s
 		FROM services s JOIN plans p ON p.id=s.plan_id
 		JOIN nodes n ON n.region_id=s.region_id AND n.status='online'
 		    AND p.virtualization=ANY(n.virtualization_types) AND n.provider_type=p.provider_type
-		    AND n.retired_at IS NULL AND ((p.node_id IS NULL AND n.owner_account_id IS NULL) OR n.id=p.node_id)
+		    AND n.retired_at IS NULL AND ((p.node_id IS NULL AND n.owner_account_id IS NULL
+		                                  AND (p.node_selection<>'nodes' OR n.id::text = ANY(p.node_ids))) OR n.id=p.node_id)
 		WHERE s.id=$1 AND s.node_id IS NULL
 		ORDER BY n.created_at
 	`, serviceID)

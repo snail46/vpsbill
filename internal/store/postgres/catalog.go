@@ -3,10 +3,14 @@ package postgres
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"vpsbill/internal/provider"
@@ -244,12 +248,20 @@ type Plan struct {
 	// StockLimit is how many instances the plan sells in total, live ones
 	// included (nil = only capacity limits it); StockHeld counts live
 	// instances and units in payable orders.
-	StockLimit *int      `json:"stock_limit"`
-	StockHeld  int       `json:"stock_held"`
-	Enabled    bool      `json:"enabled"`
-	Version    int       `json:"version"`
-	Prices     []Price   `json:"prices"`
-	CreatedAt  time.Time `json:"created_at"`
+	StockLimit *int `json:"stock_limit"`
+	StockHeld  int  `json:"stock_held"`
+	// CategoryID groups a platform plan; empty is uncategorised.
+	CategoryID string `json:"category_id"`
+	// NodeSelection is how a platform plan picks a node (see
+	// NodeSelections); NodeIDs are the nodes a "nodes" plan sells on.
+	NodeSelection string   `json:"node_selection"`
+	NodeIDs       []string `json:"node_ids"`
+	// RegionIDs are the regions of the nodes the plan can be placed on.
+	RegionIDs []string  `json:"region_ids"`
+	Enabled   bool      `json:"enabled"`
+	Version   int       `json:"version"`
+	Prices    []Price   `json:"prices"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 func (s *CatalogStore) ListPlans(ctx context.Context) ([]Plan, error) {
@@ -259,7 +271,8 @@ func (s *CatalogStore) ListPlans(ctx context.Context) ([]Plan, error) {
 		       assign_nat, port_mapping_count, assign_ipv4, ipv4_count, assign_ipv6, ipv6_count,
 		       default_template_id, allowed_template_ids, enabled, version, created_at,
 		       coalesce(owner_account_id::text,''), coalesce(node_id::text,''), description, purchase_limit, early_refund,
-		       stock_limit, `+planHeldSQL+`, disk_io
+		       stock_limit, `+planHeldSQL+`, disk_io,
+		       coalesce(category_id::text,''), node_selection, node_ids, `+planRegionsSQL+`
 		FROM plans p ORDER BY created_at DESC
 	`)
 	if err != nil {
@@ -272,7 +285,8 @@ func (s *CatalogStore) ListPlans(ctx context.Context) ([]Plan, error) {
 		if err := rows.Scan(&plan.ID, &plan.Code, &plan.Name, &plan.ProviderType, &plan.Virtualization, &plan.VCPU, &plan.RAMMB, &plan.DiskGB, &plan.TrafficGB, &plan.NetworkDownMbps, &plan.NetworkUpMbps, &plan.SnapshotLimit,
 			&plan.AssignNAT, &plan.PortMappingCount, &plan.AssignIPv4, &plan.IPv4Count, &plan.AssignIPv6, &plan.IPv6Count,
 			&plan.DefaultTemplateID, &plan.AllowedTemplateIDs, &plan.Enabled, &plan.Version, &plan.CreatedAt, &plan.OwnerAccountID, &plan.NodeID, &plan.Description, &plan.PurchaseLimit, &plan.EarlyRefund,
-			&plan.StockLimit, &plan.StockHeld, &plan.DiskIO); err != nil {
+			&plan.StockLimit, &plan.StockHeld, &plan.DiskIO,
+			&plan.CategoryID, &plan.NodeSelection, &plan.NodeIDs, &plan.RegionIDs); err != nil {
 			return nil, err
 		}
 		plan.Prices = []Price{}
@@ -306,23 +320,100 @@ func (s *CatalogStore) ListPlans(ctx context.Context) ([]Plan, error) {
 	return plans, nil
 }
 
+// planRegionsSQL lists the regions of the nodes a plan (as p) can be placed
+// on: a hosted plan's own node, or the platform nodes its node selection
+// allows.
+const planRegionsSQL = `ARRAY(SELECT DISTINCT rn.region_id::text FROM nodes rn WHERE rn.retired_at IS NULL AND (
+		(p.node_id IS NOT NULL AND rn.id=p.node_id) OR
+		(p.node_id IS NULL AND rn.owner_account_id IS NULL AND rn.provider_type=p.provider_type AND p.virtualization=ANY(rn.virtualization_types)
+		 AND (p.node_selection<>'nodes' OR rn.id::text=ANY(p.node_ids)))) ORDER BY 1)`
+
+// NodeSelections are the ways a platform plan picks a node: only the
+// listed nodes, the fullest node that still fits, or the emptiest one.
+var NodeSelections = []string{"nodes", "pack", "spread"}
+
+// PlanStockSource answers the stock questions checkPlanStock asks, either
+// from the pool or inside a transaction that is saving several plans.
+type PlanStockSource interface {
+	PlanStockLimit(ctx context.Context, id string) (*int, error)
+	PlanStockCapacity(ctx context.Context, plan Plan, excludeID string) (StockCapacity, error)
+}
+
+// PlanCheck vets a plan just before it is saved with the plans saved
+// before it in the same batch visible; it returns a message for the user.
+type PlanCheck func(ctx context.Context, stock PlanStockSource, plan Plan, existingID string) (string, error)
+
+// PlanBatchError reports which plan of a batch was refused and why.
+type PlanBatchError struct {
+	Index   int
+	Message string
+}
+
+func (e *PlanBatchError) Error() string { return e.Message }
+
+type txStock struct{ q queryer }
+
+func (t txStock) PlanStockLimit(ctx context.Context, id string) (*int, error) {
+	return planStockLimit(ctx, t.q, id)
+}
+
+func (t txStock) PlanStockCapacity(ctx context.Context, plan Plan, excludeID string) (StockCapacity, error) {
+	return planStockCapacity(ctx, t.q, plan, excludeID)
+}
+
 func (s *CatalogStore) CreatePlan(ctx context.Context, input Plan) (Plan, error) {
-	input = withPlanNetworkDefaults(input)
-	tx, err := s.db.Begin(ctx)
+	plans, err := s.CreatePlans(ctx, []Plan{input}, nil)
 	if err != nil {
 		return Plan{}, err
 	}
+	return plans[0], nil
+}
+
+// CreatePlans saves plans in one transaction, running check on each first.
+func (s *CatalogStore) CreatePlans(ctx context.Context, inputs []Plan, check PlanCheck) ([]Plan, error) {
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	result := make([]Plan, 0, len(inputs))
+	for index, input := range inputs {
+		if check != nil {
+			message, err := check(ctx, txStock{tx}, withPlanNetworkDefaults(input), "")
+			if err != nil {
+				return nil, err
+			}
+			if message != "" {
+				return nil, &PlanBatchError{Index: index, Message: message}
+			}
+		}
+		plan, err := createPlan(ctx, tx, input)
+		if err != nil {
+			return nil, &PlanBatchError{Index: index, Message: planSaveMessage(err)}
+		}
+		result = append(result, plan)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func createPlan(ctx context.Context, tx pgx.Tx, input Plan) (Plan, error) {
+	input = withPlanNetworkDefaults(input)
 	if err := tx.QueryRow(ctx, `
 		INSERT INTO plans(code, name, virtualization, vcpu, ram_mb, disk_gb, traffic_gb,
 		                  network_down_mbps, network_up_mbps, snapshot_limit,
 		                  assign_nat, port_mapping_count, assign_ipv4, ipv4_count, assign_ipv6, ipv6_count,
-		                  default_template_id, allowed_template_ids, enabled, provider_type, owner_account_id, node_id, description, purchase_limit, early_refund, stock_limit, disk_io)
-		VALUES(upper($1), $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, nullif($21,'')::uuid, nullif($22,'')::uuid, $23, $24, $25, $26, $27)
+		                  default_template_id, allowed_template_ids, enabled, provider_type, owner_account_id, node_id, description, purchase_limit, early_refund, stock_limit, disk_io,
+		                  category_id, node_selection, node_ids)
+		VALUES(upper($1), $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, nullif($21,'')::uuid, nullif($22,'')::uuid, $23, $24, $25, $26, $27,
+		       nullif($28,'')::uuid, $29, $30)
 		RETURNING id, code, version, created_at
 	`, input.Code, input.Name, input.Virtualization, input.VCPU, input.RAMMB, input.DiskGB, input.TrafficGB, input.NetworkDownMbps, input.NetworkUpMbps, input.SnapshotLimit,
 		input.AssignNAT, input.PortMappingCount, input.AssignIPv4, input.IPv4Count, input.AssignIPv6, input.IPv6Count,
-		input.DefaultTemplateID, input.AllowedTemplateIDs, input.Enabled, input.ProviderType, input.OwnerAccountID, input.NodeID, input.Description, input.PurchaseLimit, input.EarlyRefund, input.StockLimit, input.DiskIO).Scan(&input.ID, &input.Code, &input.Version, &input.CreatedAt); err != nil {
+		input.DefaultTemplateID, input.AllowedTemplateIDs, input.Enabled, input.ProviderType, input.OwnerAccountID, input.NodeID, input.Description, input.PurchaseLimit, input.EarlyRefund, input.StockLimit, input.DiskIO,
+		input.CategoryID, input.NodeSelection, input.NodeIDs).Scan(&input.ID, &input.Code, &input.Version, &input.CreatedAt); err != nil {
 		return Plan{}, fmt.Errorf("create plan: %w", err)
 	}
 	for i := range input.Prices {
@@ -335,31 +426,65 @@ func (s *CatalogStore) CreatePlan(ctx context.Context, input Plan) (Plan, error)
 			return Plan{}, fmt.Errorf("create plan price: %w", err)
 		}
 	}
-	if err := tx.Commit(ctx); err != nil {
-		return Plan{}, err
-	}
 	return input, nil
 }
 
 func (s *CatalogStore) UpdatePlan(ctx context.Context, id string, input Plan) (Plan, error) {
-	input = withPlanNetworkDefaults(input)
-	tx, err := s.db.Begin(ctx)
+	input.ID = id
+	plans, err := s.UpdatePlans(ctx, []Plan{input}, nil)
 	if err != nil {
 		return Plan{}, err
 	}
+	return plans[0], nil
+}
+
+// UpdatePlans replaces each plan (by its ID) in one transaction, running
+// check on each first.
+func (s *CatalogStore) UpdatePlans(ctx context.Context, inputs []Plan, check PlanCheck) ([]Plan, error) {
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	result := make([]Plan, 0, len(inputs))
+	for index, input := range inputs {
+		if check != nil {
+			message, err := check(ctx, txStock{tx}, withPlanNetworkDefaults(input), input.ID)
+			if err != nil {
+				return nil, err
+			}
+			if message != "" {
+				return nil, &PlanBatchError{Index: index, Message: message}
+			}
+		}
+		plan, err := updatePlan(ctx, tx, input.ID, input)
+		if err != nil {
+			return nil, &PlanBatchError{Index: index, Message: planSaveMessage(err)}
+		}
+		result = append(result, plan)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func updatePlan(ctx context.Context, tx pgx.Tx, id string, input Plan) (Plan, error) {
+	input = withPlanNetworkDefaults(input)
 	if err := tx.QueryRow(ctx, `
 		UPDATE plans SET code=upper($2), name=$3, virtualization=$4, vcpu=$5, ram_mb=$6, disk_gb=$7,
 		       traffic_gb=$8, network_down_mbps=$9, network_up_mbps=$10, snapshot_limit=$11,
 		       assign_nat=$12, port_mapping_count=$13, assign_ipv4=$14, ipv4_count=$15,
 		       assign_ipv6=$16, ipv6_count=$17, default_template_id=$18, allowed_template_ids=$19,
-		       enabled=$20, provider_type=$21, description=$22, purchase_limit=$23, early_refund=$24, stock_limit=$25, disk_io=$26, version=version+1, updated_at=now()
+		       enabled=$20, provider_type=$21, description=$22, purchase_limit=$23, early_refund=$24, stock_limit=$25, disk_io=$26,
+		       category_id=nullif($27,'')::uuid, node_selection=$28, node_ids=$29, version=version+1, updated_at=now()
 		WHERE id=$1
 		RETURNING id, code, version, created_at
 	`, id, input.Code, input.Name, input.Virtualization, input.VCPU, input.RAMMB, input.DiskGB, input.TrafficGB,
 		input.NetworkDownMbps, input.NetworkUpMbps, input.SnapshotLimit, input.AssignNAT, input.PortMappingCount,
 		input.AssignIPv4, input.IPv4Count, input.AssignIPv6, input.IPv6Count, input.DefaultTemplateID,
-		input.AllowedTemplateIDs, input.Enabled, input.ProviderType, input.Description, input.PurchaseLimit, input.EarlyRefund, input.StockLimit, input.DiskIO).Scan(&input.ID, &input.Code, &input.Version, &input.CreatedAt); err != nil {
+		input.AllowedTemplateIDs, input.Enabled, input.ProviderType, input.Description, input.PurchaseLimit, input.EarlyRefund, input.StockLimit, input.DiskIO,
+		input.CategoryID, input.NodeSelection, input.NodeIDs).Scan(&input.ID, &input.Code, &input.Version, &input.CreatedAt); err != nil {
 		return Plan{}, fmt.Errorf("update plan: %w", err)
 	}
 	now := time.Now().UTC()
@@ -377,10 +502,26 @@ func (s *CatalogStore) UpdatePlan(ctx context.Context, id string, input Plan) (P
 			return Plan{}, fmt.Errorf("update plan price: %w", err)
 		}
 	}
-	if err := tx.Commit(ctx); err != nil {
-		return Plan{}, err
-	}
 	return input, nil
+}
+
+// planSaveMessage explains a failed plan insert or update to the admin.
+func planSaveMessage(err error) string {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		switch {
+		case pgErr.Code == "23505":
+			return "套餐编码已存在"
+		case pgErr.Code == "23503":
+			return "套餐分类不存在"
+		case pgErr.Code == "22P02":
+			return "参数格式无效"
+		}
+	}
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "套餐不存在"
+	}
+	return "保存失败，请检查参数"
 }
 
 func withPlanNetworkDefaults(input Plan) Plan {
@@ -388,6 +529,17 @@ func withPlanNetworkDefaults(input Plan) Plan {
 	// nodes; an empty value would match no node in the scheduler.
 	if input.ProviderType = strings.TrimSpace(input.ProviderType); input.ProviderType == "" {
 		input.ProviderType = "clicd"
+	}
+	// Hosted plans sell their own node; platform plans default to packing,
+	// and only a "nodes" plan keeps a node list.
+	if !slices.Contains(NodeSelections, input.NodeSelection) {
+		input.NodeSelection = "pack"
+	}
+	if input.NodeSelection != "nodes" || input.NodeID != "" || input.NodeIDs == nil {
+		input.NodeIDs = []string{}
+	}
+	if input.NodeID != "" {
+		input.NodeSelection, input.CategoryID = "pack", ""
 	}
 	if input.IPv4Count < 1 {
 		input.IPv4Count = 1

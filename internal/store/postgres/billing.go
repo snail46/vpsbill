@@ -246,6 +246,11 @@ func (s *BillingStore) CreateOrder(ctx context.Context, input CreateOrderInput) 
 		if err := tx.QueryRow(ctx, "SELECT enabled FROM regions WHERE id=$1", item.RegionID).Scan(&enabled); err != nil || !enabled {
 			return Order{}, errors.New("selected region is unavailable")
 		}
+		// A plan limited to some nodes sells only in their regions.
+		var regionServed bool
+		if err := tx.QueryRow(ctx, `SELECT p.node_selection<>'nodes' OR p.node_id IS NOT NULL OR $2::text = ANY(`+planRegionsSQL+`) FROM plans p WHERE p.id=$1`, item.PlanID, item.RegionID).Scan(&regionServed); err == nil && !regionServed {
+			return Order{}, &HostedOrderError{"该套餐在所选地域暂无可用节点，请选择其他地域"}
+		}
 		priced := pricedItem{Input: item}
 		if err := tx.QueryRow(ctx, `
 			SELECT p.name, p.virtualization, p.version, p.vcpu, p.ram_mb, p.disk_gb,

@@ -60,7 +60,7 @@ export function StockField({
     const onChange = (event: Event) => {
       const target = event.target as HTMLInputElement
       if (target.name === 'stock_limit') touched.current = true
-      else if (['vcpu', 'ram_mb', 'disk_gb', 'traffic_gb', 'virtualization', 'provider_type'].includes(target.name ?? '') || target.tagName === 'SELECT') refresh()
+      else if (['vcpu', 'ram_mb', 'disk_gb', 'traffic_gb', 'virtualization', 'provider_type', 'node_selection', 'node_ids'].includes(target.name ?? '') || target.tagName === 'SELECT') refresh()
     }
     form.addEventListener('input', onChange)
     form.addEventListener('change', onChange)
