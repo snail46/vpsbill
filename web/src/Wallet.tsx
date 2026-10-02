@@ -176,7 +176,7 @@ export default function CustomerWallet() {
         </article>
       </section>
       {(wallet?.balance_minor || 0) < 0 && (
-        <div className="note-banner warn">余额为负，是托管母机清退时产生的赔付。结清前不能发布新母机，之后的托管收益会先用于抵扣。</div>
+        <div className="note-banner warn">余额为负，是以前的托管母机清退赔付尚未结清（现行规则下赔付不会再扣成负数）。结清前不能发布新母机，之后的托管收益会先用于抵扣。</div>
       )}
 
       <form className="panel" id="topup" onSubmit={topup}>

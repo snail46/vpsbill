@@ -576,9 +576,10 @@ type ClearanceResult struct {
 }
 
 // ClearNode retires a hosted node and settles every instance on it: the
-// buyer gets multiplier x the remaining value, the unreleased escrow covers
-// one share and the host pays the rest from the balance (which may go
-// negative). Instances are closed without contacting the node, which is
+// buyer gets the remaining value back from the unreleased escrow and, with
+// multiplier 2, a second share paid by the host — but only as far as the
+// host's balance reaches. The balance never goes negative, so a host and a
+// buyer acting together cannot turn a clearance into platform credit. Instances are closed without contacting the node, which is
 // usually offline at this point.
 func (m *MarketplaceStore) ClearNode(ctx context.Context, nodeID string, multiplier int, reason, actorType, actorID string) (ClearanceResult, error) {
 	reason = strings.TrimSpace(reason)
@@ -635,20 +636,34 @@ func (m *MarketplaceStore) ClearNode(ctx context.Context, nodeID string, multipl
 		if err := tx.QueryRow(ctx, `SELECT coalesce(sum(gross_minor-released_gross_minor),0)::bigint FROM marketplace_escrows WHERE service_id=$1 AND status='holding'`, item.ServiceID).Scan(&item.RemainingMinor); err != nil {
 			return ClearanceResult{}, err
 		}
-		if _, err := tx.Exec(ctx, `UPDATE marketplace_escrows SET status='cleared',cleared_at=now(),refunded_minor=(gross_minor-released_gross_minor)*$2,updated_at=now() WHERE service_id=$1 AND status='holding'`, item.ServiceID, multiplier); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE marketplace_escrows SET status='cleared',cleared_at=now(),refunded_minor=gross_minor-released_gross_minor,updated_at=now() WHERE service_id=$1 AND status='holding'`, item.ServiceID); err != nil {
 			return ClearanceResult{}, err
 		}
-		item.RefundMinor = item.RemainingMinor * int64(multiplier)
-		item.PenaltyMinor = item.RemainingMinor * int64(multiplier-1)
+		if multiplier == 2 && item.RemainingMinor > 0 {
+			// The host's share is capped by what the host has right now;
+			// earlier instances of this clearance have already drawn on it.
+			var available int64
+			if err := tx.QueryRow(ctx, `SELECT balance_minor FROM accounts WHERE id=$1 FOR UPDATE`, host).Scan(&available); err != nil {
+				return ClearanceResult{}, err
+			}
+			item.PenaltyMinor = item.RemainingMinor
+			if available < item.PenaltyMinor {
+				item.PenaltyMinor = max(available, 0)
+			}
+		}
+		item.RefundMinor = item.RemainingMinor + item.PenaltyMinor
+		description := fmt.Sprintf("母机 %s 清退：实例 %s 退还剩余价值", result.NodeName, item.InstanceName)
+		if item.PenaltyMinor > 0 {
+			description += "，含机主赔付"
+		}
 		if _, err := applyWalletChange(ctx, tx, walletChange{
 			AccountID: item.buyer, Kind: "clearance_refund", AmountMinor: item.RefundMinor,
-			Description:   fmt.Sprintf("母机 %s 清退补偿：实例 %s（剩余价值 ×%d）", result.NodeName, item.InstanceName, multiplier),
-			ReferenceType: "service", ReferenceID: item.ServiceID, DedupKey: "clearance:" + item.ServiceID + ":refund",
+			Description: description, ReferenceType: "service", ReferenceID: item.ServiceID, DedupKey: "clearance:" + item.ServiceID + ":refund",
 		}); err != nil {
 			return ClearanceResult{}, err
 		}
 		if _, err := applyWalletChange(ctx, tx, walletChange{
-			AccountID: host, Kind: "clearance_penalty", AmountMinor: -item.PenaltyMinor, AllowNegative: true,
+			AccountID: host, Kind: "clearance_penalty", AmountMinor: -item.PenaltyMinor,
 			Description:   fmt.Sprintf("母机 %s 清退赔付：实例 %s", result.NodeName, item.InstanceName),
 			ReferenceType: "service", ReferenceID: item.ServiceID, DedupKey: "clearance:" + item.ServiceID + ":penalty",
 		}); err != nil {

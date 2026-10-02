@@ -226,17 +226,22 @@ func TestHostingMarketplaceIntegration(t *testing.T) {
 		t.Fatalf("staff rooms: %+v", rooms)
 	}
 
-	// Clearance pays the buyer twice the remaining value; the host pays one share.
+	// Clearance returns the remaining value and adds the host's share, which
+	// is capped by the host's balance: the host never goes negative.
 	var releasedGross int64
 	if err = db.QueryRow(ctx, `SELECT released_gross_minor FROM marketplace_escrows WHERE service_id=$1`, serviceID).Scan(&releasedGross); err != nil {
 		t.Fatal(err)
 	}
 	remaining := gross - releasedGross
 	cleared, err := market.ClearNode(ctx, nodeID, 2, "离线测试", "system", "")
-	if err != nil || len(cleared.Services) != 1 || cleared.Services[0].RemainingMinor != remaining || cleared.RefundMinor != 2*remaining || cleared.PenaltyMinor != remaining {
+	penalty := earned
+	if earned >= remaining {
+		t.Fatalf("test setup: host earned %d, want less than the remaining %d to exercise the cap", earned, remaining)
+	}
+	if err != nil || len(cleared.Services) != 1 || cleared.Services[0].RemainingMinor != remaining || cleared.RefundMinor != remaining+penalty || cleared.PenaltyMinor != penalty {
 		t.Fatalf("clearance: %+v err=%v", cleared, err)
 	}
-	if balanceOf(buyerID) != 7000+2*remaining || balanceOf(hostID) != earned-remaining {
+	if balanceOf(buyerID) != 7000+remaining+penalty || balanceOf(hostID) != 0 {
 		t.Fatalf("after clearance buyer=%d host=%d", balanceOf(buyerID), balanceOf(hostID))
 	}
 	var serviceStatus, escrowStatus, listing string
@@ -253,9 +258,17 @@ func TestHostingMarketplaceIntegration(t *testing.T) {
 	if role, retired, _ := market.ChatRole(ctx, nodeID, buyerID); role != "" || !retired {
 		t.Fatalf("cleared buyer still in room: role=%q retired=%v", role, retired)
 	}
+	// Clearances no longer leave debt, but older ones may have; a host in
+	// debt still cannot publish.
+	if _, err = db.Exec(ctx, `UPDATE accounts SET balance_minor=-1 WHERE id=$1`, hostID); err != nil {
+		t.Fatal(err)
+	}
 	input.Name = "hk-host-2"
 	if _, err = market.CreateHostedNode(ctx, hostID, hostUser, input, HostedNodeRegistration{BaseURL: "agent://second", APIKeyCiphertext: []byte("sealed"), VirtualizationTypes: []string{"lxc"}}); !errors.Is(err, ErrHostInDebt) {
 		t.Fatalf("indebted host published a node: %v", err)
+	}
+	if _, err = db.Exec(ctx, `UPDATE accounts SET balance_minor=0 WHERE id=$1`, hostID); err != nil {
+		t.Fatal(err)
 	}
 
 	// Balance history is append-only.
@@ -267,7 +280,7 @@ func TestHostingMarketplaceIntegration(t *testing.T) {
 		t.Fatalf("buyer wallet: %+v err=%v", wallet, err)
 	}
 	adjusted, err := billing.AdjustWallet(ctx, hostID, buyerUser, 100000, "结清测试")
-	if err != nil || adjusted.BalanceMinor != earned-remaining+100000 {
+	if err != nil || adjusted.BalanceMinor != 100000 {
 		t.Fatalf("adjust wallet: %+v err=%v", adjusted, err)
 	}
 	if _, err = billing.AdjustWallet(ctx, buyerID, buyerUser, -10_000_000, "too much"); !errors.Is(err, ErrInsufficientBalance) {

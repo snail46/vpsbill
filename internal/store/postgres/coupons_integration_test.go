@@ -94,6 +94,51 @@ func hostedTermsAndCoupons(t *testing.T, ctx context.Context, db *pgxpool.Pool, 
 		t.Fatalf("host used own coupon: %v", err)
 	}
 
+	// A per-account limit counts each buyer's discounted instances, unpaid
+	// orders included, while other buyers keep their own allowance.
+	multi, err := catalog.CreatePlan(ctx, Plan{Code: "H-MULTI", Name: "Multi", ProviderType: "hatch", Virtualization: "lxc", VCPU: 1, RAMMB: 256, DiskGB: 2, AssignNAT: true, PortMappingCount: 2,
+		DefaultTemplateID: "debian12", AllowedTemplateIDs: []string{"debian12"}, Enabled: true, OwnerAccountID: hostID, NodeID: nodeID,
+		Prices: []Price{{Currency: "CNY", BillingCycle: "monthly", AmountMinor: 1000}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	perAccount := CouponInput{Code: "ONEEACH", DiscountType: "amount", DiscountValue: 100, MaxUses: 5, PerAccountLimit: 1, Enabled: true, PlanIDs: []string{multi.ID}}
+	if bad := (CouponInput{Code: "TOOMANY", DiscountType: "amount", DiscountValue: 100, MaxUses: 1, PerAccountLimit: 2}); bad.Validate() == "" {
+		t.Fatal("per-account limit above max uses accepted")
+	}
+	if _, err := coupons.CreateCoupon(ctx, hostID, perAccount); err != nil {
+		t.Fatal(err)
+	}
+	orderMulti := func(accountID string, quantity int) (Order, error) {
+		return billing.CreateOrder(ctx, CreateOrderInput{AccountID: accountID, ActorType: "customer", CouponCode: "ONEEACH", Items: []OrderItemInput{{PlanID: multi.ID, RegionID: regionID, BillingCycle: "monthly", Quantity: quantity, Configuration: map[string]any{"template_id": "debian12"}}}})
+	}
+	if _, err := orderMulti(buyerID, 2); !errors.As(err, &rule) || rule.Message != "该优惠码每个账号限用 1 次，你还能用 1 次" {
+		t.Fatalf("two units over a per-account limit of one: %v", err)
+	}
+	first, err := orderMulti(buyerID, 1)
+	if err != nil || first.DiscountMinor != 100 {
+		t.Fatalf("first per-account use: %+v err=%v", first, err)
+	}
+	if _, err := orderMulti(buyerID, 1); !errors.As(err, &rule) || rule.Message != "该优惠码每个账号限用 1 次，你已用完" {
+		t.Fatalf("second per-account use: %v", err)
+	}
+	if other, err := orderMulti(strangerID, 1); err != nil || other.DiscountMinor != 100 {
+		t.Fatalf("another account's use: %+v err=%v", other, err)
+	}
+	listed, err := coupons.ListCoupons(ctx, hostID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range listed {
+		if c.Code == "ONEEACH" && (c.PerAccountLimit != 1 || c.UsedCount != 2) {
+			t.Fatalf("listed per-account coupon: %+v", c)
+		}
+	}
+	// Free the unpaid orders so the purchase checks below start clean.
+	if _, err := db.Exec(ctx, `UPDATE invoices SET status='void' WHERE order_id IN ($1::uuid,(SELECT o.id FROM orders o WHERE o.account_id=$2 AND o.coupon_id IS NOT NULL ORDER BY o.created_at DESC LIMIT 1))`, first.ID, strangerID); err != nil {
+		t.Fatal(err)
+	}
+
 	discounted, err := order(buyerID, "HOST20")
 	if err != nil || discounted.SubtotalMinor != 3000 || discounted.DiscountMinor != 600 || discounted.TotalMinor != 2400 {
 		t.Fatalf("discounted order: %+v err=%v", discounted, err)
@@ -119,7 +164,7 @@ func hostedTermsAndCoupons(t *testing.T, ctx context.Context, db *pgxpool.Pool, 
 		t.Fatalf("purchase limit not enforced: %v", err)
 	}
 	list, err := coupons.ListCoupons(ctx, hostID)
-	if err != nil || len(list) != 2 || list[1].Code != "HOST20" || list[1].UsedCount != 1 {
+	if err != nil || len(list) != 3 || list[2].Code != "HOST20" || list[2].UsedCount != 1 {
 		t.Fatalf("host coupons: %+v err=%v", list, err)
 	}
 	if platform, _ := coupons.ListCoupons(ctx, ""); len(platform) != 1 || platform[0].Code != "PLAT5" {

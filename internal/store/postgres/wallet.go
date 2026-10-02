@@ -40,7 +40,7 @@ type Wallet struct {
 }
 
 // walletChange is one balance movement. Earnings and refunds are positive,
-// payments and penalties negative.
+// payments and penalties negative; no change may take a balance below zero.
 type walletChange struct {
 	AccountID     string
 	Kind          string
@@ -50,9 +50,6 @@ type walletChange struct {
 	ReferenceID   string
 	DedupKey      string
 	ActorUserID   string
-	// AllowNegative lets clearance penalties push a host into debt, which
-	// later earnings pay back. Payments never overdraw.
-	AllowNegative bool
 }
 
 // applyWalletChange moves a balance inside the caller's transaction. It locks
@@ -78,7 +75,7 @@ func applyWalletChange(ctx context.Context, tx pgx.Tx, change walletChange) (boo
 		}
 	}
 	next := balance + change.AmountMinor
-	if change.AmountMinor < 0 && next < 0 && !change.AllowNegative {
+	if change.AmountMinor < 0 && next < 0 {
 		return false, ErrInsufficientBalance
 	}
 	description := strings.TrimSpace(change.Description)

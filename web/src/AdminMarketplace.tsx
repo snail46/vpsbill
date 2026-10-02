@@ -276,10 +276,10 @@ function ClearDialog({ node, onClose, onCleared }: { node: HostedNodeRecord; onC
         </p>
         <div className="form-grid">
           <label>
-            <span>补偿倍数</span>
+            <span>补偿方式</span>
             <select value={multiplier} onChange={event => setMultiplier(Number(event.target.value))}>
-              <option value={2}>2 倍（机主责任：离线、到期、故障、主动下架）</option>
-              <option value={1}>1 倍（机主已提前说明的特殊原因）</option>
+              <option value={2}>退还剩余价值 + 机主赔付一份（机主责任：离线、到期、故障、主动下架）</option>
+              <option value={1}>只退还剩余价值（机主已提前说明的特殊原因）</option>
             </select>
           </label>
           <label className="wide">
@@ -288,7 +288,7 @@ function ClearDialog({ node, onClose, onCleared }: { node: HostedNodeRecord; onC
           </label>
         </div>
         <p className="muted-text">
-          买家获得 {walletMoney(remaining * multiplier)} 余额补偿；{multiplier === 2 ? `其中 ${walletMoney(remaining)} 从机主余额扣除。` : '机主不额外赔付。'}
+          买家拿回剩余价值 {walletMoney(remaining)}。{multiplier === 2 ? `另从机主余额赔付最多 ${walletMoney(remaining)}，以机主当时的余额为限，不会扣成负数。` : '机主不额外赔付。'}
         </p>
         {error && <div className="form-error">{error}</div>}
         <div className="form-actions">

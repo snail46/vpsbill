@@ -186,7 +186,7 @@ func (n *Notifier) remindNodes(ctx context.Context) {
 				body := fmt.Sprintf("母鸡 %s 的租期到 %s。请及时续费，或提前迁出上面的实例，避免客户服务中断。\n\n节点管理：%s\n",
 					node.Name, date, manage)
 				if node.OwnerEmail != "" {
-					body = fmt.Sprintf("您托管的母机 %s 租期到 %s。续租后请在托管中心更新到期日期；如果不再续租，按托管准则需按实例剩余价值的 2 倍清退受影响的实例。\n\n托管中心：%s\n",
+					body = fmt.Sprintf("您托管的母机 %s 租期到 %s。续租后请在托管中心更新到期日期；如果不再续租，受影响的实例将按托管准则清退：剩余价值退还买家，并从您的余额按剩余价值额外赔付一份（余额不足时扣到 0 为止）。\n\n托管中心：%s\n",
 						node.Name, date, manage)
 				}
 				for _, to := range recipients {

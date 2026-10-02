@@ -775,6 +775,8 @@ export type CouponRecord = {
   discount_value: number
   plan_ids: string[]
   max_uses: number
+  // per_account_limit caps the discounted instances one account gets (0 = no limit).
+  per_account_limit: number
   used_count: number
   expires_at: string | null
   recurring: boolean

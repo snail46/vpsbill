@@ -139,7 +139,7 @@ function Market({ customer }: { customer: CustomerIdentity }) {
     <>
       {error && <div className="form-error">{error}</div>}
       <div className="note-banner">
-        托管母机由其他用户提供，机主拥有服务器的 root 权限。付款由平台托管、按天结算给机主；母机离线满 24 小时或机主下架时，按实例剩余价值的 2 倍补偿到您的余额。
+        托管母机由其他用户提供，机主拥有服务器的 root 权限。付款由平台托管、按天结算给机主；母机离线满 24 小时或机主下架时实例会被清退：剩余价值退还到您的余额，另由机主按剩余价值额外赔付一份（以机主当时的余额为限）。
       </div>
       <div className="market-grid">
         {market?.nodes.map(node => (
@@ -710,7 +710,7 @@ function HostedNodeCard({
       </div>
       {node.status !== 'online' && (
         <div className="note-banner warn">
-          母机离线。离线满 {data.offline_hours} 小时将被自动清退，按剩余价值 2 倍补偿买家（其中一份从您的余额扣除）。有特殊原因请尽快提交工单联系管理员。
+          母机离线。离线满 {data.offline_hours} 小时将被自动清退：剩余价值退还买家，并从您的余额按剩余价值额外赔付一份（余额不足时扣到 0 为止）。有特殊原因请尽快提交工单联系管理员。
           {node.clearance_hold_until && ` 管理员已暂缓清退至 ${formatTime(node.clearance_hold_until)}。`}
         </div>
       )}
@@ -759,8 +759,8 @@ function HostedNodeCard({
       {retiring && (
         <div className="note-banner danger">
           <p>
-            下架后母机立即退出市场，现有 {node.active_services} 个实例全部清退：按剩余价值（当前约 {walletMoney(remaining, data.currency)}）的 2 倍补偿买家，
-            其中一份约 {walletMoney(remaining, data.currency)} 从您的余额扣除。此操作不可撤销。
+            下架后母机立即退出市场，现有 {node.active_services} 个实例全部清退：剩余价值（当前约 {walletMoney(remaining, data.currency)}）退还买家，
+            并从您的余额额外赔付最多 {walletMoney(remaining, data.currency)}（余额不足时扣到 0 为止）。此操作不可撤销。
           </p>
           <div className="form-actions">
             <button className="secondary-button" onClick={() => setRetiring(false)}>取消</button>

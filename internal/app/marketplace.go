@@ -26,7 +26,7 @@ import (
 // HostingRules are the terms a customer accepts before publishing a node.
 var HostingRules = []string{
 	"资源共享：托管旨在将用户的闲置服务器接入平台以分摊成本。不建议以高额盈利为唯一目的的大规模托管。",
-	"清退保障：母鸡离线满 24 小时系统或管理员将进行清退（如有特殊原因需提前联系管理员说明）。如服务器因租约到期、硬件故障或不可抗力无法继续提供服务，需按照实例剩余价值（托管余额）的 2 倍清退所有受影响的实例。",
+	"清退保障：母鸡离线满 24 小时系统或管理员将进行清退（如有特殊原因需提前联系管理员说明）。如服务器因租约到期、硬件故障或不可抗力无法继续提供服务，所有受影响的实例将被清退：买家拿回实例剩余价值（平台托管、尚未结算给机主的部分），机主再按剩余价值额外赔付一份，从机主账户余额扣除，余额不足时扣到 0 为止。",
 	"工单响应：托管后可能会有用户针对网络、系统等问题提交相关工单，请务必及时登录平台处理，保证服务质量。平台管理员可以查看并处理这些工单，但托管方是第一处理人。",
 	"真实合规：需真实填写母鸡地理位置、线路描述、到期时间、流量限制等，严禁虚假宣传。买家的实例不会超过母机到期时间，到期日早于计费周期结束时按剩余时间折算收费。资源以 Agent 检测值为准，可在平台上限内设置超售倍数并公开展示；母机持续负载过高会自动暂停销售。",
 	"交流群组：每台托管母鸡有独立聊天室，包含机主和各个购买方，管理员可以查看全部聊天记录。",
@@ -385,7 +385,7 @@ func (a *marketplaceAPI) retireHostedNode(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if !input.Confirm {
-		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "confirmation_required", "message": "请确认按剩余价值 2 倍清退全部实例"})
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "confirmation_required", "message": "请确认清退全部实例：退还买家剩余价值，并从你的余额额外赔付一份"})
 		return
 	}
 	reason := strings.TrimSpace(input.Reason)

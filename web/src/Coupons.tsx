@@ -135,6 +135,7 @@ export function CouponManager({ endpoint, plans, intro, canCreate = true }: { en
               <th>优惠</th>
               <th>适用套餐</th>
               <th>已用 / 上限</th>
+              <th>每账号</th>
               <th>到期</th>
               <th>续费同价</th>
               <th>状态</th>
@@ -154,6 +155,7 @@ export function CouponManager({ endpoint, plans, intro, canCreate = true }: { en
                   <td>{couponDiscountLabel(coupon)}</td>
                   <td>{coupon.plan_ids.length ? coupon.plan_ids.map(planName).join('、') : '全部套餐'}</td>
                   <td>{coupon.used_count} / {coupon.max_uses || '不限'}</td>
+                  <td>{coupon.per_account_limit ? `${coupon.per_account_limit} 次` : '不限'}</td>
                   <td>{coupon.expires_at ? localDay(coupon.expires_at) : '长期有效'}</td>
                   <td>{coupon.recurring ? '是' : '否'}</td>
                   <td>
@@ -196,6 +198,7 @@ function CouponForm({ endpoint, plans, coupon, onClose, onSaved }: { endpoint: s
       discount_value: type === 'percent' ? Math.round(raw) : Math.round(raw * 100),
       plan_ids: selected,
       max_uses: Number(form.get('max_uses') || 0),
+      per_account_limit: Number(form.get('per_account_limit') || 0),
       expires_on: form.get('expires_on') || '',
       recurring: form.get('recurring') === 'on',
       enabled: form.get('enabled') === 'on',
@@ -255,6 +258,10 @@ function CouponForm({ endpoint, plans, coupon, onClose, onSaved }: { endpoint: s
         <label>
           <span>最大使用次数（0 = 不限，每台实例算一次）</span>
           <input name="max_uses" type="number" min="0" max="1000000" required defaultValue={coupon?.max_uses ?? 0} />
+        </label>
+        <label>
+          <span>每个账号限用次数（0 = 不限，每台实例算一次）</span>
+          <input name="per_account_limit" type="number" min="0" max="10000" required defaultValue={coupon?.per_account_limit ?? 1} />
         </label>
         <label>
           <span>到期日期（可选，当天结束失效）</span>
