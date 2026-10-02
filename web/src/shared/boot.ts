@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from 'react'
 import { adoptCache, type CustomerIdentity, type StaffUser } from '../api'
 import type { Meta } from './ui'
+import { setCurrencyRates } from './currency'
 
 // Boot is what a page needs before it can render: the site facts, whether
 // installation is pending and who is signed in on this side of the site.
@@ -117,6 +118,7 @@ export function siteMeta() {
 // applyMeta shows the site name in the browser tab and the site logo.
 function applyMeta(value: Meta) {
   meta = value
+  setCurrencyRates(value.locale)
   if (value.name) document.title = value.name
   setSiteLogo(value.logo_url ?? '', value.logo_mode, value.logo_dark_url ?? '')
   setSiteFavicon(value.favicon_url ?? '')

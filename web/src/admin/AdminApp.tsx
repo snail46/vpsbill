@@ -6,6 +6,7 @@ import HostDetailPanel from '../HostDetail'
 import AdminMarketplace from '../AdminMarketplace'
 import { AdminTradeListings } from '../Trade'
 import { ThemeToggle } from '../ThemeToggle'
+import { LocaleMenu } from '../shared/LocaleMenu'
 import { Meta, SessionLoading, Field, SecuritySettings, Brand, BrandMark } from '../shared/ui'
 import { Boot, freshBoot, inlineBoot, loadBoot } from '../shared/boot'
 import { Overview } from './Overview'
@@ -242,7 +243,7 @@ export function AuthPage({
 
   return (
     <main className="auth-page">
-      <div className="auth-theme"><ThemeToggle /></div>
+      <div className="auth-theme"><LocaleMenu /><ThemeToggle /></div>
       <section className="auth-brand-panel">
         <Brand className="auth-brand" name={appName} subtitle="VPS 商业运营控制平面" />
         <div>
@@ -482,6 +483,7 @@ export function AdminShell({ meta, user, onLogout }: { meta: Meta | null; user: 
             <h1>{route.hostID ? '宿主机探针详情' : viewTitle(view)}</h1>
           </div>
           <div className="operator">
+            <LocaleMenu />
             <ThemeToggle />
             <span>{user.display_name}</span>
             <div className="avatar">{user.display_name.slice(0, 1)}</div>

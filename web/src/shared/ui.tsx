@@ -28,6 +28,10 @@ export type Meta = {
   marketplace_enabled?: boolean
   // contact fills the portal's "联系我们" page.
   contact?: ContactInfo
+  // telegram_enabled offers linking a Telegram account for rewards.
+  telegram_enabled?: boolean
+  // locale is the site's default language and the USD display rate.
+  locale?: { default_lang?: 'zh' | 'en'; usd_enabled?: boolean; usd_rate?: number }
 }
 
 // useReveal brings a form that just opened into view, flashes it and puts
@@ -282,9 +286,8 @@ export function bandwidthLabel(downMbps?: number) {
   return downMbps ? `${downMbps} Mbps` : '不限带宽'
 }
 
-export function money(amountMinor: number, currency: string) {
-  return new Intl.NumberFormat('zh-CN', { style: 'currency', currency }).format(amountMinor / 100)
-}
+// money shows an amount in the visitor's display currency (see currency.ts).
+export { money } from './currency'
 
 export function formatBytes(value: number) {
   const units = ['B', 'KB', 'MB', 'GB', 'TB']

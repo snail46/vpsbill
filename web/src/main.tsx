@@ -1,11 +1,11 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
-import { App } from './App'
 import './styles.css'
 import { initTheme } from './ThemeToggle'
 import { initTableLabels } from './shared/tableLabels'
 import { loadBoot } from './shared/boot'
 import { initFormValidation } from './shared/validation'
+import { loadLocale } from './shared/i18n'
 
 initTheme()
 initTableLabels()
@@ -34,9 +34,16 @@ window.addEventListener('vite:preloadError', event => {
   window.location.reload()
 })
 
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
-)
+// The page's language is settled before any page code loads, because
+// modules build their label tables as they load (see shared/i18n.ts).
+void loadLocale()
+  .catch(() => undefined)
+  .then(() => import('./App'))
+  .then(({ App }) => {
+    createRoot(document.getElementById('root')!).render(
+      <StrictMode>
+        <App />
+      </StrictMode>,
+    )
+  })
 

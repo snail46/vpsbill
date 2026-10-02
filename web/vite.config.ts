@@ -17,12 +17,19 @@ function preloadSurface(): Plugin {
       handler(_html, context) {
         const bundle = context.bundle
         if (!bundle) return
+        // App.tsx is loaded by main.tsx once the language is settled, so
+        // it is preloaded with either side; the English dictionary only
+        // for visitors who will read English (see shared/i18n.ts).
+        const app = chunkFiles(bundle, 'src/App.tsx')
+        const withApp = (surface: { js: string[]; css: string[] }) => ({ js: [...new Set([...surface.js, ...app.js])], css: [...new Set([...surface.css, ...app.css])] })
         const surfaces = {
-          admin: chunkFiles(bundle, 'src/admin/AdminApp.tsx'),
-          portal: chunkFiles(bundle, 'src/portal/PortalApp.tsx'),
+          admin: withApp(chunkFiles(bundle, 'src/admin/AdminApp.tsx')),
+          portal: withApp(chunkFiles(bundle, 'src/portal/PortalApp.tsx')),
         }
+        const english = chunkFiles(bundle, 'src/locale/en.ts').js[0]
         const script =
           `(function(){var s=${JSON.stringify(surfaces)}[location.pathname.indexOf('/admin')===0?'admin':'portal'];` +
+          `try{var g=localStorage.getItem('vpsbill-lang')||(navigator.language||'').toLowerCase().slice(0,2);if(g==='en')s.js.push(${JSON.stringify(english)})}catch(e){}` +
           `s.js.forEach(function(f){var l=document.createElement('link');l.rel='modulepreload';l.href='/'+f;document.head.appendChild(l)});` +
           `s.css.forEach(function(f){var l=document.createElement('link');l.rel='stylesheet';l.href='/'+f;document.head.appendChild(l)})})()`
         // First in <head>: an inline script after a stylesheet waits for it.

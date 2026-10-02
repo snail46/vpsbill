@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { RefreshCw } from 'lucide-react'
 import { api, cached, CustomerCatalogRecord, CustomerInvoiceRecord, CustomerTransactionRecord, OrderRecord, PaymentIntentRecord, WalletRecord } from '../api'
 import { StatusBadge, money } from '../shared/ui'
+import { Charged, CurrencyNote } from '../shared/LocaleMenu'
 import { formatDate, formatTime } from '../shared/time'
 
 export function CustomerBilling() {
@@ -81,6 +82,7 @@ export function CustomerBilling() {
 
       {error && <div className="form-error">{error}</div>}
       {notice && <div className="form-success">{notice}</div>}
+      <CurrencyNote />
       <div className="note-banner">
         账户余额 <strong>{money(balance, invoices[0]?.currency || 'CNY')}</strong>，可直接用于支付新购和续费账单。<a href="/portal/wallet">充值或查看明细</a>
       </div>
@@ -148,6 +150,7 @@ export function CustomerBilling() {
                   <td><strong>{money(item.total_minor, item.currency)}</strong></td>
                   <td style={{ color: item.balance_minor > 0 ? 'var(--warning-text)' : 'inherit' }}>
                     <strong>{money(item.balance_minor, item.currency)}</strong>
+                    {item.balance_minor > 0 && <Charged minor={item.balance_minor} currency={item.currency} />}
                   </td>
                   <td><StatusBadge status={item.status} /></td>
                   <td>{formatDate(item.due_at)}</td>

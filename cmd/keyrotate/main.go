@@ -144,6 +144,24 @@ func main() {
 	} else if !errors.Is(err, pgx.ErrNoRows) {
 		log.Fatal(err)
 	}
+	// The remaining sealed settings, one column each.
+	for _, column := range []string{"smtp_password_encrypted", "telegram_settings_encrypted"} {
+		var value []byte
+		err = tx.QueryRow(ctx, `SELECT `+column+` FROM system_settings WHERE singleton=true FOR UPDATE`).Scan(&value)
+		if errors.Is(err, pgx.ErrNoRows) || (err == nil && len(value) == 0) {
+			continue
+		}
+		if err != nil {
+			log.Fatal(err)
+		}
+		if value, err = reencrypt(oldBox, newBox, value); err != nil {
+			log.Fatalf("cannot decrypt %s; rotation aborted", column)
+		}
+		if _, err = tx.Exec(ctx, `UPDATE system_settings SET `+column+`=$1 WHERE singleton=true`, value); err != nil {
+			log.Fatal(err)
+		}
+		count++
+	}
 	// jsonb_build_object accepts "any", so PostgreSQL cannot infer the type of a
 	// standalone bind parameter. Keep the cast explicit for the extended query
 	// protocol used by pgx.

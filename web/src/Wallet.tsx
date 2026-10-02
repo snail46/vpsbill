@@ -4,6 +4,8 @@ import { api, cached, type CustomerCatalogRecord, type PaymentIntentRecord, type
 import { formatTime } from './shared/time'
 import { confirmDialog } from './shared/dialog'
 import { toast } from './shared/toast'
+import { chargedMoney, converted, money } from './shared/currency'
+import { Charged, CurrencyNote } from './shared/LocaleMenu'
 
 export const walletKindLabels: Record<WalletEntryRecord['kind'], string> = {
   topup: '充值',
@@ -15,13 +17,11 @@ export const walletKindLabels: Record<WalletEntryRecord['kind'], string> = {
   refund: '退款',
   trade_purchase: '交易市场购买',
   trade_sale: '交易市场售出',
+  reward: '活动奖励',
 }
 
-export function walletMoney(amountMinor: number, currency = 'CNY') {
-  const symbol = currency === 'CNY' ? '¥' : `${currency} `
-  const sign = amountMinor < 0 ? '-' : ''
-  return `${sign}${symbol}${(Math.abs(amountMinor) / 100).toFixed(2)}`
-}
+// walletMoney shows an amount in the visitor's display currency.
+export const walletMoney = money
 
 export function WalletLedger({ entries }: { entries: WalletEntryRecord[] }) {
   return (
@@ -163,6 +163,7 @@ export default function CustomerWallet() {
       </div>
 
       {error && <div className="form-error">{error}</div>}
+      <CurrencyNote />
 
       <section className="metrics">
         <article>
@@ -187,11 +188,12 @@ export default function CustomerWallet() {
         <div className="topup-row">
           {quickAmounts.map(value => (
             <button type="button" key={value} className={amount === String(value) ? 'chip-button active' : 'chip-button'} onClick={() => setAmount(String(value))}>
-              ¥{value}
+              {chargedMoney(value * 100)}
+              {converted() && <small> ≈ {money(value * 100)}</small>}
             </button>
           ))}
           <label className="topup-amount">
-            <span>金额（元）</span>
+            <span>金额（人民币 元）{converted() && Number(amount) > 0 && <small> ≈ {money(Math.round(Number(amount) * 100))}</small>}</span>
             <input type="number" min="1" max="100000" step="0.01" value={amount} onChange={event => setAmount(event.target.value)} />
           </label>
           <button className={agreed ? 'primary-button compact' : 'primary-button compact needs-agree'} disabled={busy}>
@@ -212,7 +214,7 @@ export default function CustomerWallet() {
         </div>
         {created && !checkoutEnabled && (
           <p className="muted-text">
-            已生成充值账单 {created.number}（{walletMoney(created.total_minor, created.currency)}）。当前未配置在线支付，请联系商家线下付款，商家确认到账后余额自动增加。
+            已生成充值账单 {created.number}（{chargedMoney(created.total_minor, created.currency)}）。当前未配置在线支付，请联系商家线下付款，商家确认到账后余额自动增加。
           </p>
         )}
       </form>

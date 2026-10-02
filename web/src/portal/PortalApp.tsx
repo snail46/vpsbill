@@ -17,6 +17,10 @@ import { CustomerBilling } from './Billing'
 import { CustomerProfile } from './Profile'
 import { CustomerSupport } from './Support'
 import { CustomerContact } from './Contact'
+import { LocaleMenu } from '../shared/LocaleMenu'
+import { TelegramPrompt } from '../Telegram'
+import { siteMeta } from '../shared/boot'
+import { lang } from '../shared/i18n'
 
 export type CustomerAuthScreen = 'loading' | 'install' | 'login' | 'register' | 'forgot' | 'reset' | 'ready' | 'uninstalled'
 
@@ -194,7 +198,7 @@ export function CustomerAuthPage({
         setNotice('密码已重置，请使用新密码登录。')
         return
       }
-      const body = register ? { display_name: displayName, email, password } : { email, password, totp_code: totpCode }
+      const body = register ? { display_name: displayName, email, password, locale: lang } : { email, password, totp_code: totpCode }
       const current = await api<CustomerIdentity>(
         register ? '/api/v1/customer/auth/register' : '/api/v1/customer/auth/login',
         { method: 'POST', body: JSON.stringify(body) }
@@ -221,6 +225,7 @@ export function CustomerAuthPage({
 
   return (
     <main className="auth-page customer-auth-page">
+      <div className="auth-theme"><LocaleMenu /><ThemeToggle /></div>
       <section className="auth-brand-panel customer-brand-panel">
         <Brand className="auth-brand" name={siteName} subtitle="客户服务中心" />
         <div>
@@ -295,6 +300,12 @@ export function CustomerShell({ customer, siteName, onLogout }: { customer: Cust
   const [view, setView] = useState<PortalView>(portalViewFromPath)
   const [menuOpen, setMenuOpen] = useState(false)
   usePrefetch(portalPageData)
+
+  // Mail is written in the language the customer reads the site in.
+  useEffect(() => {
+    if (customer.locale === lang) return
+    void api('/api/v1/customer/auth/locale', { method: 'PUT', body: JSON.stringify({ locale: lang }) }).catch(() => undefined)
+  }, [customer.locale])
 
   useEffect(() => {
     // Pages may add a segment, e.g. /portal/services/<id>.
@@ -385,6 +396,7 @@ export function CustomerShell({ customer, siteName, onLogout }: { customer: Cust
             <h1>{titles[view]}</h1>
           </div>
           <div className="operator">
+            <LocaleMenu />
             <ThemeToggle />
             <span>{customer.email}</span>
             <div className="avatar">{customer.display_name.slice(0, 1)}</div>
@@ -407,6 +419,8 @@ export function CustomerShell({ customer, siteName, onLogout }: { customer: Cust
         {view === 'profile' && <CustomerProfile customer={customer} />}
         {view === 'contact' && <CustomerContact />}
       </main>
+      {/* The profile page has the full Telegram section instead. */}
+      {siteMeta()?.telegram_enabled && view !== 'profile' && <TelegramPrompt />}
     </div>
   )
 }

@@ -2,6 +2,8 @@ import { FormEvent, useEffect, useState } from 'react'
 import { AlertTriangle, ArrowLeftRight, RefreshCw, Tag, Upload, X } from 'lucide-react'
 import { api, cached, type CustomerServiceRecord, type TradeListingRecord, type TradeRecord, type WalletRecord } from './api'
 import { walletMoney } from './Wallet'
+import { converted } from './shared/currency'
+import { Charged, CurrencyNote } from './shared/LocaleMenu'
 import { formatDate, formatTime } from './shared/time'
 import { cycleName } from './shared/cycles'
 import { siteMeta } from './shared/boot'
@@ -141,6 +143,7 @@ export default function TradeMarket() {
         </button>
       </div>
       <RiskBanner />
+      <CurrencyNote />
       {error && <div className="form-error">{error}</div>}
       {notice && <div className="form-success">{notice}</div>}
       <div className="segmented" role="tablist">
@@ -300,7 +303,7 @@ function BuyListing({ listing, onClose, onDone }: { listing: TradeListingRecord;
         <ListingSpecs listing={listing} />
         {error && <div className="form-error">{error}</div>}
         <ul className="trade-terms">
-          <li>用账户余额支付 <strong>{walletMoney(listing.price_minor, listing.currency)}</strong>，当前余额 {walletMoney(wallet?.balance_minor || 0, wallet?.currency)}。</li>
+          <li>用账户余额支付 <strong>{walletMoney(listing.price_minor, listing.currency)}</strong><Charged minor={listing.price_minor} currency={listing.currency} />，当前余额 {walletMoney(wallet?.balance_minor || 0, wallet?.currency)}。</li>
           <li>成交后实例连同剩余时长转入你的账户并自动开机，之后按上面的续费价格续费。</li>
           <li>原主人知道这台机器的密码，也可能留下了其他登录方式：请立即重置 root 密码，必要时重装系统。</li>
           <li>交易不退款；托管母机上的实例仍受托管清退规则保障。</li>
@@ -381,6 +384,7 @@ export function ListServiceDialog({ service, onClose, onDone }: { service: Custo
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [feePercent, setFeePercent] = useState<number | null>(() => cached<TradeRecord>('/api/v1/customer/trade')?.fee_percent ?? null)
+  const [price, setPrice] = useState(0)
   useEffect(() => {
     api<TradeRecord>('/api/v1/customer/trade').then(value => setFeePercent(value.fee_percent)).catch(() => undefined)
   }, [])
@@ -419,8 +423,8 @@ export function ListServiceDialog({ service, onClose, onDone }: { service: Custo
         {error && <div className="form-error">{error}</div>}
         <div className="form-grid">
           <label>
-            <span>挂售价格（元）</span>
-            <input name="price" type="number" min="1" max="100000" step="0.01" required />
+            <span>挂售价格（人民币 元）{converted() && price > 0 && <small> ≈ {walletMoney(Math.round(price * 100))}</small>}</span>
+            <input name="price" type="number" min="1" max="100000" step="0.01" required onChange={event => setPrice(Number(event.target.value))} />
           </label>
           <label className="wide">
             <span>说明（可选，买家可见）</span>

@@ -52,6 +52,9 @@ type CustomerIdentity struct {
 	// EmailVerified is false until the customer opens the link mailed at
 	// sign-up; unverified accounts cannot buy or receive notifications.
 	EmailVerified bool `json:"email_verified"`
+	// Locale is the language the customer reads the site in ("" = not
+	// chosen yet); mail to them is written in it.
+	Locale string `json:"locale"`
 }
 
 type CustomerSessionIdentity struct {
@@ -234,14 +237,20 @@ func (s *AuthStore) RegisterCustomer(ctx context.Context, email, displayName, pa
 	return identity, nil
 }
 
+// SetLocale records the language a user reads the site in.
+func (s *AuthStore) SetLocale(ctx context.Context, userID, locale string) error {
+	_, err := s.db.Exec(ctx, "UPDATE users SET locale=$2 WHERE id=$1 AND locale<>$2", userID, locale)
+	return err
+}
+
 func (s *AuthStore) CustomerByEmail(ctx context.Context, email string) (CustomerIdentity, error) {
 	var identity CustomerIdentity
 	err := s.db.QueryRow(ctx, `
-		SELECT u.id,m.account_id,u.email,u.display_name,u.password_hash,u.status,a.status,a.default_currency,m.role,u.mfa_enabled,u.mfa_secret_encrypted,u.email_verified_at IS NOT NULL
+		SELECT u.id,m.account_id,u.email,u.display_name,u.password_hash,u.status,a.status,a.default_currency,m.role,u.mfa_enabled,u.mfa_secret_encrypted,u.email_verified_at IS NOT NULL,u.locale
 		FROM users u JOIN memberships m ON m.user_id=u.id JOIN accounts a ON a.id=m.account_id
 		WHERE lower(u.email)=lower($1)
 		ORDER BY CASE m.role WHEN 'owner' THEN 0 ELSE 1 END,m.created_at LIMIT 1
-	`, strings.TrimSpace(email)).Scan(&identity.UserID, &identity.AccountID, &identity.Email, &identity.DisplayName, &identity.PasswordHash, &identity.Status, &identity.AccountStatus, &identity.DefaultCurrency, &identity.Role, &identity.MFAEnabled, &identity.MFASecretEncrypted, &identity.EmailVerified)
+	`, strings.TrimSpace(email)).Scan(&identity.UserID, &identity.AccountID, &identity.Email, &identity.DisplayName, &identity.PasswordHash, &identity.Status, &identity.AccountStatus, &identity.DefaultCurrency, &identity.Role, &identity.MFAEnabled, &identity.MFASecretEncrypted, &identity.EmailVerified, &identity.Locale)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return CustomerIdentity{}, ErrInvalidLogin
 	}
@@ -251,11 +260,11 @@ func (s *AuthStore) CustomerByEmail(ctx context.Context, email string) (Customer
 func (s *AuthStore) CustomerSessionByToken(ctx context.Context, tokenHash []byte) (CustomerSessionIdentity, error) {
 	var identity CustomerSessionIdentity
 	err := s.db.QueryRow(ctx, `
-		SELECT u.id,m.account_id,u.email,u.display_name,u.status,a.status,a.default_currency,m.role,u.mfa_enabled,s.csrf_hash,s.expires_at,u.email_verified_at IS NOT NULL
+		SELECT u.id,m.account_id,u.email,u.display_name,u.status,a.status,a.default_currency,m.role,u.mfa_enabled,s.csrf_hash,s.expires_at,u.email_verified_at IS NOT NULL,u.locale
 		FROM login_sessions s JOIN users u ON u.id=s.user_id JOIN memberships m ON m.user_id=u.id JOIN accounts a ON a.id=m.account_id
 		WHERE s.token_hash=$1 AND s.expires_at>now() AND u.status='active' AND a.status='active'
 		ORDER BY CASE m.role WHEN 'owner' THEN 0 ELSE 1 END,m.created_at LIMIT 1
-	`, tokenHash).Scan(&identity.UserID, &identity.AccountID, &identity.Email, &identity.DisplayName, &identity.Status, &identity.AccountStatus, &identity.DefaultCurrency, &identity.Role, &identity.MFAEnabled, &identity.CSRFHash, &identity.ExpiresAt, &identity.EmailVerified)
+	`, tokenHash).Scan(&identity.UserID, &identity.AccountID, &identity.Email, &identity.DisplayName, &identity.Status, &identity.AccountStatus, &identity.DefaultCurrency, &identity.Role, &identity.MFAEnabled, &identity.CSRFHash, &identity.ExpiresAt, &identity.EmailVerified, &identity.Locale)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return CustomerSessionIdentity{}, ErrInvalidLogin
 	}

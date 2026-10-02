@@ -25,6 +25,7 @@ import { ReportDialog } from './Reports'
 import { StatusBadge, TicketConversation, ticketStatusLabel, useReveal , bandwidthLabel } from './shared/ui'
 import { ticketRequestBody, useAttachmentLimit } from './TicketAttachments'
 import { walletMoney } from './Wallet'
+import { CurrencyNote } from './shared/LocaleMenu'
 import { formatDate, formatTime } from './shared/time'
 import { cycleName, cycleOrder, CyclePriceFields, priceLeft, readCyclePrices } from './shared/cycles'
 import { readStock, stockLeft, StockField, StockTag } from './shared/stock'
@@ -138,6 +139,7 @@ function Market({ customer }: { customer: CustomerIdentity }) {
 
   return (
     <>
+      <CurrencyNote />
       {error && <div className="form-error">{error}</div>}
       <div className="note-banner">
         托管母机由其他用户提供，机主拥有服务器的 root 权限。付款由平台托管、按天结算给机主；母机离线满 24 小时或机主下架时实例会被清退：剩余价值退还到您的余额，另由机主按剩余价值额外赔付一份（以机主当时的余额为限）。

@@ -17,6 +17,7 @@ import (
 	"vpsbill/internal/security"
 	"vpsbill/internal/settings"
 	"vpsbill/internal/store/postgres"
+	"vpsbill/internal/telegram"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -36,6 +37,9 @@ type Dependencies struct {
 	Marketplace *marketplace.Service
 	// Backups makes and restores backups; nil hides the backup pages.
 	Backups *backup.Service
+	// Telegram is the running bot; nil builds one that only answers the
+	// settings pages.
+	Telegram *telegram.Bot
 	// ChatHub pushes hosted-node chat messages; nil disables live updates
 	// (messages still load over HTTP).
 	ChatHub *chat.Hub
@@ -77,6 +81,11 @@ func NewHandler(deps Dependencies) (http.Handler, error) {
 	coupons := &couponAPI{coupons: postgres.NewCouponStore(deps.DB), settings: deps.Settings, market: market}
 	overview := &overviewAPI{announcements: postgres.NewAnnouncementStore(deps.DB), billing: billingStore, market: marketStore}
 	trade := &tradeAPI{store: postgres.NewTradeStore(deps.DB), notifier: notifier, hosting: marketService, settings: deps.Settings}
+	bot := deps.Telegram
+	if bot == nil {
+		bot = telegram.New(postgres.NewTelegramStore(deps.DB), deps.Settings, deps.Logger)
+	}
+	tg := &telegramAPI{store: postgres.NewTelegramStore(deps.DB), settings: deps.Settings, bot: bot}
 	install := &installer{settings: deps.Settings, auth: auth, logger: deps.Logger}
 
 	mux := http.NewServeMux()
@@ -115,6 +124,7 @@ func NewHandler(deps Dependencies) (http.Handler, error) {
 	mux.HandleFunc("POST /api/v1/customer/auth/password-reset/confirm", auth.customerResetPassword)
 	mux.Handle("GET /api/v1/customer/auth/me", auth.requireCustomer(http.HandlerFunc(auth.customerMe)))
 	mux.Handle("POST /api/v1/customer/auth/logout", auth.requireCustomer(http.HandlerFunc(auth.customerLogout)))
+	mux.Handle("PUT /api/v1/customer/auth/locale", auth.requireCustomer(http.HandlerFunc(auth.customerSetLocale)))
 	mux.Handle("POST /api/v1/customer/auth/mfa/setup", auth.requireCustomer(http.HandlerFunc(auth.customerMFASetup)))
 	mux.Handle("POST /api/v1/customer/auth/mfa/confirm", auth.requireCustomer(http.HandlerFunc(auth.customerMFAConfirm)))
 	mux.Handle("POST /api/v1/customer/auth/mfa/disable", auth.requireCustomer(http.HandlerFunc(auth.customerMFADisable)))
@@ -260,6 +270,16 @@ func NewHandler(deps Dependencies) (http.Handler, error) {
 	mux.Handle("PUT /api/v1/admin/settings/logo", auth.require("settings:write", http.HandlerFunc(adminSettings.linkLogo)))
 	mux.Handle("PUT /api/v1/admin/settings/logo/mode", auth.require("settings:write", http.HandlerFunc(adminSettings.logoMode)))
 	mux.Handle("PUT /api/v1/admin/settings/contact", auth.require("settings:write", http.HandlerFunc(adminSettings.contact)))
+	mux.Handle("GET /api/v1/admin/settings/telegram", auth.require("settings:read", http.HandlerFunc(tg.adminSettings)))
+	mux.Handle("PUT /api/v1/admin/settings/telegram", auth.require("settings:write", http.HandlerFunc(tg.adminUpdate)))
+	mux.Handle("POST /api/v1/admin/settings/telegram/check", auth.require("settings:write", http.HandlerFunc(tg.adminCheck)))
+	mux.Handle("GET /api/v1/customer/telegram", auth.requireCustomer(http.HandlerFunc(tg.customerTelegram)))
+	mux.Handle("POST /api/v1/customer/telegram/bind", auth.requireCustomer(http.HandlerFunc(tg.customerBind)))
+	mux.Handle("POST /api/v1/customer/telegram/invite-link", auth.requireCustomer(http.HandlerFunc(tg.customerInviteLink)))
+	mux.Handle("DELETE /api/v1/customer/telegram", auth.requireCustomer(http.HandlerFunc(tg.customerUnlink)))
+	mux.Handle("GET /api/v1/admin/settings/locale", auth.require("settings:read", http.HandlerFunc(adminSettings.locale)))
+	mux.Handle("PUT /api/v1/admin/settings/locale", auth.require("settings:write", http.HandlerFunc(adminSettings.updateLocale)))
+	mux.Handle("POST /api/v1/admin/settings/locale/rate", auth.require("settings:write", http.HandlerFunc(adminSettings.fetchRate)))
 	mux.Handle("POST /api/v1/admin/settings/site/test-mail", auth.require("settings:write", http.HandlerFunc(adminSettings.testMail)))
 	mux.Handle("GET /api/v1/admin/services", auth.require("services:read", http.HandlerFunc(automation.listServices)))
 	mux.Handle("GET /api/v1/admin/jobs", auth.require("services:read", http.HandlerFunc(automation.listJobs)))

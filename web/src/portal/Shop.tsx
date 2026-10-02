@@ -4,6 +4,7 @@ import { ArrowLeftRight, ArrowRight, ShieldCheck, Store } from 'lucide-react'
 import { navigatePortal, osOptions } from '../shared/nav'
 import { CouponField } from '../Coupons'
 import { cycleLabel, money, bandwidthLabel } from '../shared/ui'
+import { CurrencyNote } from '../shared/LocaleMenu'
 import { cycleOrder, priceLeft } from '../shared/cycles'
 import { stockLeft, StockTag } from '../shared/stock'
 
@@ -159,6 +160,7 @@ export function CustomerShop({ customer }: { customer: CustomerIdentity }) {
         </button>
       </div>
 
+      <CurrencyNote />
       {error && <div className="form-error">{error}</div>}
 
       <div className={categories.length ? 'shop-body with-categories' : 'shop-body'}>

@@ -61,6 +61,10 @@ type Runtime struct {
 	// ContactIntro and ContactLinks fill the portal's "联系我们" page.
 	ContactIntro string
 	ContactLinks []ContactLink
+	// Locale is the display language and currency (see LocaleSettings).
+	Locale LocaleSettings
+	// Telegram configures the Telegram bot and its rewards.
+	Telegram TelegramSettings
 }
 
 // MarketplaceSettings controls the hosting center: whether customers can
@@ -176,7 +180,7 @@ func NewManager(ctx context.Context, db *pgxpool.Pool, box *security.SecretBox, 
 		LifecycleInterval: fallback.LifecycleInterval, RenewalLeadTime: fallback.RenewalLeadTime,
 		OverdueGracePeriod: fallback.OverdueGracePeriod, TerminationRetention: fallback.TerminationRetention,
 		PaymentGateway:    legacyPaymentConfig(fallback.PaymentProviderName, fallback.PaymentCheckoutURL, fallback.PaymentWebhookSecret),
-		MailNotifications: DefaultMailNotifications(), TicketAttachmentMaxMB: 5, Marketplace: DefaultMarketplaceSettings(),
+		MailNotifications: DefaultMailNotifications(), TicketAttachmentMaxMB: 5, Marketplace: DefaultMarketplaceSettings(), Locale: DefaultLocaleSettings(), Telegram: DefaultTelegramSettings(),
 	})
 	if err := m.reload(ctx); err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return nil, err
@@ -273,7 +277,7 @@ func (m *Manager) UpdatePaymentGateway(ctx context.Context, in PaymentGatewayInp
 
 func (m *Manager) reload(ctx context.Context) error {
 	var v Runtime
-	var payment, notification, metrics, gatewayConfig, smtpPassword, mailNotifications, contactLinks []byte
+	var payment, notification, metrics, gatewayConfig, smtpPassword, mailNotifications, contactLinks, localeSettings, telegramSettings []byte
 	var gatewayType string
 	var poll, reconcile, lifecycle, lead, grace, retention int
 	err := m.db.QueryRow(ctx, `SELECT app_name,public_url,timezone,payment_provider_name,payment_checkout_url,
@@ -284,15 +288,19 @@ func (m *Manager) reload(ctx context.Context) error {
 		mail_notifications,ticket_attachment_max_mb,
 		marketplace_enabled,marketplace_fee_percent::float8,marketplace_offline_hours,trade_fee_percent::float8,admin_url,
 		max_overcommit_cpu::float8,max_overcommit_ram::float8,max_overcommit_disk::float8,max_overcommit_traffic::float8,
-		logo_url,logo_version,logo_mode,trade_hold_days,contact_intro,contact_links,logo_dark_url,logo_dark_version,logo_favicon_url,logo_favicon_version
+		logo_url,logo_version,logo_mode,trade_hold_days,contact_intro,contact_links,logo_dark_url,logo_dark_version,logo_favicon_url,logo_favicon_version,locale_settings,telegram_settings_encrypted
 		FROM system_settings WHERE singleton=true`).Scan(&v.AppName, &v.PublicURL, &v.Timezone, &v.PaymentProviderName, &v.PaymentCheckoutURL,
 		&payment, &v.NotificationWebhookURL, &notification, &metrics, &poll, &reconcile, &lifecycle, &lead, &grace, &retention, &gatewayType, &gatewayConfig,
 		&v.SMTP.Host, &v.SMTP.Port, &v.SMTP.Username, &smtpPassword, &v.SMTP.From, &v.SMTP.Security,
 		&mailNotifications, &v.TicketAttachmentMaxMB,
 		&v.Marketplace.Enabled, &v.Marketplace.FeePercent, &v.Marketplace.OfflineHours, &v.Marketplace.TradeFeePercent, &v.AdminURL,
 		&v.Marketplace.MaxOvercommitCPU, &v.Marketplace.MaxOvercommitRAM, &v.Marketplace.MaxOvercommitDisk, &v.Marketplace.MaxOvercommitTraffic,
-		&v.LogoURL, &v.LogoVersion, &v.LogoMode, &v.Marketplace.TradeHoldDays, &v.ContactIntro, &contactLinks, &v.LogoDarkURL, &v.LogoDarkVersion, &v.LogoFaviconURL, &v.LogoFaviconVersion)
+		&v.LogoURL, &v.LogoVersion, &v.LogoMode, &v.Marketplace.TradeHoldDays, &v.ContactIntro, &contactLinks, &v.LogoDarkURL, &v.LogoDarkVersion, &v.LogoFaviconURL, &v.LogoFaviconVersion, &localeSettings, &telegramSettings)
 	if err != nil {
+		return err
+	}
+	v.Locale = decodeLocaleSettings(localeSettings)
+	if v.Telegram, err = m.decodeTelegram(telegramSettings); err != nil {
 		return err
 	}
 	v.ContactLinks = []ContactLink{}
@@ -431,6 +439,7 @@ func validate(in InstallInput) (Runtime, InstallResult, error) {
 		NotificationWebhookURL: strings.TrimSpace(in.NotificationWebhookURL), NotificationWebhookSecret: strings.TrimSpace(in.NotificationWebhookSecret), MetricsToken: strings.TrimSpace(in.MetricsToken)}
 	v.PaymentGateway = PaymentGatewayConfig{Type: "disabled", AlipayGatewayURL: "https://openapi.alipay.com/gateway.do", EpayPaymentType: "alipay"}
 	v.MailNotifications, v.TicketAttachmentMaxMB, v.Marketplace = DefaultMailNotifications(), 5, DefaultMarketplaceSettings()
+	v.Locale, v.Telegram = DefaultLocaleSettings(), DefaultTelegramSettings()
 	if v.AppName == "" || strings.TrimSpace(in.AdminDisplayName) == "" || strings.TrimSpace(in.AdminEmail) == "" {
 		return Runtime{}, InstallResult{}, errors.New("站点名称和管理员信息不能为空")
 	}

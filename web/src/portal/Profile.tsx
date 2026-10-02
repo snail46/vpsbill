@@ -1,5 +1,6 @@
 import { CustomerIdentity } from '../api'
 import { StatusBadge, SecuritySettings } from '../shared/ui'
+import { TelegramPanel } from '../Telegram'
 
 export function CustomerProfile({ customer }: { customer: CustomerIdentity }) {
   return (
@@ -39,6 +40,7 @@ export function CustomerProfile({ customer }: { customer: CustomerIdentity }) {
         </div>
       </div>
 
+      <TelegramPanel />
       <SecuritySettings enabled={customer.mfa_enabled} customer />
     </section>
   )

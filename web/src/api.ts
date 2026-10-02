@@ -1,3 +1,4 @@
+import { lang, tr } from './shared/i18n'
 export type StaffUser = {
   id: string
   email: string
@@ -17,6 +18,8 @@ export type CustomerIdentity = {
   role: string
   mfa_enabled: boolean
   email_verified: boolean
+  // locale is the language mail to this customer is written in.
+  locale?: '' | 'zh' | 'en'
 }
 
 // Overcommit is a node's oversell ratio per resource; 1 sells exactly
@@ -527,6 +530,7 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
 async function request<T>(path: string, init: RequestInit): Promise<T> {
   const headers = new Headers(init.headers)
   headers.set('Accept', 'application/json')
+  headers.set('Accept-Language', lang)
   if (typeof init.body === 'string') headers.set('Content-Type', 'application/json')
   if (init.method && !['GET', 'HEAD'].includes(init.method.toUpperCase())) {
     headers.set('X-CSRF-Token', csrfToken(path))
@@ -535,7 +539,7 @@ async function request<T>(path: string, init: RequestInit): Promise<T> {
   if (response.status === 204) return undefined as T
   const payload = (await response.json().catch(() => ({}))) as Partial<Envelope<T>>
   if (!response.ok) {
-    const error = new Error(payload.message || '请求失败') as Error & { status?: number }
+    const error = new Error(tr(payload.message) || '请求失败') as Error & { status?: number }
     error.status = response.status
     throw error
   }
@@ -639,7 +643,7 @@ export function imageLabel(item: { name: string; release?: string; arch?: string
 
 export type WalletEntryRecord = {
   id: string
-  kind: 'topup' | 'earning' | 'payment' | 'clearance_refund' | 'clearance_penalty' | 'adjustment' | 'refund' | 'trade_purchase' | 'trade_sale'
+  kind: 'topup' | 'earning' | 'payment' | 'clearance_refund' | 'clearance_penalty' | 'adjustment' | 'refund' | 'trade_purchase' | 'trade_sale' | 'reward'
   amount_minor: number
   balance_after_minor: number
   currency: string

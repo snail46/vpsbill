@@ -5,6 +5,8 @@ import { setSiteFavicon, setSiteLogo, type LogoMode } from '../shared/boot'
 import { Brand, StatusBadge } from '../shared/ui'
 import type { ContactLink } from '../shared/contact'
 import { ContactSettings } from './ContactSettings'
+import { LocaleSettings } from './LocaleSettings'
+import { TelegramSettings } from './TelegramSettings'
 
 export function PaymentSettingsView() {
   const [settings, setSettings] = useState<PaymentSettingsRecord | null>(null)
@@ -452,6 +454,8 @@ export function SiteSettingsView() {
         />
       )}
       {settings && <ContactSettings intro={settings.contact_intro ?? ''} links={settings.contact_links ?? []} />}
+      <LocaleSettings />
+      <TelegramSettings />
 
       <form className="panel site-settings" onSubmit={submit}>
         <div className="form-grid">

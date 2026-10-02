@@ -18,6 +18,7 @@ import (
 	"vpsbill/internal/billing"
 	"vpsbill/internal/chat"
 	"vpsbill/internal/config"
+	"vpsbill/internal/fx"
 	"vpsbill/internal/hatch/gateway"
 	"vpsbill/internal/marketplace"
 	"vpsbill/internal/notifications"
@@ -28,6 +29,7 @@ import (
 	"vpsbill/internal/security"
 	"vpsbill/internal/settings"
 	"vpsbill/internal/store/postgres"
+	"vpsbill/internal/telegram"
 )
 
 // version is the commit the image was built from (see Dockerfile).
@@ -114,6 +116,9 @@ func main() {
 	mailNotifier := notify.New(postgres.NewMailStore(db), runtime, secretBox, logger)
 	go mailNotifier.RunSender(workCtx)
 	go mailNotifier.RunScanner(workCtx)
+	go fx.Run(workCtx, runtime, logger)
+	telegramBot := telegram.New(postgres.NewTelegramStore(db), runtime, logger)
+	go telegramBot.Run(workCtx)
 	marketStore := postgres.NewMarketplaceStore(db)
 	// Escrow release and clearance are idempotent, so every replica may run it.
 	marketService := marketplace.New(marketStore, catalogStore, secretBox, runtime, mailNotifier, logger)
@@ -143,6 +148,7 @@ func main() {
 		Notifier:      mailNotifier,
 		Marketplace:   marketService,
 		ChatHub:       chatHub,
+		Telegram:      telegramBot,
 		Backups:       backups,
 	})
 	if err != nil {

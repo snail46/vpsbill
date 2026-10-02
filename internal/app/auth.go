@@ -147,6 +147,8 @@ func (a *authenticator) customerRegister(w http.ResponseWriter, r *http.Request)
 		DisplayName string `json:"display_name"`
 		Email       string `json:"email"`
 		Password    string `json:"password"`
+		// Locale is the language the visitor signed up in.
+		Locale string `json:"locale"`
 	}
 	if !decodeJSON(w, r, &input) {
 		return
@@ -178,6 +180,11 @@ func (a *authenticator) customerRegister(w http.ResponseWriter, r *http.Request)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "internal_error"})
 		return
+	}
+	if input.Locale == "zh" || input.Locale == "en" {
+		if err := a.store.SetLocale(r.Context(), identity.UserID, input.Locale); err == nil {
+			identity.Locale = input.Locale
+		}
 	}
 	if mailReady {
 		if err := a.sendVerification(r.Context(), identity.UserID, identity.Email); err != nil {
