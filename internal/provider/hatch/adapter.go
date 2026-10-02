@@ -106,6 +106,9 @@ func (d *Driver) HostInfo(ctx context.Context) (provider.HostInfo, error) {
 		"hostname": info.Hostname, "agent_version": info.AgentVersion, "runtimes": info.Runtimes,
 		"public_ipv4": d.publicAddress(info.PublicIPv4), "details": info.Details, "detected": info.Detected,
 	}
+	if info.Country != "" {
+		raw["ip_country"] = info.Country
+	}
 	result := provider.HostInfo{Raw: raw, MachineID: info.MachineID,
 		Capacity: provider.Capacity{VCPU: info.Capacity.VCPU, RAMMB: info.Capacity.RAMMB, DiskGB: info.Capacity.DiskGB}}
 	if health := info.Health; health != nil {

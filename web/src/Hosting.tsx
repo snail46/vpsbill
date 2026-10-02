@@ -1,5 +1,5 @@
-import { FormEvent, useEffect, useRef, useState } from 'react'
-import { MapPin, MessagesSquare, Plus, RefreshCw, Server, Store, Ticket, TicketPercent, X } from 'lucide-react'
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react'
+import { ChevronRight, FilterX, MapPin, MessagesSquare, Plus, RefreshCw, Search, Server, Store, Ticket, TicketPercent, X } from 'lucide-react'
 import {
   api,
   cached,
@@ -34,6 +34,10 @@ import { ConnectSteps, PendingAgents } from './shared/agents'
 import { confirmDialog } from './shared/dialog'
 import { toast } from './shared/toast'
 import { t, tr } from './shared/i18n'
+import { CountryLabel, Flag, countryName } from './shared/country'
+import { currencySymbol, displayCurrency, plainMoney } from './shared/currency'
+import { arrangeMarket, headlinePrice, narrowing, noFilter, type MarketFilter, type MarketNode, type MarketSort } from './shared/market'
+import { TagInput } from './shared/tags'
 
 type Tab = 'market' | 'mine' | 'coupons' | 'tickets' | 'chat'
 const tabs: [Tab, string, typeof Store][] = [
@@ -83,14 +87,22 @@ export default function HostingCenter({ customer }: { customer: CustomerIdentity
   )
 }
 
+// placementNote tells the owner how the host's country was decided when
+// it was not simply read from the location they wrote.
+function placementNote(node: HostedNodeRecord) {
+  if (!node.country_code) return t('未能识别国家/地区，请在「地理位置」里写明国家或城市')
+  if (node.country_source === 'ip') return t('未能从填写的地理位置识别，按 IP 归属地归类')
+  if (node.ip_country && node.ip_country !== node.country_code) return t('IP 归属地为 {0} {1}，买家可以看到', node.ip_country, countryName(node.ip_country))
+  return ''
+}
+
 function lastSeen(node: HostedNodeRecord) {
   if (node.status === 'online') return t('在线')
   return node.last_seen_at ? t('离线（最后在线 {0}）', formatTime(node.last_seen_at)) : t('离线')
 }
 
 function planPrice(plan: PlanRecord) {
-  const sorted = [...plan.prices].sort((a, b) => cycleOrder(a.billing_cycle) - cycleOrder(b.billing_cycle))
-  const first = sorted.find(price => price.billing_cycle === 'monthly') ?? sorted[0]
+  const first = headlinePrice(plan)
   if (!first) return t('暂无报价')
   const more = plan.prices.length > 1 ? t(' 等 {0} 种周期', plan.prices.length) : ''
   return `${walletMoney(first.amount_minor, first.currency)} / ${cycleName(first.billing_cycle)}${more}`
@@ -128,6 +140,11 @@ function Market({ customer }: { customer: CustomerIdentity }) {
   const [buying, setBuying] = useState<{ node: HostedNodeRecord; plan: PlanRecord } | null>(null)
   const [reporting, setReporting] = useState<HostedNodeRecord | null>(null)
   const [error, setError] = useState('')
+  const [filter, setFilter] = useState<MarketFilter>(noFilter)
+  // The market opens on the countries; country is the one opened (''
+  // being the hosts that could not be placed) and nodeID the host opened.
+  const [country, setCountry] = useState<string | null>(null)
+  const [nodeID, setNodeID] = useState('')
 
   const load = () =>
     api<MarketRecord>('/api/v1/customer/market')
@@ -137,6 +154,37 @@ function Market({ customer }: { customer: CustomerIdentity }) {
     void load()
   }, [])
 
+  const countries = useMemo(() => arrangeMarket(market?.nodes ?? [], filter), [market, filter])
+  const shownNodes = countries.flatMap(item => item.nodes)
+  const narrowed = narrowing(filter)
+  const opened = country === null ? null : (countries.find(item => item.code === country) ?? { code: country, nodes: [], plans: 0, low: null, high: null })
+  const openedRaw = nodeID ? market?.nodes.find(node => node.id === nodeID) : undefined
+  // A host stays open while the filter hides its plans, so typing does not
+  // throw the visitor back a level.
+  const openedNode: MarketNode | null = openedRaw
+    ? (shownNodes.find(item => item.node.id === nodeID) ?? { node: openedRaw, plans: [], low: null, high: null, inStock: false })
+    : null
+  const set = (patch: Partial<MarketFilter>) => setFilter(current => ({ ...current, ...patch }))
+  const open = (node: HostedNodeRecord) => {
+    setCountry(node.country_code || '')
+    setNodeID(node.id)
+  }
+  const nodeCards = (items: MarketNode[]) => (
+    <div className="market-grid">
+      {items.map(item => (
+        <NodeCard key={item.node.id} item={item} onOpen={() => open(item.node)} />
+      ))}
+    </div>
+  )
+  const nothing = (
+    <div className="empty-card">
+      {t('没有符合条件的母机或套餐。')}
+      <button className="text-button" onClick={() => setFilter({ ...noFilter, sort: filter.sort })}>
+        {t('清除筛选')}
+      </button>
+    </div>
+  )
+
   return (
     <>
       <CurrencyNote />
@@ -144,82 +192,244 @@ function Market({ customer }: { customer: CustomerIdentity }) {
       <div className="note-banner">
         {t('托管母机由其他用户提供，机主拥有服务器的 root 权限。付款由平台托管、按天结算给机主；母机离线满 24 小时或机主下架时实例会被清退：剩余价值退还到您的余额，另由机主按剩余价值额外赔付一份（以机主当时的余额为限）。')}
       </div>
-      <div className="market-grid">
-        {market?.nodes.map(node => (
-          <article key={node.id} className="panel market-node">
-            <div className="panel-heading">
+      {!!market?.nodes.length && (
+        <div className="filter-bar market-filter">
+          <div className="filter-fields">
+            <label className="filter-field filter-search">
+              <span>{t('搜索')}</span>
               <div>
-                <h3>{node.name}</h3>
-                <small>
-                  {t('机主 {0}{1}', node.owner_name, node.mine ? t('（我自己）') : '')}
-                </small>
+                <Search size={14} aria-hidden="true" />
+                <input type="search" value={filter.query} placeholder={t('母机、套餐、标签、地区、线路')} onChange={event => set({ query: event.target.value })} />
               </div>
-              <span className={node.status === 'online' ? 'tag success' : 'tag danger'}>{node.status === 'online' ? t('在线') : t('离线')}</span>
-            </div>
-            <dl className="market-facts">
+            </label>
+            <label className="filter-field filter-number market-price-range">
+              <span>{t('价格（{0}）', currencySymbol())}</span>
               <div>
-                <dt><MapPin size={13} /> {t('位置')}</dt>
-                <dd>{node.region_name} · {node.location}</dd>
+                <input type="number" min={0} step="any" inputMode="decimal" value={filter.min} placeholder={t('最低')} aria-label={t('最低价格')} onChange={event => set({ min: event.target.value })} />
+                <em>–</em>
+                <input type="number" min={0} step="any" inputMode="decimal" value={filter.max} placeholder={t('最高')} aria-label={t('最高价格')} onChange={event => set({ max: event.target.value })} />
               </div>
-              <div>
-                <dt>{t('线路')}</dt>
-                <dd>{node.line_description}</dd>
-              </div>
-              <div>
-                <dt>{t('母机到期')}</dt>
-                <dd>{node.expires_at || '—'}</dd>
-              </div>
-              <div>
-                <dt>{t('月流量限额')}</dt>
-                <dd>{node.traffic_quota_gb ? t('{0} GB（整机）', node.traffic_quota_gb) : t('不限')}</dd>
-              </div>
-              <div>
-                <dt>{t('剩余可售')}</dt>
-                <dd>{t('{0} 核 · {1} MB · {2} GB', node.free_vcpu, node.free_ram_mb, node.free_disk_gb)}</dd>
-              </div>
-              <div>
-                <dt>{t('超售')}</dt>
-                <dd>{overcommitText(node.overcommit)}</dd>
-              </div>
-            </dl>
-            <SupplyDetails node={node} sellable={{ vcpu: node.capacity_vcpu, ram_mb: node.capacity_ram_mb, disk_gb: node.capacity_disk_gb }} />
-            {!node.mine && (
-              <button className="text-button report-link" onClick={() => setReporting(node)}>
-                {t('举报资源不符或超售')}
+            </label>
+            <label className="filter-field">
+              <span>{t('排序')}</span>
+              <select value={filter.sort} onChange={event => set({ sort: event.target.value as MarketSort })}>
+                <option value="default">{t('默认排序')}</option>
+                <option value="price-asc">{t('价格从低到高')}</option>
+                <option value="price-desc">{t('价格从高到低')}</option>
+              </select>
+            </label>
+            <label className="switch market-stock-switch">
+              <input type="checkbox" checked={filter.inStock} onChange={event => set({ inStock: event.target.checked })} />
+              <span />
+              {t('仅显示有货')}
+            </label>
+          </div>
+          <div className="filter-summary">
+            <span>{t('{0} 个地区 · {1} 台母机 · {2} 个套餐', countries.length, shownNodes.length, countries.reduce((sum, item) => sum + item.plans, 0))}</span>
+            {narrowed > 0 && (
+              <button type="button" className="text-button" onClick={() => setFilter({ ...noFilter, sort: filter.sort })}>
+                <FilterX size={13} />
+                {t('清除筛选')}
               </button>
             )}
-            <div className="market-plans">
-              {node.plans.map(plan => (
-                <div key={plan.id} className="market-plan">
-                  <div>
-                    <strong>{plan.name}</strong>
-                    <span className="tag">{virtNames[plan.virtualization] || plan.virtualization}</span>
-                    <StockTag plan={plan} />
-                  </div>
-                  <PlanSpecs plan={plan} />
-                  {plan.description && <p className="plan-description">{plan.description}</p>}
-                  <PlanTerms plan={plan} />
-                  <div className="market-plan-buy">
-                    <strong>{planPrice(plan)}</strong>
-                    <button
-                      className="primary-button compact"
-                      disabled={node.mine || node.status !== 'online' || !!node.health_hold_reason || stockLeft(plan) === 0}
-                      onClick={() => setBuying({ node, plan })}
-                    >
-                      {stockLeft(plan) === 0 ? t('已售罄') : t('购买')}
-                    </button>
-                    {stockLeft(plan) === 0 && !node.mine && <WatchButton planID={plan.id} />}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </article>
-        ))}
-        {market && !market.nodes.length && <div className="empty-card">{t('托管市场暂时没有在售母机。')}</div>}
-      </div>
+          </div>
+        </div>
+      )}
+      {opened && (
+        <nav className="market-crumbs" aria-label={t('当前位置')}>
+          <button
+            className="text-button"
+            onClick={() => {
+              setCountry(null)
+              setNodeID('')
+            }}
+          >
+            {t('全部地区')}
+          </button>
+          <ChevronRight size={14} aria-hidden="true" />
+          {openedNode ? (
+            <>
+              <button className="text-button" onClick={() => setNodeID('')}>
+                <CountryLabel code={opened.code} />
+              </button>
+              <ChevronRight size={14} aria-hidden="true" />
+              <strong>{openedNode.node.name}</strong>
+            </>
+          ) : (
+            <strong>
+              <CountryLabel code={opened.code} />
+            </strong>
+          )}
+        </nav>
+      )}
+
+      {!opened && (
+        <>
+          <div className="market-countries">
+            {countries.map(item => (
+              <button key={item.code} className="market-country" onClick={() => setCountry(item.code)}>
+                <Flag code={item.code} />
+                <span>
+                  <strong>
+                    {item.code && <b>{item.code}</b>}
+                    {countryName(item.code)}
+                  </strong>
+                  <small>
+                    {t('{0} 个套餐', item.plans)}
+                    {item.low !== null && ` · ${priceRange(item)}`}
+                  </small>
+                </span>
+                <em title={t('{0} 台母机', item.nodes.length)}>{item.nodes.length}</em>
+              </button>
+            ))}
+          </div>
+          {narrowed > 0 && shownNodes.length > 0 && (
+            <>
+              <h3 className="market-heading">{t('符合条件的母机')}</h3>
+              {nodeCards(shownNodes)}
+            </>
+          )}
+          {market && !market.nodes.length && <div className="empty-card">{t('托管市场暂时没有在售母机。')}</div>}
+          {!!market?.nodes.length && !countries.length && nothing}
+        </>
+      )}
+
+      {opened && !openedNode && (opened.nodes.length ? nodeCards(opened.nodes) : nothing)}
+
+      {openedNode && (
+        <MarketNodeDetail
+          item={openedNode}
+          onBuy={plan => setBuying({ node: openedNode.node, plan })}
+          onReport={() => setReporting(openedNode.node)}
+          onShowAll={() => setFilter({ ...noFilter, sort: filter.sort })}
+        />
+      )}
       {reporting && <ReportDialog nodeID={reporting.id} nodeName={reporting.name} onClose={() => setReporting(null)} />}
       {buying && <BuyDialog customer={customer} node={buying.node} plan={buying.plan} onClose={() => setBuying(null)} onDone={() => void load()} />}
     </>
+  )
+}
+
+function priceRange(item: { low: number | null; high: number | null }) {
+  if (item.low === null || item.high === null) return t('暂无报价')
+  const low = plainMoney(item.low, displayCurrency())
+  return item.low === item.high ? low : `${low} – ${plainMoney(item.high, displayCurrency())}`
+}
+
+// NodeCard is a host in a country's list; opening it shows its plans.
+function NodeCard({ item, onOpen }: { item: MarketNode; onOpen: () => void }) {
+  const { node } = item
+  return (
+    <button className="panel market-node-card" onClick={onOpen}>
+      <span className="market-node-card-head">
+        <strong>{node.name}</strong>
+        <span className={node.status === 'online' ? 'tag success' : 'tag danger'}>{node.status === 'online' ? t('在线') : t('离线')}</span>
+      </span>
+      <small>
+        <CountryLabel code={node.country_code || ''} /> · {node.location}
+      </small>
+      <small className="market-node-card-line">{node.line_description}</small>
+      <span className="market-node-card-foot">
+        <span>
+          {t('{0} 个套餐', item.plans.length)}
+          {!item.inStock && <span className="tag stock-tag sold-out">{t('暂时无货')}</span>}
+        </span>
+        <strong>{priceRange(item)}</strong>
+        <ChevronRight size={16} aria-hidden="true" />
+      </span>
+    </button>
+  )
+}
+
+// MarketNodeDetail is a host with the plans the filter left.
+function MarketNodeDetail({ item, onBuy, onReport, onShowAll }: { item: MarketNode; onBuy: (plan: PlanRecord) => void; onReport: () => void; onShowAll: () => void }) {
+  const { node, plans } = item
+  const hidden = node.plans.length - plans.length
+  return (
+    <article className="panel market-node">
+      <div className="panel-heading">
+        <div>
+          <h3>{node.name}</h3>
+          <small>{t('机主 {0}{1}', node.owner_name, node.mine ? t('（我自己）') : '')}</small>
+        </div>
+        <span className={node.status === 'online' ? 'tag success' : 'tag danger'}>{node.status === 'online' ? t('在线') : t('离线')}</span>
+      </div>
+      <dl className="market-facts">
+        <div>
+          <dt><MapPin size={13} /> {t('位置')}</dt>
+          <dd>
+            {node.region_name} · {node.location}
+            {node.ip_country && node.ip_country !== node.country_code && <small className="block">{t('IP 归属地：{0} {1}', node.ip_country, countryName(node.ip_country))}</small>}
+          </dd>
+        </div>
+        <div>
+          <dt>{t('线路')}</dt>
+          <dd>{node.line_description}</dd>
+        </div>
+        <div>
+          <dt>{t('母机到期')}</dt>
+          <dd>{node.expires_at || '—'}</dd>
+        </div>
+        <div>
+          <dt>{t('月流量限额')}</dt>
+          <dd>{node.traffic_quota_gb ? t('{0} GB（整机）', node.traffic_quota_gb) : t('不限')}</dd>
+        </div>
+        <div>
+          <dt>{t('剩余可售')}</dt>
+          <dd>{t('{0} 核 · {1} MB · {2} GB', node.free_vcpu, node.free_ram_mb, node.free_disk_gb)}</dd>
+        </div>
+        <div>
+          <dt>{t('超售')}</dt>
+          <dd>{overcommitText(node.overcommit)}</dd>
+        </div>
+      </dl>
+      <SupplyDetails node={node} sellable={{ vcpu: node.capacity_vcpu, ram_mb: node.capacity_ram_mb, disk_gb: node.capacity_disk_gb }} />
+      {!node.mine && (
+        <button className="text-button report-link" onClick={onReport}>
+          {t('举报资源不符或超售')}
+        </button>
+      )}
+      <div className="market-plans">
+        {plans.map(plan => (
+          <div key={plan.id} className="market-plan">
+            <div>
+              <strong>{plan.name}</strong>
+              <span className="tag">{virtNames[plan.virtualization] || plan.virtualization}</span>
+              <StockTag plan={plan} />
+            </div>
+            <PlanSpecs plan={plan} />
+            {!!plan.tags?.length && (
+              <div className="shop-tags">
+                {plan.tags.map(tag => (
+                  <span key={tag}>{tag}</span>
+                ))}
+              </div>
+            )}
+            {plan.description && <p className="plan-description">{plan.description}</p>}
+            <PlanTerms plan={plan} />
+            <div className="market-plan-buy">
+              <strong>{planPrice(plan)}</strong>
+              <button
+                className="primary-button compact"
+                disabled={node.mine || node.status !== 'online' || !!node.health_hold_reason || stockLeft(plan) === 0}
+                onClick={() => onBuy(plan)}
+              >
+                {stockLeft(plan) === 0 ? t('已售罄') : t('购买')}
+              </button>
+              {stockLeft(plan) === 0 && !node.mine && <WatchButton planID={plan.id} />}
+            </div>
+          </div>
+        ))}
+        {hidden > 0 && (
+          <p className="market-hidden">
+            {plans.length ? t('另有 {0} 个套餐不符合筛选条件。', hidden) : t('这台母机没有符合筛选条件的套餐。')}
+            <button className="text-button" onClick={onShowAll}>
+              {t('显示全部')}
+            </button>
+          </p>
+        )}
+      </div>
+    </article>
   )
 }
 
@@ -544,6 +754,7 @@ function NodeInfoFields({
       <label>
         <span>{t('地理位置（真实填写）')}</span>
         <input name="location" required minLength={2} maxLength={80} defaultValue={node?.location} placeholder={t('例如 香港 葵涌 / 美国 洛杉矶')} />
+        <small>{t('请写明国家或地区（如 香港、美国 洛杉矶、Tokyo JP）：托管市场按它把母机归入对应的国家/地区分类。')}</small>
       </label>
       <label>
         <span>{t('母机租约到期日')}</span>
@@ -697,6 +908,11 @@ function HostedNodeCard({
           <h3>{node.name}</h3>
           <small>
             {t('{0} · {1} · 到期 {2}', node.region_name, node.location, node.expires_at)}
+          </small>
+          <small className="hosted-country">
+            {t('市场分类：')}
+            <CountryLabel code={node.country_code || ''} />
+            {placementNote(node) && <span className={node.country_source === 'location' ? '' : 'warn-text'}>{placementNote(node)}</span>}
           </small>
         </div>
         <div className="form-actions">
@@ -865,6 +1081,7 @@ function HostedPlanForm({ node, plan, onClose, onSaved }: { node: HostedNodeReco
   const [allowed, setAllowed] = useState<string[]>(plan?.allowed_template_ids || [])
   const [fallback, setFallback] = useState(plan?.default_template_id || '')
   const [limited, setLimited] = useState(!!plan?.purchase_limit)
+  const [tags, setTags] = useState<string[]>(plan?.tags ?? [])
   const [capacity, setCapacity] = useState<StockCapacityRecord | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -903,6 +1120,7 @@ function HostedPlanForm({ node, plan, onClose, onSaved }: { node: HostedNodeReco
       ...readDiskIO(form),
       enabled: form.get('enabled') === 'on',
       description: String(form.get('description') || ''),
+      tags,
       purchase_limit: limited ? Number(form.get('purchase_limit') || 0) : 0,
       early_refund: form.get('early_refund') === 'on',
     }
@@ -1001,6 +1219,10 @@ function HostedPlanForm({ node, plan, onClose, onSaved }: { node: HostedNodeReco
         <label className="wide">
           <span>{t('套餐描述（可选，展示在托管市场）')}</span>
           <textarea name="description" maxLength={1000} rows={3} defaultValue={plan?.description} placeholder={t('例如适用场景、线路特点、是否支持某些用途')} />
+        </label>
+        <label className="wide">
+          <span>{t('标签（可选，展示在托管市场，买家可以按标签搜索）')}</span>
+          <TagInput value={tags} onChange={setTags} placeholder={t('如：CN2 GIA、原生 IP、解锁流媒体')} />
         </label>
         <div className="wide">
           <label className="checkbox">

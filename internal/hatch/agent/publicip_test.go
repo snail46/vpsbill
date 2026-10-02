@@ -48,3 +48,21 @@ func TestDetectPublicIPv4Sources(t *testing.T) {
 		t.Fatal("a private address was accepted")
 	}
 }
+
+func TestAskCountry(t *testing.T) {
+	answer := "fl=1\nh=1.1.1.1\nip=203.0.113.44\nloc=HK\ntls=TLSv1.3\n"
+	trace := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(answer))
+	}))
+	defer trace.Close()
+	client := &http.Client{}
+	if country, err := askCountry(context.Background(), client, trace.URL); err != nil || country != "HK" {
+		t.Fatalf("trace: %q %v", country, err)
+	}
+	for _, unknown := range []string{"loc=XX\n", "loc=T1\n", "loc=hk\n", "ip=203.0.113.44\n", ""} {
+		answer = unknown
+		if country, err := askCountry(context.Background(), client, trace.URL); err == nil {
+			t.Fatalf("%q was read as %q", unknown, country)
+		}
+	}
+}

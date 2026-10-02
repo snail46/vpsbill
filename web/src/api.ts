@@ -713,6 +713,13 @@ export type HostedNodeRecord = NodeSupply & {
   plans: PlanRecord[]
   services?: HostedServiceRecord[]
   mine?: boolean
+  // country_code is the country the host is listed under in the market
+  // ('' when nothing tells); country_source is what told: the owner's
+  // description ('location') or the address ('ip'). ip_country is where
+  // the host's address belongs, when its agent reports it.
+  country_code?: string
+  country_source?: '' | 'location' | 'ip'
+  ip_country?: string
 }
 
 export type MarketRecord = { nodes: HostedNodeRecord[]; fee_percent: number; overcommit_limits: Overcommit }

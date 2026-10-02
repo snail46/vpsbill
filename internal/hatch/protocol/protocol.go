@@ -126,6 +126,9 @@ type HostInfo struct {
 	AgentVersion string   `json:"agent_version"`
 	Runtimes     []string `json:"runtimes"`
 	PublicIPv4   string   `json:"public_ipv4"`
+	// Country is the two-letter code of the country the host's address
+	// belongs to, when the agent could find out.
+	Country string `json:"country,omitempty"`
 	// Capacity is what the host offers: the detected hardware, lowered by
 	// the operator's config. It never exceeds Detected.
 	Capacity Capacity `json:"capacity"`

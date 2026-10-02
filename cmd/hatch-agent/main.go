@@ -189,6 +189,7 @@ func run(args []string) error {
 	}
 	go service.Meter(ctx, time.Minute)
 	go service.MeasureDisk()
+	go detectCountry(ctx, service, logger)
 	attrs := []any{"version", version, "runtimes", config.Runtimes()}
 	if config.LXD != nil {
 		attrs = append(attrs, "lxd_socket", config.LXD.Socket, "lxd_network", config.LXD.Network)
@@ -199,6 +200,32 @@ func run(args []string) error {
 	logger.Info("hatch agent started", attrs...)
 	client.Run(ctx)
 	return nil
+}
+
+// detectCountry finds the country the host's address belongs to, trying
+// again until it is known and then once a day, since hosts change address.
+func detectCountry(ctx context.Context, service *agent.Service, logger *slog.Logger) {
+	known := ""
+	for {
+		detectCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+		country, err := agent.DetectCountry(detectCtx)
+		cancel()
+		wait := 24 * time.Hour
+		switch {
+		case err != nil && known == "":
+			wait = 10 * time.Minute
+			logger.Debug("country of the public address not detected", "error", err)
+		case err == nil && country != known:
+			known = country
+			service.SetCountry(country)
+			logger.Info("detected the country of the public address", "country", country)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(wait):
+		}
+	}
 }
 
 // redetectPublicIPv4 looks the address up again now and then: providers

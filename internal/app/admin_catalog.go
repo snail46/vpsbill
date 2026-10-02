@@ -780,20 +780,30 @@ func cleanPlanLabels(plan *postgres.Plan) string {
 	if utf8.RuneCountInString(plan.Description) > maxPlanDescRunes {
 		return fmt.Sprintf("套餐描述最多 %d 个字", maxPlanDescRunes)
 	}
-	tags := make([]string, 0, len(plan.Tags))
-	for _, tag := range plan.Tags {
+	tags, message := cleanPlanTags(plan.Tags)
+	if message != "" {
+		return message
+	}
+	plan.Tags = tags
+	return ""
+}
+
+// cleanPlanTags tidies a plan's tags, dropping empty and repeated ones, or
+// returns why they cannot be kept.
+func cleanPlanTags(raw []string) ([]string, string) {
+	tags := make([]string, 0, len(raw))
+	for _, tag := range raw {
 		tag = strings.Join(strings.Fields(tag), " ")
 		if tag == "" || containsString(tags, tag) {
 			continue
 		}
 		if utf8.RuneCountInString(tag) > maxPlanTagRunes {
-			return fmt.Sprintf("标签「%s」太长，每个标签最多 %d 个字", tag, maxPlanTagRunes)
+			return nil, fmt.Sprintf("标签「%s」太长，每个标签最多 %d 个字", tag, maxPlanTagRunes)
 		}
 		tags = append(tags, tag)
 	}
 	if len(tags) > maxPlanTags {
-		return fmt.Sprintf("标签最多 %d 个", maxPlanTags)
+		return nil, fmt.Sprintf("标签最多 %d 个", maxPlanTags)
 	}
-	plan.Tags = tags
-	return ""
+	return tags, ""
 }

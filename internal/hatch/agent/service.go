@@ -56,6 +56,8 @@ type Service struct {
 	// publicIPv4 starts as the configured or detected address; the agent
 	// detects it again now and then, since hosts may change address.
 	publicIPv4 atomic.Pointer[string]
+	// country is where the host's address belongs, "" until detected.
+	country atomic.Pointer[string]
 
 	// background tracks work left running after a reply, such as
 	// installing packages; tests wait for it.
@@ -101,11 +103,15 @@ func NewService(config Config, version string, store *Store, runtimes []Runtime,
 		now: time.Now, passwordRetry: 3 * time.Second, firstSampleWait: time.Second, run: runCommand, locks: map[string]*sync.Mutex{}, samples: map[string]samples{},
 	}
 	service.SetPublicIPv4(config.PublicIPv4)
+	service.SetCountry("")
 	return service
 }
 
 // PublicIPv4 is the address customers reach the host's NAT ports on.
 func (s *Service) PublicIPv4() string { return *s.publicIPv4.Load() }
+
+// SetCountry records the country the host's address belongs to.
+func (s *Service) SetCountry(code string) { s.country.Store(&code) }
 
 // SetPublicIPv4 replaces the address reported from now on.
 func (s *Service) SetPublicIPv4(address string) { s.publicIPv4.Store(&address) }
@@ -297,7 +303,7 @@ func (s *Service) hostInfo(ctx context.Context) (protocol.HostInfo, error) {
 		}
 	}
 	return protocol.HostInfo{
-		Hostname: hostname, AgentVersion: s.version, Runtimes: s.config.Runtimes(), PublicIPv4: s.PublicIPv4(),
+		Hostname: hostname, AgentVersion: s.version, Runtimes: s.config.Runtimes(), PublicIPv4: s.PublicIPv4(), Country: *s.country.Load(),
 		Capacity: lowerCapacity(detected, s.config.Capacity), Detected: detected, MachineID: machineID(),
 		Health: health, QuotaErrors: quotaErrors, DiskPerf: s.diskPerf.Load(), IOLimitErrors: ioErrors, Details: details,
 	}, nil

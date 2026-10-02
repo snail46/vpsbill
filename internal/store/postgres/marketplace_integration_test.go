@@ -87,6 +87,27 @@ func TestHostingMarketplaceIntegration(t *testing.T) {
 	if err != nil || len(listed) != 1 || len(listed[0].Plans) != 1 || listed[0].OwnerEmail != "" || listed[0].FreeVCPU != 4 {
 		t.Fatalf("market listing: %+v err=%v", listed, err)
 	}
+	// The market files the node by what its owner wrote; the country its
+	// agent reports only tells when those words name none.
+	if place := listed[0].Placement; place.Country != "HK" || place.Source != "location" || place.IPCountry != "" {
+		t.Fatalf("placement from the location: %+v", place)
+	}
+	if _, err = db.Exec(ctx, `UPDATE nodes SET capacity=capacity||'{"ip_country":"JP"}', location='机房 A 区' WHERE id=$1`, nodeID); err != nil {
+		t.Fatal(err)
+	}
+	// The region's name would tell as well.
+	if _, err = db.Exec(ctx, `UPDATE regions SET name='默认区' WHERE id=$1`, regionID); err != nil {
+		t.Fatal(err)
+	}
+	if listed, err = market.HostedNodes(ctx, "", true, false); err != nil || listed[0].Country != "JP" || listed[0].Source != "ip" {
+		t.Fatalf("placement from the address: %+v err=%v", listed[0].Placement, err)
+	}
+	if _, err = db.Exec(ctx, `UPDATE nodes SET location='香港 葵涌' WHERE id=$1`, nodeID); err != nil {
+		t.Fatal(err)
+	}
+	if listed, err = market.HostedNodes(ctx, "", true, false); err != nil || listed[0].Country != "HK" || listed[0].IPCountry != "JP" {
+		t.Fatalf("placement with a differing address: %+v err=%v", listed[0].Placement, err)
+	}
 
 	// Top up, then pay a hosted order from the balance.
 	topup, err := billing.CreateTopupInvoice(ctx, buyerID, buyerUser, 10000)

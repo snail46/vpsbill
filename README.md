@@ -179,7 +179,7 @@ chmod +x verify.sh integration-test.sh
 
 收银台跳转和签名约定见 [在线收银台对接协议](docs/PAYMENT-CHECKOUT.md)。
 
-账户余额、托管规则、资金结算、清退、退款、优惠码与交易市场见 [账户余额与托管中心](docs/HOSTING.md)。
+托管市场按国家/地区分类浏览（按机主填写的地理位置识别，Agent 上报的 IP 归属地作佐证），可搜索、按价格区间筛选、按价格排序、只看有货。账户余额、托管规则、资金结算、清退、退款、优惠码与交易市场见 [账户余额与托管中心](docs/HOSTING.md)。
 
 母鸡对接层契约与各后端接入计划见 [母鸡对接层](docs/PROVIDERS.md)；Hatch Agent 安装与宿主机准备见 [Hatch Agent](docs/HATCH-AGENT.md)；CLICD 节点权限和接口约定见 [CLICD 集成说明](docs/CLICD-INTEGRATION.md)。
 

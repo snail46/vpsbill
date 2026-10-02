@@ -453,6 +453,9 @@ type hostedPlanInput struct {
 	Description   string `json:"description"`
 	PurchaseLimit int    `json:"purchase_limit"`
 	EarlyRefund   bool   `json:"early_refund"`
+	// Tags are short labels on the plan in the market, which buyers can
+	// search for.
+	Tags []string `json:"tags"`
 	// StockLimit is the plan's total stock (nil = capacity only);
 	// PriceLimits caps how many times each cycle's price is sold.
 	StockLimit  *int           `json:"stock_limit"`
@@ -489,7 +492,12 @@ func (in *hostedPlanInput) plan(node postgres.Node) (postgres.Plan, string) {
 	case in.PurchaseLimit < 0 || in.PurchaseLimit > 100:
 		return postgres.Plan{}, "每人限购数量需在 0-100 之间（0 表示不限购）"
 	}
+	tags, message := cleanPlanTags(in.Tags)
+	if message != "" {
+		return postgres.Plan{}, message
+	}
 	plan := postgres.Plan{
+		Tags: tags,
 		Name: in.Name, ProviderType: "hatch", Virtualization: in.Virtualization, VCPU: in.VCPU, RAMMB: in.RAMMB, DiskGB: in.DiskGB,
 		TrafficGB: in.TrafficGB, NetworkDownMbps: in.NetworkDownMbps, NetworkUpMbps: in.NetworkUpMbps,
 		AssignNAT: true, PortMappingCount: in.PortMappingCount, IPv4Count: 1, IPv6Count: 1,

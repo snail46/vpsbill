@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useState } from 'react'
 import { Flag, MessagesSquare, RefreshCw, Server, X } from 'lucide-react'
+import { CountryLabel } from './shared/country'
 import { api, cached, type ChatRoomRecord, type ClearanceRecord, type HostedNodeRecord } from './api'
 import ChatRoom from './ChatRoom'
 import { AdminReports } from './Reports'
@@ -135,6 +136,14 @@ function HostedNodes() {
                         <strong>{node.name}</strong>
                       </button>
                       <small className="block">{t('{0} · {1} · 到期 {2}', node.region_name, node.location, node.expires_at)}</small>
+                      <small className="block hosted-country">
+                        {t('市场分类：')}
+                        <CountryLabel code={node.country_code || ''} />
+                        {node.country_source === 'ip' && <span className="warn-text">{t('按 IP 归属地归类')}</span>}
+                        {node.country_source === 'location' && node.ip_country && node.ip_country !== node.country_code && (
+                          <span className="warn-text">{t('IP 归属地为 {0}', node.ip_country)}</span>
+                        )}
+                      </small>
                       <small className="block">
                         {t('可售 {0} 核 / {1} MB / {2} GB{3}', node.capacity_vcpu, node.capacity_ram_mb, node.capacity_disk_gb, node.capacity_cap_vcpu || node.capacity_cap_ram_mb || node.capacity_cap_disk_gb ? t('（已核定上限）') : '')}
                       </small>

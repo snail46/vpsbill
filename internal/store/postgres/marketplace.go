@@ -12,6 +12,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"vpsbill/internal/geo"
 )
 
 var (
@@ -201,6 +203,8 @@ type HostedNode struct {
 	CreatedAt          time.Time       `json:"created_at"`
 	Plans              []Plan          `json:"plans"`
 	Services           []HostedService `json:"services,omitempty"`
+	// Placement is the country the node is filed under in the market.
+	geo.Placement
 	NodeSupply
 }
 
@@ -355,6 +359,7 @@ func (m *MarketplaceStore) HostedNodes(ctx context.Context, ownerID string, mark
 		       n.last_seen_at,n.clearance_hold_until,n.retired_at,coalesce(n.retired_reason,''),
 		       (SELECT count(*) FROM services s JOIN plans p ON p.id=s.plan_id WHERE p.node_id=n.id AND s.status IN ('provisioning','active','overdue','suspended'))::int,
 		       coalesce(e.holding,0),coalesce(e.host_pending,0),coalesce(e.host_released,0),coalesce(e.fee,0),n.created_at,
+		       coalesce(n.capacity->>'ip_country',''),
 		       `+nodeSupplyColumns+`
 		FROM nodes n JOIN accounts a ON a.id=n.owner_account_id JOIN regions r ON r.id=n.region_id
 		LEFT JOIN LATERAL (SELECT sum(vcpu) vcpu, sum(ram_mb) ram_mb, sum(disk_gb) disk_gb FROM inventory_reservations WHERE node_id IN (SELECT m.id FROM nodes m WHERE m.id=n.id OR m.machine_id=n.machine_id) AND status='reserved') res ON true
@@ -374,14 +379,16 @@ func (m *MarketplaceStore) HostedNodes(ctx context.Context, ownerID string, mark
 	for rows.Next() {
 		var node HostedNode
 		var reservedVCPU, reservedRAM, reservedDisk int64
+		var ipCountry string
 		targets := []any{&node.ID, &node.Name, &node.OwnerAccountID, &node.OwnerName, &node.OwnerEmail, &node.OwnerBalanceMinor, &node.RegionID, &node.RegionName, &node.Location, &node.LineDescription,
 			&node.Status, &node.ListingStatus, &node.VirtualizationTypes, &node.ExpiresAt, &node.TrafficQuotaGB,
 			&node.CapacityVCPU, &node.CapacityRAMMB, &node.CapacityDiskGB, &node.CapVCPU, &node.CapRAMMB, &node.CapDiskGB, &reservedVCPU, &reservedRAM, &reservedDisk,
 			&node.LastSeenAt, &node.ClearanceHoldUntil, &node.RetiredAt, &node.RetiredReason, &node.ActiveServices,
-			&node.EscrowHoldingMinor, &node.HostPendingMinor, &node.HostReleasedMinor, &node.FeeMinor, &node.CreatedAt}
+			&node.EscrowHoldingMinor, &node.HostPendingMinor, &node.HostReleasedMinor, &node.FeeMinor, &node.CreatedAt, &ipCountry}
 		if err := rows.Scan(append(targets, node.NodeSupply.targets()...)...); err != nil {
 			return nil, err
 		}
+		node.Placement = geo.Place(node.Location, node.RegionName, ipCountry)
 		node.finish(ownerID == "" && !marketOnly)
 		node.FreeVCPU = max(node.CapacityVCPU-reservedVCPU, 0)
 		node.FreeRAMMB = max(node.CapacityRAMMB-reservedRAM, 0)
