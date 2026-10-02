@@ -106,8 +106,8 @@ var (
 	}
 	msgMeToday = text{"（今天已签到）", " (done today)"}
 	msgHelp    = text{
-		"<b>%s</b> 机器人\n\n• 在网站「账户资料」里绑定 Telegram%s\n• 在群里发送「签到」或 /checkin，每天领 %s 余额\n• /invite 获取专属邀请链接%s\n• /me 查看余额和奖励\n\n余额可用于在 <a href=\"%s\">%s</a> 购买和续费，不能提现。",
-		"<b>%s</b> bot\n\n• Link Telegram on the site under Profile%s\n• Send /checkin in the group every day for %s of balance\n• /invite gives you your own invite link%s\n• /me shows your balance and rewards\n\nBalance pays for purchases and renewals at <a href=\"%s\">%s</a>; it cannot be withdrawn.",
+		"<b>%s</b> 机器人\n\n• 在网站「账户资料」里绑定 Telegram%s\n• 在群里发送「签到」或 /checkin，每天领 %s 余额\n• /invite 获取专属邀请链接%s\n• /me 查看签到和奖励\n• 私聊发送 /services 查看 VPS、/balance 查看余额、/invoices 支付待付账单\n\n余额可用于在 <a href=\"%s\">%s</a> 购买和续费，不能提现。",
+		"<b>%s</b> bot\n\n• Link Telegram on the site under Profile%s\n• Send /checkin in the group every day for %s of balance\n• /invite gives you your own invite link%s\n• /me shows your check-ins and rewards\n• In a private chat: /services lists your VPS, /balance shows your balance, /invoices pays unpaid invoices\n\nBalance pays for purchases and renewals at <a href=\"%s\">%s</a>; it cannot be withdrawn.",
 	}
 	msgHelpBind   = text{"，奖励 %s", " and get %s"}
 	msgHelpInvite = text{"，每邀请一人奖励 %s", ", %s per member invited"}
@@ -119,7 +119,26 @@ var (
 		"🎉 你邀请的 %s 已满足条件，奖励 <b>%s</b> 已存入余额。",
 		"🎉 %s, whom you invited, now counts: <b>%s</b> was added to your balance.",
 	}
-	msgGroupLink = text{"群：%s", "Group: %s"}
+	msgGroupLink       = text{"群：%s", "Group: %s"}
+	msgPeriodBoth      = text{"⏰ 活动时间：%s 至 %s（北京时间）。", "⏰ Rewards run from %s to %s (UTC+8)."}
+	msgPeriodFrom      = text{"⏰ 活动自 %s 开始（北京时间）。", "⏰ Rewards start at %s (UTC+8)."}
+	msgPeriodUntil     = text{"⏰ 活动截止 %s（北京时间）。", "⏰ Rewards end at %s (UTC+8)."}
+	msgRewardsUpcoming = text{
+		"活动还没有开始，暂时不发放奖励。%s",
+		"Rewards have not started yet; nothing is paid for now. %s",
+	}
+	msgRewardsEnded = text{
+		"活动已经结束，不再发放奖励。%s",
+		"Rewards have ended; nothing is paid any more. %s",
+	}
+	msgHelpRebate = text{
+		"\n• 你邀请的成员首次充值或在线付款后，你再得该笔金额 %d%% 的返利",
+		"\n• When a member you invited first tops up or pays online, you get %d%% of that payment",
+	}
+	msgRebatePaid = text{
+		"🎉 你邀请的 %s 完成了首次付款，返利 <b>%s</b> 已存入余额。",
+		"🎉 %s, whom you invited, made a first payment: a rebate of <b>%s</b> was added to your balance.",
+	}
 )
 
 // amountRange prints the check-in reward: one amount, or the two ends.

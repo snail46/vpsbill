@@ -134,7 +134,7 @@ func TestNotificationChannelsIntegration(t *testing.T) {
 		mailed = append(mailed, to)
 		return nil
 	}
-	n.sendTelegram = func(_ context.Context, config settings.TelegramSettings, chatID int64, text string) error {
+	n.sendTelegram = func(_ context.Context, config settings.TelegramSettings, chatID int64, text string, _ [][]telegram.Button) error {
 		if config.BotToken != "1:token" {
 			t.Errorf("sent with token %q", config.BotToken)
 		}

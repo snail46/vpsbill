@@ -27,10 +27,27 @@ type TelegramSettingsRecord = {
   daily_budget_minor: number
   reply_ttl_seconds: number
   welcome: boolean
+  rewards_from: string | null
+  rewards_until: string | null
+  rebate_percent: number
+  rebate_max_minor: number
+  rebate_delay_hours: number
+  announce_chat_id: number
+  announce_chat_title: string
+  announce_new: boolean
+  announce_restock: boolean
+  announce_hosted: boolean
+  announce_daily_cap: number
+  admin_chat_id: number
+  admin_chat_title: string
   status: { running: boolean; last_error: string; last_poll_at?: string; chats: SeenChat[] }
   stats: { links: number; checkins_today: number; rewarded_today_minor: number; rewarded_total_minor: number; invites_rewarded: number; invites_pending: number; members: number }
 }
 type CheckRecord = { bot_username: string; chat_id: number; chat_title: string; chat_url: string; warnings: string[] }
+
+// The platform clock is UTC+8: a date-time field shows and takes that.
+const toField = (value: string | null) => (value ? formatTime(value).replace(' ', 'T') : '')
+const fromField = (value: string) => (value ? new Date(`${value}:00+08:00`).toISOString() : null)
 
 const yuan = (minor: number) => String(minor / 100)
 const minor = (value: string) => Math.round(Number(value) * 100)
@@ -54,6 +71,17 @@ export function TelegramSettings() {
   const [budget, setBudget] = useState('100')
   const [replyTTL, setReplyTTL] = useState('60')
   const [welcome, setWelcome] = useState(true)
+  const [from, setFrom] = useState('')
+  const [until, setUntil] = useState('')
+  const [rebate, setRebate] = useState('0')
+  const [rebateMax, setRebateMax] = useState('20')
+  const [rebateDelay, setRebateDelay] = useState('72')
+  const [announceChat, setAnnounceChat] = useState('')
+  const [announceNew, setAnnounceNew] = useState(true)
+  const [announceRestock, setAnnounceRestock] = useState(true)
+  const [announceHosted, setAnnounceHosted] = useState(false)
+  const [announceCap, setAnnounceCap] = useState('10')
+  const [adminChat, setAdminChat] = useState('')
   const [busy, setBusy] = useState(false)
   const [checking, setChecking] = useState(false)
   const [error, setError] = useState('')
@@ -76,6 +104,17 @@ export function TelegramSettings() {
     setBudget(yuan(value.daily_budget_minor))
     setReplyTTL(String(value.reply_ttl_seconds))
     setWelcome(value.welcome)
+    setFrom(toField(value.rewards_from))
+    setUntil(toField(value.rewards_until))
+    setRebate(String(value.rebate_percent))
+    setRebateMax(yuan(value.rebate_max_minor))
+    setRebateDelay(String(value.rebate_delay_hours))
+    setAnnounceChat('')
+    setAnnounceNew(value.announce_new)
+    setAnnounceRestock(value.announce_restock)
+    setAnnounceHosted(value.announce_hosted)
+    setAnnounceCap(String(value.announce_daily_cap))
+    setAdminChat('')
   }
 
   useEffect(() => {
@@ -90,6 +129,10 @@ export function TelegramSettings() {
       bind_reward_minor: minor(bind), checkin_min_minor: minor(checkinMin), checkin_max_minor: minor(checkinMax),
       invite_reward_minor: minor(invite), invite_hold_hours: Number(holdHours), invite_require_link: requireLink,
       invite_daily_cap: Number(dailyCap), daily_budget_minor: minor(budget), reply_ttl_seconds: Number(replyTTL), welcome,
+      rewards_from: fromField(from), rewards_until: fromField(until),
+      rebate_percent: Number(rebate), rebate_max_minor: minor(rebateMax), rebate_delay_hours: Number(rebateDelay),
+      announce_chat: announceChat, announce_new: announceNew, announce_restock: announceRestock, announce_hosted: announceHosted, announce_daily_cap: Number(announceCap),
+      admin_chat: adminChat,
     })
 
   async function save(event: FormEvent) {
@@ -239,6 +282,87 @@ export function TelegramSettings() {
         <label className="check-row">
           <input type="checkbox" checked={welcome} onChange={event => setWelcome(event.target.checked)} />
           {t('新成员进群时发送欢迎和绑定指引')}
+        </label>
+      </div>
+
+      <h4 className="settings-subheading">{t('活动时间')}</h4>
+      <p className="muted-text">{t('只在这段时间内发放绑定、签到、邀请和返利奖励；前台和机器人会向用户写明活动时间。两项都留空表示长期有效。活动时间外仍然可以绑定账号（用于接收通知），只是不发奖励。时间按北京时间（UTC+8）。')}</p>
+      <div className="form-grid">
+        <label>
+          <span>{t('开始时间（留空为不限）')}</span>
+          <input type="datetime-local" value={from} onChange={event => setFrom(event.target.value)} />
+        </label>
+        <label>
+          <span>{t('结束时间（留空为不限）')}</span>
+          <input type="datetime-local" value={until} onChange={event => setUntil(event.target.value)} />
+        </label>
+      </div>
+
+      <h4 className="settings-subheading">{t('首单返利')}</h4>
+      <p className="muted-text">{t('被邀请人（通过邀请链接进群并绑定站点账号）第一次在线付款或由管理员确认收款后，邀请人按该笔金额的比例获得返利，每个被邀请账号只算一次。余额支付不算。返利计入每日奖励总预算。')}</p>
+      <div className="form-grid">
+        <label>
+          <span>{t('返利比例 %（0 为关闭）')}</span>
+          <input type="number" min="0" max="50" step="1" value={rebate} onChange={event => setRebate(event.target.value)} required />
+        </label>
+        <label>
+          <span>{t('单笔返利上限（{0}，0 为不限）', unit)}</span>
+          <input type="number" min="0" max="10000" step="0.01" value={rebateMax} onChange={event => setRebateMax(event.target.value)} required />
+        </label>
+        <label>
+          <span>{t('付款后等待（小时）')}</span>
+          <input type="number" min="0" max="720" step="1" value={rebateDelay} onChange={event => setRebateDelay(event.target.value)} required />
+          <small>{t('付款满这么久才发返利，用来覆盖退款期。')}</small>
+        </label>
+      </div>
+
+      <h4 className="settings-subheading">{t('上新与补货推送')}</h4>
+      <p className="muted-text">{t('新套餐上架或售罄的套餐补货时，机器人在这里指定的频道或群里发一条带购买按钮的消息。机器人需要是该频道的管理员（有发消息权限）。客户在售罄套餐上点「到货通知我」的提醒不受这里影响，会按各自的通知方式发送。')}</p>
+      <div className="form-grid">
+        <label>
+          <span>{t('推送到的频道或群')}</span>
+          <input value={announceChat} onChange={event => setAnnounceChat(event.target.value)} placeholder={saved?.announce_chat_id ? t('{0}（{1}），留空保持不变，填 0 关闭', saved.announce_chat_title, saved.announce_chat_id) : t('@频道用户名 或 ID（-100…），留空为不推送')} />
+          {!!status?.chats.length && (
+            <small>
+              {t('机器人所在的群和频道：')}
+              {status.chats.map(item => (
+                <button type="button" className="button-link" key={item.id} onClick={() => setAnnounceChat(String(item.id))}>{item.title}</button>
+              ))}
+            </small>
+          )}
+        </label>
+        <label>
+          <span>{t('每日最多推送（条，0 为不限）')}</span>
+          <input type="number" min="0" max="200" step="1" value={announceCap} onChange={event => setAnnounceCap(event.target.value)} required />
+        </label>
+        <label className="check-row">
+          <input type="checkbox" checked={announceNew} onChange={event => setAnnounceNew(event.target.checked)} />
+          {t('推送新上架的套餐')}
+        </label>
+        <label className="check-row">
+          <input type="checkbox" checked={announceRestock} onChange={event => setAnnounceRestock(event.target.checked)} />
+          {t('推送补货')}
+        </label>
+        <label className="check-row">
+          <input type="checkbox" checked={announceHosted} onChange={event => setAnnounceHosted(event.target.checked)} />
+          {t('包含机主托管的套餐')}
+        </label>
+      </div>
+
+      <h4 className="settings-subheading">{t('管理群通知')}</h4>
+      <p className="muted-text">{t('把机器人拉进一个只有管理员的群并在这里指定：原本发给商家邮箱的通知（新工单和客户回复、母机负载过高暂停销售、母机到期和流量提醒）会同时发到这个群。各类通知的开关沿用「邮件通知」里的设置。')}</p>
+      <div className="form-grid">
+        <label>
+          <span>{t('管理群')}</span>
+          <input value={adminChat} onChange={event => setAdminChat(event.target.value)} placeholder={saved?.admin_chat_id ? t('{0}（{1}），留空保持不变，填 0 关闭', saved.admin_chat_title, saved.admin_chat_id) : t('群 ID（-100…）或 @群用户名，留空为不发送')} />
+          {!!status?.chats.length && (
+            <small>
+              {t('机器人所在的群和频道：')}
+              {status.chats.map(item => (
+                <button type="button" className="button-link" key={item.id} onClick={() => setAdminChat(String(item.id))}>{item.title}</button>
+              ))}
+            </small>
+          )}
         </label>
       </div>
       <div className="form-actions">

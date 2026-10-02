@@ -5284,3 +5284,38 @@ input, select, textarea { min-height: 34px; padding: 6px 10px; font-size: 13px; 
   flex-wrap: wrap;
   row-gap: 2px;
 }
+
+/* Telegram settings: sections under the main form. */
+.settings-subheading {
+  margin: 22px 0 6px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-default);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.telegram-period {
+  color: var(--text-secondary);
+  font-size: 12.5px;
+}
+
+.telegram-prompt .telegram-period {
+  margin: 6px 0 0;
+}
+
+.watch-button {
+  margin-top: 8px;
+}
+
+.market-plan-buy .watch-button {
+  margin-top: 0;
+}
+
+.watch-button.on {
+  color: var(--accent-text);
+}
+
+.settings-subheading + p {
+  margin-bottom: 10px;
+}

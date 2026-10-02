@@ -145,6 +145,7 @@ type Update struct {
 	Message      *Message           `json:"message"`
 	ChatMember   *ChatMemberUpdated `json:"chat_member"`
 	MyChatMember *ChatMemberUpdated `json:"my_chat_member"`
+	Callback     *CallbackQuery     `json:"callback_query"`
 }
 
 func (c *Client) GetMe(ctx context.Context) (User, error) {
@@ -157,7 +158,7 @@ func (c *Client) GetMe(ctx context.Context) (User, error) {
 func (c *Client) GetUpdates(ctx context.Context, offset int64) ([]Update, error) {
 	var updates []Update
 	err := c.call(ctx, "getUpdates", map[string]any{
-		"offset": offset, "timeout": pollSeconds, "allowed_updates": []string{"message", "chat_member", "my_chat_member"},
+		"offset": offset, "timeout": pollSeconds, "allowed_updates": []string{"message", "chat_member", "my_chat_member", "callback_query"},
 	}, &updates)
 	return updates, err
 }
@@ -195,4 +196,62 @@ func (c *Client) CreateInviteLink(ctx context.Context, chatID int64, name string
 	}
 	err := c.call(ctx, "createChatInviteLink", map[string]any{"chat_id": chatID, "name": name}, &link)
 	return link.InviteLink, err
+}
+
+// Button is one button under a message: it opens URL, or sends Data back
+// to the bot as a callback.
+type Button struct {
+	Text string `json:"text"`
+	URL  string `json:"url,omitempty"`
+	Data string `json:"data,omitempty"`
+}
+
+// CallbackQuery is a press of a Data button.
+type CallbackQuery struct {
+	ID      string   `json:"id"`
+	From    User     `json:"from"`
+	Message *Message `json:"message"`
+	Data    string   `json:"data"`
+}
+
+func keyboard(buttons [][]Button) map[string]any {
+	rows := make([][]map[string]string, 0, len(buttons))
+	for _, row := range buttons {
+		items := make([]map[string]string, 0, len(row))
+		for _, button := range row {
+			item := map[string]string{"text": button.Text}
+			if button.URL != "" {
+				item["url"] = button.URL
+			} else {
+				item["callback_data"] = button.Data
+			}
+			items = append(items, item)
+		}
+		rows = append(rows, items)
+	}
+	return map[string]any{"inline_keyboard": rows}
+}
+
+// SendButtons sends HTML text with buttons under it.
+func (c *Client) SendButtons(ctx context.Context, chatID int64, html string, buttons [][]Button) (Message, error) {
+	params := map[string]any{"chat_id": chatID, "text": html, "parse_mode": "HTML", "link_preview_options": map[string]any{"is_disabled": true}}
+	if len(buttons) > 0 {
+		params["reply_markup"] = keyboard(buttons)
+	}
+	var message Message
+	return message, c.call(ctx, "sendMessage", params, &message)
+}
+
+// EditMessage replaces a message's text and buttons (none removes them).
+func (c *Client) EditMessage(ctx context.Context, chatID, messageID int64, html string, buttons [][]Button) error {
+	return c.call(ctx, "editMessageText", map[string]any{
+		"chat_id": chatID, "message_id": messageID, "text": html, "parse_mode": "HTML",
+		"link_preview_options": map[string]any{"is_disabled": true}, "reply_markup": keyboard(buttons),
+	}, nil)
+}
+
+// AnswerCallback ends the wait shown on a pressed button; text, when not
+// empty, pops up for the user.
+func (c *Client) AnswerCallback(ctx context.Context, id, text string) error {
+	return c.call(ctx, "answerCallbackQuery", map[string]any{"callback_query_id": id, "text": text, "show_alert": text != ""}, nil)
 }

@@ -6,6 +6,7 @@ package notify
 
 import (
 	"context"
+	"encoding/json"
 	"html"
 	"log/slog"
 	"strconv"
@@ -30,18 +31,20 @@ const (
 )
 
 type Notifier struct {
-	store    *postgres.MailStore
+	store *postgres.MailStore
+	// catalog finds new and restocked plans and who waits for them.
+	catalog  *postgres.CatalogStore
 	settings *settings.Manager
 	box      *security.SecretBox
 	logger   *slog.Logger
 	send     func(ctx context.Context, config mail.Config, to, subject, body string) error
 	// sendTelegram delivers one message to a Telegram chat.
-	sendTelegram func(ctx context.Context, config settings.TelegramSettings, chatID int64, text string) error
+	sendTelegram func(ctx context.Context, config settings.TelegramSettings, chatID int64, text string, buttons [][]telegram.Button) error
 	now          func() time.Time
 }
 
 func New(store *postgres.MailStore, runtime *settings.Manager, box *security.SecretBox, logger *slog.Logger) *Notifier {
-	return &Notifier{store: store, settings: runtime, box: box, logger: logger, send: mail.Send, sendTelegram: sendTelegram, now: time.Now}
+	return &Notifier{store: store, catalog: postgres.NewCatalogStore(store.Pool()), settings: runtime, box: box, logger: logger, send: mail.Send, sendTelegram: sendTelegram, now: time.Now}
 }
 
 // enabled reports whether anything can be sent at all; without SMTP or a
@@ -56,7 +59,35 @@ func (n *Notifier) enabled() bool {
 // channels they chose: mail, their linked Telegram account, or both. Mail
 // is the fallback while Telegram cannot be used.
 func (n *Notifier) enqueue(ctx context.Context, to, subject, body, dedupKey string) {
+	n.enqueueWith(ctx, to, subject, body, dedupKey, nil)
+}
+
+// adminChat stands for the staff group among the merchant's recipients.
+const adminChat = "telegram:staff-group"
+
+func encodeButtons(buttons [][]telegram.Button) ([]byte, error) {
+	if len(buttons) == 0 {
+		return nil, nil
+	}
+	return json.Marshal(buttons)
+}
+
+// enqueueWith is enqueue with buttons under the Telegram message; mail
+// carries the same links in its text.
+func (n *Notifier) enqueueWith(ctx context.Context, to, subject, body, dedupKey string, buttons [][]telegram.Button) {
 	current := n.settings.Current()
+	markup, err := encodeButtons(buttons)
+	if err != nil {
+		n.logger.Error("encode notification buttons", "error", err)
+	}
+	if to == adminChat {
+		if current.Telegram.Ready() && current.Telegram.AdminChatID != 0 {
+			if _, err := n.store.EnqueueTelegram(ctx, current.Telegram.AdminChatID, subject, body, dedupKey, markup); err != nil {
+				n.logger.Error("queue staff group notice", "error", err)
+			}
+		}
+		return
+	}
 	target, err := n.store.NotifyTarget(ctx, to)
 	if err != nil {
 		n.logger.Error("read notification channels", "to", to, "error", err)
@@ -68,7 +99,7 @@ func (n *Notifier) enqueue(ctx context.Context, to, subject, body, dedupKey stri
 		if key != "" {
 			key += ":telegram"
 		}
-		if _, err := n.store.EnqueueTelegram(ctx, target.TelegramID, subject, body, key); err != nil {
+		if _, err := n.store.EnqueueTelegram(ctx, target.TelegramID, subject, body, key, markup); err != nil {
 			n.logger.Error("queue telegram notification", "to", to, "error", err)
 		}
 	}
@@ -98,17 +129,22 @@ func say(lang, zh, en string) string {
 }
 
 // adminRecipients returns the configured merchant addresses, or every active
-// staff member when none are configured.
+// staff member when none are configured, and the staff group on Telegram
+// when one is set.
 func (n *Notifier) adminRecipients(ctx context.Context) []string {
-	if configured := n.settings.Current().MailNotifications.AdminRecipients(); len(configured) > 0 {
-		return configured
+	current := n.settings.Current()
+	recipients := current.MailNotifications.AdminRecipients()
+	if len(recipients) == 0 {
+		emails, err := n.store.StaffEmails(ctx)
+		if err != nil {
+			n.logger.Error("list staff emails", "error", err)
+		}
+		recipients = emails
 	}
-	emails, err := n.store.StaffEmails(ctx)
-	if err != nil {
-		n.logger.Error("list staff emails", "error", err)
-		return nil
+	if current.Telegram.Ready() && current.Telegram.AdminChatID != 0 {
+		recipients = append(append([]string(nil), recipients...), adminChat)
 	}
-	return emails
+	return recipients
 }
 
 func (n *Notifier) link(path string) string {
@@ -161,7 +197,11 @@ func (n *Notifier) sendDue(ctx context.Context) {
 			if err != nil {
 				return finalError{err}
 			}
-			err = n.sendTelegram(ctx, config, chatID, telegramText(item.Subject, item.Body))
+			var buttons [][]telegram.Button
+			if len(item.Buttons) > 0 {
+				_ = json.Unmarshal(item.Buttons, &buttons)
+			}
+			err = n.sendTelegram(ctx, config, chatID, telegramText(item.Subject, item.Body), buttons)
 			if telegram.Forbidden(err) {
 				// The user blocked the bot; trying again will not help.
 				return finalError{err}
@@ -209,8 +249,34 @@ func telegramText(subject, body string) string {
 	return "<b>" + html.EscapeString(subject) + "</b>\n\n" + html.EscapeString(excerpt(body, 3200))
 }
 
-func sendTelegram(ctx context.Context, config settings.TelegramSettings, chatID int64, text string) error {
-	_, err := telegram.NewClient(config.APIBase, config.BotToken).SendMessage(ctx, chatID, text, 0)
+func sendTelegram(ctx context.Context, config settings.TelegramSettings, chatID int64, text string, buttons [][]telegram.Button) error {
+	client := telegram.NewClient(config.APIBase, config.BotToken)
+	if len(buttons) > 0 {
+		if _, err := client.SendButtons(ctx, chatID, text, buttons); err == nil {
+			return nil
+		}
+		// Telegram refuses buttons whose address it does not like (a
+		// site without a public address); the text has the links too, so
+		// the buttons that open one are left out.
+		var actions [][]telegram.Button
+		for _, row := range buttons {
+			var kept []telegram.Button
+			for _, button := range row {
+				if button.URL == "" {
+					kept = append(kept, button)
+				}
+			}
+			if len(kept) > 0 {
+				actions = append(actions, kept)
+			}
+		}
+		if len(actions) > 0 {
+			if _, err := client.SendButtons(ctx, chatID, text, actions); err == nil {
+				return nil
+			}
+		}
+	}
+	_, err := client.SendMessage(ctx, chatID, text, 0)
 	return err
 }
 

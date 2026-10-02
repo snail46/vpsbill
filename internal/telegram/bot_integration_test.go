@@ -22,13 +22,67 @@ import (
 type fakeAPI struct {
 	mu      sync.Mutex
 	sent    []sentMessage
+	edits   []string
+	answers []string
 	links   int
 	noLinks bool
 }
 
 type sentMessage struct {
-	chat int64
-	text string
+	chat    int64
+	text    string
+	buttons [][]Button
+}
+
+func (f *fakeAPI) SendButtons(_ context.Context, chatID int64, html string, buttons [][]Button) (Message, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.sent = append(f.sent, sentMessage{chatID, html, buttons})
+	return Message{MessageID: int64(len(f.sent))}, nil
+}
+
+func (f *fakeAPI) EditMessage(_ context.Context, _, _ int64, html string, _ [][]Button) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.edits = append(f.edits, html)
+	return nil
+}
+
+func (f *fakeAPI) AnswerCallback(_ context.Context, _, text string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.answers = append(f.answers, text)
+	return nil
+}
+
+// lastButtons are the buttons under the newest message sent to chat.
+func (f *fakeAPI) lastButtons(chat int64) [][]Button {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i := len(f.sent) - 1; i >= 0; i-- {
+		if f.sent[i].chat == chat {
+			return f.sent[i].buttons
+		}
+	}
+	return nil
+}
+
+func (f *fakeAPI) lastEdit() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.edits) == 0 {
+		return ""
+	}
+	return f.edits[len(f.edits)-1]
+}
+
+func (f *fakeAPI) lastAnswer() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.answers) == 0 {
+		return ""
+	}
+	return f.answers[len(f.answers)-1]
 }
 
 func (f *fakeAPI) GetMe(context.Context) (User, error) {
@@ -38,7 +92,7 @@ func (f *fakeAPI) GetUpdates(context.Context, int64) ([]Update, error) { return 
 func (f *fakeAPI) SendMessage(_ context.Context, chatID int64, html string, _ int64) (Message, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.sent = append(f.sent, sentMessage{chatID, html})
+	f.sent = append(f.sent, sentMessage{chatID, html, nil})
 	return Message{MessageID: int64(len(f.sent))}, nil
 }
 func (f *fakeAPI) DeleteMessage(context.Context, int64, int64) error { return nil }

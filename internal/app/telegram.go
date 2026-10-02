@@ -64,6 +64,50 @@ type telegramInput struct {
 	DailyBudgetMinor  int64  `json:"daily_budget_minor"`
 	ReplyTTLSeconds   int    `json:"reply_ttl_seconds"`
 	Welcome           bool   `json:"welcome"`
+	// RewardsFrom and RewardsUntil bound the period rewards are paid in;
+	// null leaves that end open.
+	RewardsFrom      *time.Time `json:"rewards_from"`
+	RewardsUntil     *time.Time `json:"rewards_until"`
+	RebatePercent    int        `json:"rebate_percent"`
+	RebateMaxMinor   int64      `json:"rebate_max_minor"`
+	RebateDelayHours int        `json:"rebate_delay_hours"`
+	// AnnounceChat and AdminChat name a chat like Chat does; empty keeps
+	// the current one and "0" turns it off.
+	AnnounceChat     string `json:"announce_chat"`
+	AnnounceNew      bool   `json:"announce_new"`
+	AnnounceRestock  bool   `json:"announce_restock"`
+	AnnounceHosted   bool   `json:"announce_hosted"`
+	AnnounceDailyCap int    `json:"announce_daily_cap"`
+	AdminChat        string `json:"admin_chat"`
+}
+
+// otherChat resolves the announcement or staff chat typed in the
+// settings: empty keeps the current one, "0" clears it.
+func (a *telegramAPI) otherChat(ctx context.Context, input telegramInput, typed string, id int64, title string) (int64, string, error) {
+	typed = strings.TrimSpace(typed)
+	switch typed {
+	case "":
+		return id, title, nil
+	case "0":
+		return 0, "", nil
+	}
+	token := strings.TrimSpace(input.BotToken)
+	if token == "" {
+		token = a.settings.Current().Telegram.BotToken
+	}
+	if token == "" {
+		return 0, "", errors.New("请先填写 Bot Token")
+	}
+	ctx, cancel := context.WithTimeout(ctx, 25*time.Second)
+	defer cancel()
+	check, err := a.bot.Verify(ctx, input.APIBase, token, typed)
+	if err != nil {
+		return 0, "", err
+	}
+	if check.ChatID == 0 {
+		return 0, "", errors.New("没有找到这个群或频道")
+	}
+	return check.ChatID, check.ChatTitle, nil
 }
 
 // check asks Telegram about the token and the group in the input, falling
@@ -115,8 +159,17 @@ func (a *telegramAPI) adminUpdate(w http.ResponseWriter, r *http.Request) {
 		BindRewardMinor: input.BindRewardMinor, CheckinMinMinor: input.CheckinMinMinor, CheckinMaxMinor: input.CheckinMaxMinor,
 		InviteRewardMinor: input.InviteRewardMinor, InviteHoldHours: input.InviteHoldHours, InviteRequireLink: input.InviteRequireLink,
 		InviteDailyCap: input.InviteDailyCap, DailyBudgetMinor: input.DailyBudgetMinor, ReplyTTLSeconds: input.ReplyTTLSeconds, Welcome: input.Welcome,
+		RewardsFrom: input.RewardsFrom, RewardsUntil: input.RewardsUntil,
+		RebatePercent: input.RebatePercent, RebateMaxMinor: input.RebateMaxMinor, RebateDelayHours: input.RebateDelayHours,
+		AnnounceNew: input.AnnounceNew, AnnounceRestock: input.AnnounceRestock, AnnounceHosted: input.AnnounceHosted, AnnounceDailyCap: input.AnnounceDailyCap,
 	}
 	check, token, err := a.check(r.Context(), input)
+	if err == nil {
+		next.AnnounceChatID, next.AnnounceChatTitle, err = a.otherChat(r.Context(), input, input.AnnounceChat, current.AnnounceChatID, current.AnnounceChatTitle)
+	}
+	if err == nil {
+		next.AdminChatID, next.AdminChatTitle, err = a.otherChat(r.Context(), input, input.AdminChat, current.AdminChatID, current.AdminChatTitle)
+	}
 	if err != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]any{"error": "telegram_failed", "message": "连接 Telegram 失败：" + err.Error()})
 		return
@@ -159,8 +212,10 @@ func (a *telegramAPI) customerTelegram(w http.ResponseWriter, r *http.Request) {
 	data["rules"] = map[string]any{
 		"bind_reward_minor": cfg.BindRewardMinor, "checkin_min_minor": cfg.CheckinMinMinor, "checkin_max_minor": cfg.CheckinMaxMinor,
 		"invite_reward_minor": cfg.InviteRewardMinor, "invite_hold_hours": cfg.InviteHoldHours, "invite_require_link": cfg.InviteRequireLink,
-		"invite_daily_cap": cfg.InviteDailyCap,
+		"invite_daily_cap": cfg.InviteDailyCap, "rebate_percent": cfg.RebatePercent, "rebate_max_minor": cfg.RebateMaxMinor,
 	}
+	// When rewards are paid: the portal says so wherever it offers them.
+	data["rewards"] = map[string]any{"state": cfg.RewardsState(time.Now()), "from": cfg.RewardsFrom, "until": cfg.RewardsUntil}
 	link, err := a.store.LinkByUser(r.Context(), identity.UserID)
 	switch {
 	case errors.Is(err, postgres.ErrTelegramNotLinked):

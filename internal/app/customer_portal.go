@@ -785,3 +785,43 @@ func addUDPTwin(ctx context.Context, mapper provider.PortMapper, name string, tc
 	}
 	return next, nil
 }
+
+// planWatches lists the sold-out plans the customer asked to hear about.
+func (p *customerPortal) planWatches(w http.ResponseWriter, r *http.Request) {
+	ids, err := p.catalog.WatchedPlans(r.Context(), customerPrincipalFromContext(r.Context()).UserID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "internal_error"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": ids})
+}
+
+// watchPlan asks for one notice when the plan can be bought again; it
+// goes through the customer's notification channels.
+func (p *customerPortal) watchPlan(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !uuidPattern.MatchString(id) {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "plan_not_found", "message": "套餐不存在或已下架"})
+		return
+	}
+	err := p.catalog.WatchPlan(r.Context(), id, customerPrincipalFromContext(r.Context()).UserID)
+	switch {
+	case errors.Is(err, postgres.ErrPlanNotFound):
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "plan_not_found", "message": "套餐不存在或已下架"})
+	case err != nil:
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "internal_error"})
+	default:
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+func (p *customerPortal) unwatchPlan(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if uuidPattern.MatchString(id) {
+		if err := p.catalog.UnwatchPlan(r.Context(), id, customerPrincipalFromContext(r.Context()).UserID); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "internal_error"})
+			return
+		}
+	}
+	w.WriteHeader(http.StatusNoContent)
+}

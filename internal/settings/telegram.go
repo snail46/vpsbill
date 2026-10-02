@@ -48,13 +48,61 @@ type TelegramSettings struct {
 	ReplyTTLSeconds int `json:"reply_ttl_seconds"`
 	// Welcome greets new members with how to earn balance.
 	Welcome bool `json:"welcome"`
+	// RewardsFrom and RewardsUntil bound when rewards are paid (nil = no
+	// bound). Outside the period accounts can still be linked, for
+	// notices, but nothing is paid.
+	RewardsFrom  *time.Time `json:"rewards_from"`
+	RewardsUntil *time.Time `json:"rewards_until"`
+	// RebatePercent of an invited member's first real payment goes to the
+	// inviter (0 = off), at most RebateMaxMinor (0 = no cap), once the
+	// payment is RebateDelayHours old.
+	RebatePercent    int   `json:"rebate_percent"`
+	RebateMaxMinor   int64 `json:"rebate_max_minor"`
+	RebateDelayHours int   `json:"rebate_delay_hours"`
+	// AnnounceChatID is the channel or group that hears about new plans
+	// and restocks (0 = nowhere).
+	AnnounceChatID    int64  `json:"announce_chat_id"`
+	AnnounceChatTitle string `json:"announce_chat_title"`
+	AnnounceNew       bool   `json:"announce_new"`
+	AnnounceRestock   bool   `json:"announce_restock"`
+	// AnnounceHosted includes plans sold by hosts.
+	AnnounceHosted bool `json:"announce_hosted"`
+	// AnnounceDailyCap is how many announcements go out per day (0 = no cap).
+	AnnounceDailyCap int `json:"announce_daily_cap"`
+	// AdminChatID is the staff group that gets what merchant mail says
+	// (0 = none).
+	AdminChatID    int64  `json:"admin_chat_id"`
+	AdminChatTitle string `json:"admin_chat_title"`
 }
+
+// Rewards periods, as RewardsState reports them.
+const (
+	RewardsOpen     = "open"
+	RewardsUpcoming = "upcoming"
+	RewardsEnded    = "ended"
+)
+
+// RewardsState says whether rewards are paid at a moment.
+func (t TelegramSettings) RewardsState(now time.Time) string {
+	switch {
+	case t.RewardsFrom != nil && now.Before(*t.RewardsFrom):
+		return RewardsUpcoming
+	case t.RewardsUntil != nil && !now.Before(*t.RewardsUntil):
+		return RewardsEnded
+	}
+	return RewardsOpen
+}
+
+// CanSend reports whether the bot can send messages at all, whether or
+// not rewards are on.
+func (t TelegramSettings) CanSend() bool { return t.BotToken != "" }
 
 func DefaultTelegramSettings() TelegramSettings {
 	return TelegramSettings{
 		BindRewardMinor: 100, CheckinMinMinor: 10, CheckinMaxMinor: 50,
 		InviteRewardMinor: 100, InviteHoldHours: 24, InviteRequireLink: true, InviteDailyCap: 10,
 		DailyBudgetMinor: 10000, ReplyTTLSeconds: 60, Welcome: true,
+		RebateMaxMinor: 2000, RebateDelayHours: 72, AnnounceNew: true, AnnounceRestock: true, AnnounceDailyCap: 10,
 	}
 }
 
@@ -64,7 +112,7 @@ func (t TelegramSettings) In(locale LocaleSettings, currency string) TelegramSet
 	if from == "" {
 		from = "CNY"
 	}
-	for _, amount := range []*int64{&t.BindRewardMinor, &t.CheckinMinMinor, &t.CheckinMaxMinor, &t.InviteRewardMinor, &t.DailyBudgetMinor} {
+	for _, amount := range []*int64{&t.BindRewardMinor, &t.CheckinMinMinor, &t.CheckinMaxMinor, &t.InviteRewardMinor, &t.DailyBudgetMinor, &t.RebateMaxMinor} {
 		*amount = locale.Convert(*amount, from, currency)
 	}
 	t.Currency = currency
@@ -105,6 +153,16 @@ func (t TelegramSettings) validate() error {
 		return fmt.Errorf("每人每日邀请奖励上限必须在 0–1000 之间")
 	case t.DailyBudgetMinor < 0 || t.DailyBudgetMinor > 100_000_000:
 		return fmt.Errorf("每日奖励总预算超出范围")
+	case t.RewardsFrom != nil && t.RewardsUntil != nil && !t.RewardsUntil.After(*t.RewardsFrom):
+		return fmt.Errorf("活动结束时间必须晚于开始时间")
+	case t.RebatePercent < 0 || t.RebatePercent > 50:
+		return fmt.Errorf("首单返利比例必须在 0–50 之间")
+	case t.RebateMaxMinor < 0 || t.RebateMaxMinor > 10*maxTelegramReward:
+		return fmt.Errorf("首单返利上限超出范围")
+	case t.RebateDelayHours < 0 || t.RebateDelayHours > 720:
+		return fmt.Errorf("首单返利的等待时间必须在 0–720 小时之间")
+	case t.AnnounceDailyCap < 0 || t.AnnounceDailyCap > 200:
+		return fmt.Errorf("每日推送条数上限必须在 0–200 之间")
 	case t.ReplyTTLSeconds < 0 || t.ReplyTTLSeconds > 3600:
 		return fmt.Errorf("群内回复的保留时间必须在 0–3600 秒之间")
 	case t.APIBase != "" && absoluteURL(t.APIBase, true) != nil:

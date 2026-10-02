@@ -7,7 +7,7 @@ import { CouponField } from '../Coupons'
 import { cycleLabel, money, bandwidthLabel } from '../shared/ui'
 import { CurrencyNote } from '../shared/LocaleMenu'
 import { cycleOrder, priceLeft } from '../shared/cycles'
-import { stockLeft, StockTag } from '../shared/stock'
+import { stockLeft, StockTag, WatchButton } from '../shared/stock'
 import { t } from '../shared/i18n'
 
 // cardPrice shows the monthly price when the plan sells one, otherwise the
@@ -324,6 +324,7 @@ export function CustomerShop({ customer }: { customer: CustomerIdentity }) {
                   <button className="primary-button" disabled={saving || !regions.length || stockLeft(selected) === 0}>
                     {saving ? t('正在生成订单…') : stockLeft(selected) === 0 ? t('已售罄') : t('立即下单')}
                   </button>
+                  {stockLeft(selected) === 0 && <WatchButton planID={selected.id} />}
                 </form>
 
                 {created && (

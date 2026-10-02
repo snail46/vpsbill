@@ -27,7 +27,7 @@ import { topupLink, walletMoney } from './Wallet'
 import { CurrencyNote } from './shared/LocaleMenu'
 import { formatDate, formatTime } from './shared/time'
 import { cycleName, cycleOrder, CyclePriceFields, priceLeft, readCyclePrices } from './shared/cycles'
-import { readStock, stockLeft, StockField, StockTag } from './shared/stock'
+import { readStock, stockLeft, StockField, StockTag, WatchButton } from './shared/stock'
 import { DiskIOFields, diskIOText, readDiskIO } from './shared/diskio'
 import { OvercommitDialog, SupplyDetails, overcommitText } from './Supply'
 import { ConnectSteps, PendingAgents } from './shared/agents'
@@ -208,6 +208,7 @@ function Market({ customer }: { customer: CustomerIdentity }) {
                     >
                       {stockLeft(plan) === 0 ? t('已售罄') : t('购买')}
                     </button>
+                    {stockLeft(plan) === 0 && !node.mine && <WatchButton planID={plan.id} />}
                   </div>
                 </div>
               ))}

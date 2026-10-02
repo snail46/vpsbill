@@ -3,6 +3,13 @@
 // serverWords are whole messages; serverRules are messages with changing
 // parts, where $1 puts a captured group as it is and %1 translates it.
 export const serverWords: Record<string, string> = {
+  '套餐不存在或已下架': 'The plan does not exist or is no longer sold',
+  '活动结束时间必须晚于开始时间': 'The period must end after it starts',
+  '首单返利比例必须在 0–50 之间': 'The rebate must be between 0 and 50 percent',
+  '首单返利上限超出范围': 'The most per rebate is out of range',
+  '首单返利的等待时间必须在 0–720 小时之间': 'The wait before a rebate must be between 0 and 720 hours',
+  '每日推送条数上限必须在 0–200 之间': 'Posts per day must be between 0 and 200',
+  'Telegram 邀请首单返利': 'Telegram rebate for an invited member’s first payment',
   '记账币种已经变化，请刷新页面后再操作': 'The ledger currency has changed; reload the page and try again',
   '有在线支付正在进行，暂时不能切换记账币种。请先停用支付网关，等 30 分钟后未完成的支付过期再切换': 'Online payments are under way, so the ledger currency cannot be switched now. Turn the payment gateway off first and switch after 30 minutes, once the unfinished payments have expired',
   '切换失败，账本没有任何改动': 'The switch failed and nothing in the books was changed',

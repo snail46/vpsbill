@@ -22,7 +22,23 @@ type QueuedMail struct {
 	Subject   string
 	Body      string
 	Attempts  int
+	// Buttons are the rows of buttons under a Telegram message, as JSON.
+	Buttons []byte
 }
+
+// AnnouncementKey starts the deduplication key of every announcement of a
+// plan, which is how the day's announcements are counted.
+const AnnouncementKey = "announce:"
+
+// AnnouncementsSince counts the announcements queued since a moment.
+func (s *MailStore) AnnouncementsSince(ctx context.Context, since time.Time) (int, error) {
+	var count int
+	err := s.db.QueryRow(ctx, `SELECT count(*) FROM mail_queue WHERE channel='telegram' AND dedup_key LIKE $1 AND created_at>=$2`, AnnouncementKey+"%", since).Scan(&count)
+	return count, err
+}
+
+// Pool is the database the store works on.
+func (s *MailStore) Pool() *pgxpool.Pool { return s.db }
 
 // EnqueueMail adds a message unless one with the same dedup key was queued
 // before; an empty key never deduplicates. It reports whether a row was added.
@@ -30,7 +46,7 @@ type QueuedMail struct {
 // verified them are skipped, so a sign-up with someone else's address
 // cannot make the platform mail them.
 func (s *MailStore) EnqueueMail(ctx context.Context, recipient, subject, body, dedupKey string) (bool, error) {
-	return s.enqueue(ctx, ChannelMail, recipient, subject, body, dedupKey)
+	return s.enqueue(ctx, ChannelMail, recipient, subject, body, dedupKey, nil)
 }
 
 // The channels a queued message goes out through. A Telegram message's
@@ -40,18 +56,23 @@ const (
 	ChannelTelegram = "telegram"
 )
 
-// EnqueueTelegram queues a message for a Telegram chat.
-func (s *MailStore) EnqueueTelegram(ctx context.Context, chatID int64, subject, body, dedupKey string) (bool, error) {
-	return s.enqueue(ctx, ChannelTelegram, strconv.FormatInt(chatID, 10), subject, body, dedupKey)
+// EnqueueTelegram queues a message for a Telegram chat; buttons, when not
+// nil, is the JSON of the rows of buttons under it.
+func (s *MailStore) EnqueueTelegram(ctx context.Context, chatID int64, subject, body, dedupKey string, buttons []byte) (bool, error) {
+	return s.enqueue(ctx, ChannelTelegram, strconv.FormatInt(chatID, 10), subject, body, dedupKey, buttons)
 }
 
-func (s *MailStore) enqueue(ctx context.Context, channel, recipient, subject, body, dedupKey string) (bool, error) {
+func (s *MailStore) enqueue(ctx context.Context, channel, recipient, subject, body, dedupKey string, buttons []byte) (bool, error) {
+	var markup any
+	if len(buttons) > 0 {
+		markup = string(buttons)
+	}
 	command, err := s.db.Exec(ctx, `
-		INSERT INTO mail_queue(channel,recipient,subject,body,dedup_key)
-		SELECT $5,$1,$2,$3,nullif($4,'')
+		INSERT INTO mail_queue(channel,recipient,subject,body,dedup_key,buttons)
+		SELECT $5,$1,$2,$3,nullif($4,''),$6::jsonb
 		WHERE $5<>'mail' OR NOT EXISTS(SELECT 1 FROM users u WHERE lower(u.email)=lower($1) AND u.email_verified_at IS NULL)
 		ON CONFLICT (dedup_key) DO NOTHING
-	`, recipient, subject, body, dedupKey, channel)
+	`, recipient, subject, body, dedupKey, channel, markup)
 	if err != nil {
 		return false, err
 	}
@@ -90,7 +111,7 @@ func (s *MailStore) ClaimMail(ctx context.Context, channel string, limit int) ([
 			WHERE channel=$2 AND ((status='pending' AND next_attempt_at<=now()) OR (status='sending' AND locked_until<now()))
 			ORDER BY created_at LIMIT $1 FOR UPDATE SKIP LOCKED
 		)
-		RETURNING id,recipient,subject,body,attempts
+		RETURNING id,recipient,subject,body,attempts,coalesce(buttons::text,'')
 	`, limit, channel)
 	if err != nil {
 		return nil, err
@@ -99,9 +120,11 @@ func (s *MailStore) ClaimMail(ctx context.Context, channel string, limit int) ([
 	result := make([]QueuedMail, 0)
 	for rows.Next() {
 		var row QueuedMail
-		if err := rows.Scan(&row.ID, &row.Recipient, &row.Subject, &row.Body, &row.Attempts); err != nil {
+		var buttons string
+		if err := rows.Scan(&row.ID, &row.Recipient, &row.Subject, &row.Body, &row.Attempts, &buttons); err != nil {
 			return nil, err
 		}
+		row.Buttons = []byte(buttons)
 		result = append(result, row)
 	}
 	return result, rows.Err()
@@ -164,6 +187,7 @@ type ExpiringService struct {
 	DueAt         time.Time
 	Email         string
 	CustomerName  string
+	InvoiceID     string
 	InvoiceNumber string
 	AmountMinor   int64
 	Currency      string
@@ -171,7 +195,7 @@ type ExpiringService struct {
 
 func (s *MailStore) ExpiringServices(ctx context.Context, within time.Duration) ([]ExpiringService, error) {
 	rows, err := s.db.Query(ctx, `
-		SELECT DISTINCT ON (s.id) s.id,s.instance_name,p.name,s.next_due_at,u.email,u.display_name,i.number,i.balance_minor,i.currency
+		SELECT DISTINCT ON (s.id) s.id,s.instance_name,p.name,s.next_due_at,u.email,u.display_name,i.id,i.number,i.balance_minor,i.currency
 		FROM services s
 		JOIN plans p ON p.id=s.plan_id
 		JOIN invoices i ON i.service_id=s.id AND i.kind='renewal' AND i.status='open'
@@ -187,7 +211,7 @@ func (s *MailStore) ExpiringServices(ctx context.Context, within time.Duration) 
 	result := make([]ExpiringService, 0)
 	for rows.Next() {
 		var row ExpiringService
-		if err := rows.Scan(&row.ServiceID, &row.InstanceName, &row.PlanName, &row.DueAt, &row.Email, &row.CustomerName, &row.InvoiceNumber, &row.AmountMinor, &row.Currency); err != nil {
+		if err := rows.Scan(&row.ServiceID, &row.InstanceName, &row.PlanName, &row.DueAt, &row.Email, &row.CustomerName, &row.InvoiceID, &row.InvoiceNumber, &row.AmountMinor, &row.Currency); err != nil {
 			return nil, err
 		}
 		result = append(result, row)

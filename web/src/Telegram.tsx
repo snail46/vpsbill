@@ -24,7 +24,11 @@ export type TelegramRecord = {
     invite_hold_hours: number
     invite_require_link: boolean
     invite_daily_cap: number
+    rebate_percent?: number
+    rebate_max_minor?: number
   }
+  // rewards says when rewards are paid: open now, not started yet, or over.
+  rewards?: { state: 'open' | 'upcoming' | 'ended'; from: string | null; until: string | null }
   stats?: { checkins: number; checked_in_today: boolean; invites_rewarded: number; invites_pending: number; earned_minor: number }
 }
 
@@ -34,6 +38,15 @@ const dismissKey = 'vpsbill-telegram-prompt'
 const dismissFor = 7 * 24 * 3600 * 1000
 // Linking is watched for as long as a bind link works.
 const watchFor = 10 * 60 * 1000
+
+// rewardPeriod is the period rewards are paid in as a sentence, or '' when
+// it has no bounds.
+function rewardPeriod(rewards: TelegramRecord['rewards']) {
+  if (rewards?.from && rewards.until) return t('活动时间：{0} 至 {1}（北京时间）', formatTime(rewards.from), formatTime(rewards.until))
+  if (rewards?.from) return t('活动自 {0} 开始（北京时间）', formatTime(rewards.from))
+  if (rewards?.until) return t('活动截止 {0}（北京时间）', formatTime(rewards.until))
+  return ''
+}
 
 // checkinRange is what a check-in pays: one amount or a range.
 function checkinRange(rules: NonNullable<TelegramRecord['rules']>) {
@@ -117,6 +130,8 @@ export function TelegramPrompt() {
 
   if (!data?.enabled || !data.rules || closed) return null
   if (data.linked && !started) return null
+  // The card offers rewards, so it only shows while they are paid.
+  if (data.rewards && data.rewards.state !== 'open' && !started) return null
 
   const close = () => {
     try {
@@ -159,6 +174,7 @@ export function TelegramPrompt() {
             <li>{t('每天在交流群发「签到」领')} <b>{checkinRange(rules)}</b></li>
             {rules.invite_reward_minor > 0 && <li>{t('邀请好友进群，每人再得')} <b>{money(rules.invite_reward_minor)}</b></li>}
           </ul>
+          {rewardPeriod(data.rewards) && <p className="telegram-period">{rewardPeriod(data.rewards)}</p>}
           {!data.email_verified && <p className="danger-text">{t('请先完成邮箱验证，再绑定 Telegram。')}</p>}
           <div className="telegram-prompt-actions">
             <button type="button" className="primary-button compact" disabled={!data.email_verified} onClick={() => { setStarted(true); void bind() }}>
@@ -296,6 +312,9 @@ export function TelegramPanel() {
         <h3><Send size={16} /> Telegram</h3>
         <span className={data.linked ? 'tag success' : 'tag'}>{data.linked ? t('已绑定') : t('未绑定')}</span>
       </div>
+      {data.rewards?.state === 'upcoming' && <div className="note-banner warn">{t('活动还没有开始，暂时不发放奖励。{0}。现在可以先绑定账号，用 Telegram 接收通知。', rewardPeriod(data.rewards))}</div>}
+      {data.rewards?.state === 'ended' && <div className="note-banner warn">{t('活动已经结束，不再发放奖励。{0}。绑定后仍然可以用 Telegram 接收通知。', rewardPeriod(data.rewards))}</div>}
+      {data.rewards?.state === 'open' && rewardPeriod(data.rewards) && <div className="note-banner telegram-period">{rewardPeriod(data.rewards)}{t('，活动时间外不发放奖励。')}</div>}
       <ul className="telegram-rules">
         {rules.bind_reward_minor > 0 && <li><Gift size={14} />{t('绑定 Telegram 账号，一次性奖励')} <b>{money(rules.bind_reward_minor)}</b>{t('。')}</li>}
         <li><Gift size={14} />{t('每天在交流群发送「签到」或 /checkin，领')} <b>{checkinRange(rules)}</b>{t('。')}</li>
@@ -305,7 +324,14 @@ export function TelegramPanel() {
             {t('{0}。', rules.invite_daily_cap > 0 && t('（每天最多 {0} 人，超出的顺延到次日）', rules.invite_daily_cap))}
           </li>
         )}
+        {!!rules.rebate_percent && (
+          <li>
+            <Gift size={14} />{t('你邀请的成员首次充值或在线付款后，你再得该笔金额的')} <b>{rules.rebate_percent}%</b>
+            {t('{0}。', !!rules.rebate_max_minor && t('（单笔最多 {0}）', money(rules.rebate_max_minor)))}
+          </li>
+        )}
         <li className="muted-text">{t('奖励存入账户余额，可用于购买和续费，不能提现。')}</li>
+        <li className="muted-text">{t('绑定后私聊机器人：/services 查看 VPS，/balance 查看余额，/invoices 用余额支付待付账单；到期提醒里可以直接点按钮续费。')}</li>
       </ul>
 
       {!data.linked && (

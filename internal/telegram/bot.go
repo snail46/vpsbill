@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"vpsbill/internal/clock"
 	"vpsbill/internal/security"
 	"vpsbill/internal/settings"
 	"vpsbill/internal/store/postgres"
@@ -37,6 +38,9 @@ type API interface {
 	GetChat(ctx context.Context, chat any) (Chat, error)
 	GetChatMember(ctx context.Context, chatID, userID int64) (ChatMember, error)
 	CreateInviteLink(ctx context.Context, chatID int64, name string) (string, error)
+	SendButtons(ctx context.Context, chatID int64, html string, buttons [][]Button) (Message, error)
+	EditMessage(ctx context.Context, chatID, messageID int64, html string, buttons [][]Button) error
+	AnswerCallback(ctx context.Context, id, text string) error
 }
 
 // SeenChat is a group the bot was added to, offered in the settings.
@@ -56,7 +60,10 @@ type Status struct {
 }
 
 type Bot struct {
-	store    *postgres.TelegramStore
+	store *postgres.TelegramStore
+	// billing and portal answer the account commands and pay invoices.
+	billing  *postgres.BillingStore
+	portal   *postgres.PortalStore
 	settings *settings.Manager
 	logger   *slog.Logger
 	connect  func(apiBase, token string) API
@@ -74,7 +81,8 @@ type Bot struct {
 
 func New(store *postgres.TelegramStore, runtime *settings.Manager, logger *slog.Logger) *Bot {
 	return &Bot{
-		store: store, settings: runtime, logger: logger, now: time.Now,
+		store: store, billing: postgres.NewBillingStore(store.Pool()), portal: postgres.NewPortalStore(store.Pool()),
+		settings: runtime, logger: logger, now: time.Now,
 		connect: func(apiBase, token string) API { return NewClient(apiBase, token) },
 		between: func(min, max int64) int64 {
 			if max <= min {
@@ -197,6 +205,10 @@ func (b *Bot) budget(cfg settings.TelegramSettings) postgres.TelegramBudget {
 // settle pays the invitations that now meet the rules and tells the
 // inviters.
 func (b *Bot) settle(ctx context.Context, client API, cfg settings.TelegramSettings) {
+	if cfg.RewardsState(b.now()) != settings.RewardsOpen {
+		return
+	}
+	b.settleRebates(ctx, client, cfg)
 	settled, err := b.store.SettleInvites(ctx, postgres.TelegramInviteRules{
 		RewardMinor: cfg.InviteRewardMinor, Hold: cfg.InviteHold(), RequireLink: cfg.InviteRequireLink, DailyCap: cfg.InviteDailyCap,
 	}, b.budget(cfg))
@@ -214,6 +226,52 @@ func (b *Bot) settle(ctx context.Context, client API, cfg settings.TelegramSetti
 	}
 }
 
+// settleRebates pays inviters for their invited members' first payments.
+func (b *Bot) settleRebates(ctx context.Context, client API, cfg settings.TelegramSettings) {
+	settled, err := b.store.SettleRebates(ctx, postgres.TelegramRebateRules{
+		Percent: cfg.RebatePercent, MaxMinor: cfg.RebateMaxMinor, Delay: time.Duration(cfg.RebateDelayHours) * time.Hour,
+	}, b.budget(cfg))
+	if err != nil {
+		b.logger.Error("settle telegram rebates", "error", err)
+		return
+	}
+	for _, item := range settled {
+		link, err := b.store.LinkByAccount(ctx, item.InviterAccountID)
+		if err != nil {
+			continue
+		}
+		lang := b.settings.Current().Lang(link.Locale)
+		_, _ = client.SendMessage(ctx, link.TelegramID, say(lang, msgRebatePaid, html.EscapeString(item.InviteeName), b.money(item.RebateMinor)), 0)
+	}
+}
+
+// period says when rewards are paid, for the messages that explain them;
+// empty without a bound.
+func (b *Bot) period(cfg settings.TelegramSettings, lang string) string {
+	at := func(value *time.Time) string { return value.In(clock.Zone).Format("2006-01-02 15:04") }
+	switch {
+	case cfg.RewardsFrom != nil && cfg.RewardsUntil != nil:
+		return say(lang, msgPeriodBoth, at(cfg.RewardsFrom), at(cfg.RewardsUntil))
+	case cfg.RewardsFrom != nil:
+		return say(lang, msgPeriodFrom, at(cfg.RewardsFrom))
+	case cfg.RewardsUntil != nil:
+		return say(lang, msgPeriodUntil, at(cfg.RewardsUntil))
+	}
+	return ""
+}
+
+// closed is what to say instead of paying while rewards are not on, or ""
+// while they are.
+func (b *Bot) closed(cfg settings.TelegramSettings, lang string) string {
+	switch cfg.RewardsState(b.now()) {
+	case settings.RewardsUpcoming:
+		return say(lang, msgRewardsUpcoming, b.period(cfg, lang))
+	case settings.RewardsEnded:
+		return say(lang, msgRewardsEnded, b.period(cfg, lang))
+	}
+	return ""
+}
+
 func (b *Bot) handle(ctx context.Context, client API, cfg settings.TelegramSettings, update Update) {
 	switch {
 	case update.MyChatMember != nil:
@@ -222,12 +280,19 @@ func (b *Bot) handle(ctx context.Context, client API, cfg settings.TelegramSetti
 		b.membership(ctx, client, cfg, update.ChatMember)
 	case update.Message != nil:
 		b.message(ctx, client, cfg, update.Message)
+	case update.Callback != nil:
+		if cfg.Ready() {
+			b.callback(ctx, client, update.Callback)
+		} else {
+			_ = client.AnswerCallback(ctx, update.Callback.ID, "")
+		}
 	}
 }
 
 // botMembership remembers the groups the bot was added to.
 func (b *Bot) botMembership(change *ChatMemberUpdated) {
-	if change.Chat.Type != "group" && change.Chat.Type != "supergroup" {
+	// Channels too: one may be chosen for announcements.
+	if change.Chat.Type != "group" && change.Chat.Type != "supergroup" && change.Chat.Type != "channel" {
 		return
 	}
 	b.mu.Lock()
@@ -393,8 +458,10 @@ func (b *Bot) message(ctx context.Context, client API, cfg settings.TelegramSett
 		answer(b.checkin(ctx, cfg, user, lang))
 	case "invite":
 		b.personal(ctx, client, cfg, message, lang, b.invite(ctx, client, cfg, user, lang))
-	case "me", "balance":
+	case "me":
 		b.personal(ctx, client, cfg, message, lang, b.me(ctx, user, lang))
+	case "services", "balance", "invoices":
+		b.account(ctx, client, cfg, message, name, lang)
 	}
 }
 
@@ -447,7 +514,17 @@ func (b *Bot) help(cfg settings.TelegramSettings, lang string) string {
 	if cfg.InviteRewardMinor > 0 {
 		inviteNote = say(lang, msgHelpInvite, b.money(cfg.InviteRewardMinor))
 	}
-	return say(lang, msgHelp, html.EscapeString(site.AppName), bindNote, amountRange(cfg, b.money), inviteNote, site.PublicURL, siteHost(site.PublicURL))
+	text := say(lang, msgHelp, html.EscapeString(site.AppName), bindNote, amountRange(cfg, b.money), inviteNote, site.PublicURL, siteHost(site.PublicURL))
+	if cfg.RebatePercent > 0 {
+		text += say(lang, msgHelpRebate, cfg.RebatePercent)
+	}
+	if note := b.closed(cfg, lang); note != "" {
+		return text + "\n\n" + note
+	}
+	if period := b.period(cfg, lang); period != "" {
+		text += "\n\n" + period
+	}
+	return text
 }
 
 func (b *Bot) notLinked(lang string) string {
@@ -456,7 +533,12 @@ func (b *Bot) notLinked(lang string) string {
 }
 
 func (b *Bot) bind(ctx context.Context, cfg settings.TelegramSettings, user User, code, lang string) string {
-	result, err := b.store.Bind(ctx, security.HashToken(strings.TrimSpace(code)), postgres.TelegramUser{ID: user.ID, Username: user.Username, FirstName: user.FirstName}, cfg.BindRewardMinor, b.budget(cfg))
+	// Linking works at any time; the bonus is paid inside the period only.
+	bonus := cfg.BindRewardMinor
+	if cfg.RewardsState(b.now()) != settings.RewardsOpen {
+		bonus = 0
+	}
+	result, err := b.store.Bind(ctx, security.HashToken(strings.TrimSpace(code)), postgres.TelegramUser{ID: user.ID, Username: user.Username, FirstName: user.FirstName}, bonus, b.budget(cfg))
 	switch {
 	case errors.Is(err, postgres.ErrTelegramCodeInvalid):
 		return say(lang, msgBindInvalid)
@@ -489,6 +571,9 @@ func firstNonEmpty(values ...string) string {
 }
 
 func (b *Bot) checkin(ctx context.Context, cfg settings.TelegramSettings, user User, lang string) string {
+	if note := b.closed(cfg, lang); note != "" {
+		return note
+	}
 	link, err := b.store.LinkByTelegram(ctx, user.ID)
 	if errors.Is(err, postgres.ErrTelegramNotLinked) {
 		return b.notLinked(lang)
@@ -541,6 +626,9 @@ func (b *Bot) inviteLink(ctx context.Context, client API, cfg settings.TelegramS
 func (b *Bot) invite(ctx context.Context, client API, cfg settings.TelegramSettings, user User, lang string) string {
 	if cfg.InviteRewardMinor <= 0 {
 		return say(lang, msgInviteOff)
+	}
+	if note := b.closed(cfg, lang); note != "" {
+		return note
 	}
 	link, err := b.store.LinkByTelegram(ctx, user.ID)
 	if errors.Is(err, postgres.ErrTelegramNotLinked) {

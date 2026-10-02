@@ -116,6 +116,7 @@ func main() {
 	mailNotifier := notify.New(postgres.NewMailStore(db), runtime, secretBox, logger)
 	go mailNotifier.RunSender(workCtx)
 	go mailNotifier.RunScanner(workCtx)
+	go mailNotifier.RunStock(workCtx)
 	go fx.Run(workCtx, runtime, logger)
 	telegramBot := telegram.New(postgres.NewTelegramStore(db), runtime, logger)
 	go telegramBot.Run(workCtx)

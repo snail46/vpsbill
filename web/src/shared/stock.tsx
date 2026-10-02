@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import type { PlanRecord, StockCapacityRecord } from '../api'
+import { Bell } from 'lucide-react'
+import { api, type PlanRecord, type StockCapacityRecord } from '../api'
+import { toast } from './toast'
 import { t } from './i18n'
 
 // stockLeft is how many more instances a plan can sell (null = no stock set).
@@ -97,4 +99,62 @@ export function StockField({
 export function readStock(form: FormData): number | null {
   const raw = String(form.get('stock_limit') ?? '').trim()
   return raw === '' ? null : Math.max(0, Math.floor(Number(raw)))
+}
+
+// The plans this customer asked to hear about, shared by every button on
+// the page.
+const watchPath = '/api/v1/customer/plan-watches'
+let watched: Set<string> | null = null
+let loading: Promise<void> | null = null
+const listeners = new Set<() => void>()
+
+function loadWatched() {
+  loading ??= api<string[]>(watchPath)
+    .then(ids => {
+      watched = new Set(ids)
+      listeners.forEach(listener => listener())
+    })
+    .catch(() => {
+      loading = null
+    })
+  return loading
+}
+
+// WatchButton asks for one notice when a sold-out plan can be bought
+// again; the notice goes to the customer's notification channels.
+export function WatchButton({ planID }: { planID: string }) {
+  const [, refresh] = useState(0)
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    const listener = () => refresh(value => value + 1)
+    listeners.add(listener)
+    void loadWatched()
+    return () => {
+      listeners.delete(listener)
+    }
+  }, [])
+
+  const on = watched?.has(planID) ?? false
+  async function toggle() {
+    setBusy(true)
+    try {
+      await api(`/api/v1/customer/plans/${planID}/watch`, { method: on ? 'DELETE' : 'PUT' })
+      watched ??= new Set()
+      if (on) watched.delete(planID)
+      else watched.add(planID)
+      listeners.forEach(listener => listener())
+      toast('success', on ? t('已取消到货通知') : t('到货后会通知你'), on ? undefined : t('补货时按你的通知方式（邮件或 Telegram）提醒一次，先到先得。'))
+    } catch (err) {
+      toast('error', t('操作失败'), err instanceof Error ? err.message : undefined)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <button type="button" className={on ? 'secondary-button compact watch-button on' : 'secondary-button compact watch-button'} disabled={busy} aria-pressed={on} onClick={() => void toggle()}>
+      <Bell size={14} />{on ? t('已订阅到货通知') : t('到货通知我')}
+    </button>
+  )
 }

@@ -8,6 +8,7 @@ import (
 
 	"vpsbill/internal/clock"
 	"vpsbill/internal/provider"
+	"vpsbill/internal/telegram"
 )
 
 // RunScanner measures service traffic and queues expiry and traffic
@@ -67,7 +68,12 @@ func (n *Notifier) remindExpiringServices(ctx context.Context) {
 				"Pay it before the instance expires; after that the instance is suspended once the grace period ends.\n\nPay now: %s\n"),
 			service.CustomerName, service.InstanceName, service.PlanName, due, service.InvoiceNumber,
 			money(service.AmountMinor, service.Currency), n.link("/portal/billing"))
-		n.enqueue(ctx, service.Email, subject, body, fmt.Sprintf("service-expiry:%s:%s:%s", service.ServiceID, service.DueAt.UTC().Format(time.RFC3339), stage))
+		// On Telegram the reminder carries a button that pays the renewal
+		// from the balance, after a confirmation.
+		n.enqueueWith(ctx, service.Email, subject, body, fmt.Sprintf("service-expiry:%s:%s:%s", service.ServiceID, service.DueAt.UTC().Format(time.RFC3339), stage), [][]telegram.Button{
+			{telegram.InvoiceButton(say(lang, "用余额续费", "Renew from balance"), service.InvoiceID)},
+			{{Text: say(lang, "打开网站", "Open the site"), URL: n.link("/portal/billing")}},
+		})
 	}
 }
 
