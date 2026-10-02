@@ -219,12 +219,13 @@ func (a *adminBilling) epayWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 	intent, err := a.store.PaymentIntentByMerchantReference(r.Context(), r.Form.Get("out_trade_no"), "epay")
 	amount, amountErr := parseAmountMinor(r.Form.Get("money"))
-	if err != nil || amountErr != nil || amount != intent.AmountMinor || intent.Currency != "CNY" || r.Form.Get("trade_no") == "" {
+	charged, chargedCurrency := intent.Charged()
+	if err != nil || amountErr != nil || amount != charged || chargedCurrency != "CNY" || r.Form.Get("trade_no") == "" {
 		plainWebhook(w, "fail")
 		return
 	}
 	payload, _ := json.Marshal(r.Form)
-	_, err = a.store.ProcessPayment(r.Context(), postgres.PaymentEvent{Provider: "epay", ProviderEventID: r.Form.Get("trade_no"), EventType: "payment.succeeded", ProviderTransactionID: r.Form.Get("trade_no"), InvoiceNumber: intent.InvoiceNumber, AmountMinor: amount, Currency: intent.Currency, Payload: payload}, "payment_provider", "epay")
+	_, err = a.store.ProcessPayment(r.Context(), postgres.PaymentEvent{Provider: "epay", ProviderEventID: r.Form.Get("trade_no"), EventType: "payment.succeeded", ProviderTransactionID: r.Form.Get("trade_no"), InvoiceNumber: intent.InvoiceNumber, AmountMinor: intent.AmountMinor, Currency: intent.Currency, Payload: payload}, "payment_provider", "epay")
 	if err != nil {
 		plainWebhook(w, "fail")
 		return
@@ -245,12 +246,13 @@ func (a *adminBilling) alipayWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 	intent, err := a.store.PaymentIntentByMerchantReference(r.Context(), r.Form.Get("out_trade_no"), "alipay_f2f")
 	amount, amountErr := parseAmountMinor(r.Form.Get("total_amount"))
-	if err != nil || amountErr != nil || amount != intent.AmountMinor || intent.Currency != "CNY" || r.Form.Get("trade_no") == "" || r.Form.Get("notify_id") == "" {
+	charged, chargedCurrency := intent.Charged()
+	if err != nil || amountErr != nil || amount != charged || chargedCurrency != "CNY" || r.Form.Get("trade_no") == "" || r.Form.Get("notify_id") == "" {
 		plainWebhook(w, "failure")
 		return
 	}
 	payload, _ := json.Marshal(r.Form)
-	_, err = a.store.ProcessPayment(r.Context(), postgres.PaymentEvent{Provider: "alipay_f2f", ProviderEventID: r.Form.Get("notify_id"), EventType: "payment.succeeded", ProviderTransactionID: r.Form.Get("trade_no"), InvoiceNumber: intent.InvoiceNumber, AmountMinor: amount, Currency: intent.Currency, Payload: payload}, "payment_provider", "alipay_f2f")
+	_, err = a.store.ProcessPayment(r.Context(), postgres.PaymentEvent{Provider: "alipay_f2f", ProviderEventID: r.Form.Get("notify_id"), EventType: "payment.succeeded", ProviderTransactionID: r.Form.Get("trade_no"), InvoiceNumber: intent.InvoiceNumber, AmountMinor: intent.AmountMinor, Currency: intent.Currency, Payload: payload}, "payment_provider", "alipay_f2f")
 	if err != nil {
 		plainWebhook(w, "failure")
 		return

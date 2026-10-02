@@ -421,12 +421,12 @@ func createPlan(ctx context.Context, tx pgx.Tx, input Plan) (Plan, error) {
 		return Plan{}, fmt.Errorf("create plan: %w", err)
 	}
 	for i := range input.Prices {
-		input.Prices[i].Currency = strings.ToUpper(strings.TrimSpace(input.Prices[i].Currency))
+		// Prices are always in the ledger currency, whatever was sent.
 		if err := tx.QueryRow(ctx, `
 			INSERT INTO plan_prices(plan_id, currency, billing_cycle, amount_minor, setup_fee_minor, purchase_limit)
-			VALUES($1, $2, $3, $4, $5, $6)
-			RETURNING id, active_from
-		`, input.ID, input.Prices[i].Currency, input.Prices[i].BillingCycle, input.Prices[i].AmountMinor, input.Prices[i].SetupFeeMinor, input.Prices[i].PurchaseLimit).Scan(&input.Prices[i].ID, &input.Prices[i].ActiveFrom); err != nil {
+			VALUES($1, `+LedgerCurrencySQL+`, $2, $3, $4, $5)
+			RETURNING id, active_from, currency
+		`, input.ID, input.Prices[i].BillingCycle, input.Prices[i].AmountMinor, input.Prices[i].SetupFeeMinor, input.Prices[i].PurchaseLimit).Scan(&input.Prices[i].ID, &input.Prices[i].ActiveFrom, &input.Prices[i].Currency); err != nil {
 			return Plan{}, fmt.Errorf("create plan price: %w", err)
 		}
 	}
@@ -496,13 +496,12 @@ func updatePlan(ctx context.Context, tx pgx.Tx, id string, input Plan) (Plan, er
 		return Plan{}, fmt.Errorf("expire plan prices: %w", err)
 	}
 	for i := range input.Prices {
-		input.Prices[i].Currency = strings.ToUpper(strings.TrimSpace(input.Prices[i].Currency))
 		if err := tx.QueryRow(ctx, `
 			INSERT INTO plan_prices(plan_id, currency, billing_cycle, amount_minor, setup_fee_minor, active_from, purchase_limit)
-			VALUES($1, $2, $3, $4, $5, $6, $7)
-			RETURNING id, active_from
-		`, id, input.Prices[i].Currency, input.Prices[i].BillingCycle, input.Prices[i].AmountMinor,
-			input.Prices[i].SetupFeeMinor, now, input.Prices[i].PurchaseLimit).Scan(&input.Prices[i].ID, &input.Prices[i].ActiveFrom); err != nil {
+			VALUES($1, `+LedgerCurrencySQL+`, $2, $3, $4, $5, $6)
+			RETURNING id, active_from, currency
+		`, id, input.Prices[i].BillingCycle, input.Prices[i].AmountMinor,
+			input.Prices[i].SetupFeeMinor, now, input.Prices[i].PurchaseLimit).Scan(&input.Prices[i].ID, &input.Prices[i].ActiveFrom, &input.Prices[i].Currency); err != nil {
 			return Plan{}, fmt.Errorf("update plan price: %w", err)
 		}
 	}

@@ -59,9 +59,9 @@ export function Overview() {
   }
 
   const revenue =
-    data.revenue_30_days.map(item => money(item.amount_minor, item.currency)).join(' / ') || money(0, 'CNY')
+    data.revenue_30_days.map(item => money(item.amount_minor, item.currency)).join(' / ') || money(0)
   const outstanding =
-    data.outstanding.map(item => money(item.amount_minor, item.currency)).join(' / ') || money(0, 'CNY')
+    data.outstanding.map(item => money(item.amount_minor, item.currency)).join(' / ') || money(0)
   const nodeRate = data.nodes ? Math.round((data.online_nodes / data.nodes) * 100) : 0
   const offline = data.nodes - data.online_nodes
 

@@ -644,7 +644,7 @@ func (p *customerPortal) catalogData(w http.ResponseWriter, r *http.Request) {
 			categories = append(categories, category)
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": map[string]any{"plans": available, "regions": regions, "categories": categories, "checkout_enabled": p.settings.Current().PaymentGateway.Type != "disabled"}})
+	writeJSON(w, http.StatusOK, map[string]any{"data": map[string]any{"plans": available, "regions": regions, "categories": categories, "checkout_enabled": p.settings.Current().PaymentGateway.Type != "disabled", "checkout_currency": p.checkoutCurrency()}})
 }
 
 func (p *customerPortal) listOrders(w http.ResponseWriter, r *http.Request) {
@@ -679,6 +679,16 @@ func (p *customerPortal) createOrder(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, map[string]any{"data": order})
 }
 
+// checkoutCurrency is the currency online payments are charged in: CNY
+// with Alipay and Epay, the ledger's otherwise.
+func (p *customerPortal) checkoutCurrency() string {
+	runtime := p.settings.Current()
+	if runtime.PaymentGateway.Type == "alipay_f2f" || runtime.PaymentGateway.Type == "epay" {
+		return "CNY"
+	}
+	return runtime.Locale.Ledger()
+}
+
 func (p *customerPortal) checkout(w http.ResponseWriter, r *http.Request) {
 	runtime := p.settings.Current()
 	config := runtime.PaymentGateway
@@ -700,12 +710,16 @@ func (p *customerPortal) checkout(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "internal_error"})
 		return
 	}
-	if (config.Type == "alipay_f2f" || config.Type == "epay") && intent.Currency != "CNY" {
-		writeJSON(w, http.StatusConflict, map[string]any{"error": "currency_unsupported", "message": "当前支付网关仅支持人民币账单"})
-		return
-	}
 	if intent.CheckoutURL == "" {
-		request := payment.CheckoutRequest{MerchantReference: intent.MerchantReference, InvoiceNumber: intent.InvoiceNumber, AmountMinor: intent.AmountMinor, Currency: intent.Currency, ExpiresAt: intent.ExpiresAt}
+		// Alipay and Epay take CNY: an invoice in another currency is
+		// charged its worth in CNY at the rate of this moment, which the
+		// intent keeps for checking the gateway's notification.
+		intent.ChargeCurrency, intent.ChargeMinor = "", 0
+		if (config.Type == "alipay_f2f" || config.Type == "epay") && intent.Currency != "CNY" {
+			intent.ChargeCurrency, intent.ChargeMinor = "CNY", max(runtime.Locale.Convert(intent.AmountMinor, intent.Currency, "CNY"), 1)
+		}
+		charge, chargeCurrency := intent.Charged()
+		request := payment.CheckoutRequest{MerchantReference: intent.MerchantReference, InvoiceNumber: intent.InvoiceNumber, AmountMinor: charge, Currency: chargeCurrency, ExpiresAt: intent.ExpiresAt}
 		switch config.Type {
 		case "generic":
 			intent.CheckoutURL, err = (payment.GenericGateway{BaseURL: config.GenericBaseURL, PublicURL: runtime.PublicURL, Secret: config.GenericSecret}).CheckoutURL(request)
@@ -717,7 +731,7 @@ func (p *customerPortal) checkout(w http.ResponseWriter, r *http.Request) {
 			err = errors.New("unsupported payment gateway")
 		}
 		if err == nil {
-			err = p.billing.SetPaymentIntentCheckoutURL(r.Context(), intent.ID, identity.AccountID, intent.CheckoutURL)
+			err = p.billing.SetPaymentIntentCheckoutURL(r.Context(), intent.ID, identity.AccountID, intent.CheckoutURL, intent.ChargeCurrency, intent.ChargeMinor)
 		}
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "checkout_create_failed"})

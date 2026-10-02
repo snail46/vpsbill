@@ -451,6 +451,8 @@ export type CustomerCatalogRecord = {
   regions: RegionRecord[]
   categories?: PlanCategoryRecord[]
   checkout_enabled: boolean
+  // checkout_currency is what online payments are charged in.
+  checkout_currency?: string
 }
 
 export type PaymentIntentRecord = {

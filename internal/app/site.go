@@ -32,7 +32,7 @@ func siteMeta(cfg config.Config, runtime *settings.Manager, r *http.Request) map
 		"trade_hold_days":          current.Marketplace.TradeHoldDays,
 		"contact":                  map[string]any{"intro": current.ContactIntro, "links": current.ContactLinks},
 		"telegram_enabled":         current.Telegram.Ready(),
-		"locale":                   map[string]any{"default_lang": current.Locale.DefaultLang, "usd_enabled": current.Locale.USDEnabled, "usd_rate": current.Locale.USDRate, "currencies": current.Locale.Currencies(), "default_currency": current.Locale.Currency()},
+		"locale":                   map[string]any{"default_lang": current.Locale.DefaultLang, "usd_enabled": current.Locale.USDEnabled, "usd_rate": current.Locale.USDRate, "currencies": current.Locale.Currencies(), "default_currency": current.Locale.Currency(), "ledger_currency": current.Locale.Ledger()},
 		"capabilities": []string{
 			"accounts", "catalog", "billing", "provisioning", "clicd", "support", "audit", "notifications", "wallet", "marketplace",
 		},

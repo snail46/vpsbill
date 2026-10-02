@@ -16,6 +16,14 @@ var (
 	ErrBalanceOnly = errors.New("invoice can only be paid from the balance")
 )
 
+// Charged is what the gateway takes for the intent and in which currency.
+func (p PaymentIntent) Charged() (int64, string) {
+	if p.ChargeMinor > 0 {
+		return p.ChargeMinor, p.ChargeCurrency
+	}
+	return p.AmountMinor, p.Currency
+}
+
 // invoiceGatewaySQL tells whether invoice i may be paid through the payment
 // gateway: top-ups and the platform's own products. Everything sold by a
 // host is paid from the balance.
@@ -24,17 +32,22 @@ const invoiceGatewaySQL = `(i.kind='topup' OR NOT (
 	OR EXISTS(SELECT 1 FROM services gs JOIN plans gp ON gp.id=gs.plan_id WHERE gs.id=i.service_id AND gp.owner_account_id IS NOT NULL)))`
 
 type PaymentIntent struct {
-	ID                string    `json:"id"`
-	AccountID         string    `json:"account_id"`
-	InvoiceID         string    `json:"invoice_id"`
-	InvoiceNumber     string    `json:"invoice_number"`
-	Provider          string    `json:"provider"`
-	MerchantReference string    `json:"merchant_reference"`
-	Status            string    `json:"status"`
-	Currency          string    `json:"currency"`
-	AmountMinor       int64     `json:"amount_minor"`
-	CheckoutURL       string    `json:"checkout_url"`
-	ExpiresAt         time.Time `json:"expires_at"`
+	ID                string `json:"id"`
+	AccountID         string `json:"account_id"`
+	InvoiceID         string `json:"invoice_id"`
+	InvoiceNumber     string `json:"invoice_number"`
+	Provider          string `json:"provider"`
+	MerchantReference string `json:"merchant_reference"`
+	Status            string `json:"status"`
+	Currency          string `json:"currency"`
+	AmountMinor       int64  `json:"amount_minor"`
+	// ChargeCurrency and ChargeMinor are what the gateway takes when it
+	// cannot charge the invoice's currency (Alipay and Epay take CNY);
+	// empty and 0 when it charges the invoice amount itself.
+	ChargeCurrency string    `json:"charge_currency,omitempty"`
+	ChargeMinor    int64     `json:"charge_minor,omitempty"`
+	CheckoutURL    string    `json:"checkout_url"`
+	ExpiresAt      time.Time `json:"expires_at"`
 }
 
 func (s *BillingStore) PreparePaymentIntent(ctx context.Context, accountID, invoiceID, provider string) (PaymentIntent, error) {
@@ -63,10 +76,10 @@ func (s *BillingStore) PreparePaymentIntent(ctx context.Context, accountID, invo
 		return PaymentIntent{}, ErrBalanceOnly
 	}
 	err = tx.QueryRow(ctx, `
-		SELECT id,account_id,provider,merchant_reference,status,coalesce(checkout_url,''),expires_at
+		SELECT id,account_id,provider,merchant_reference,status,coalesce(checkout_url,''),expires_at,coalesce(charge_currency,''),coalesce(charge_minor,0)
 		FROM payment_intents WHERE invoice_id=$1 AND provider=$2 AND status IN ('pending','redirected') AND expires_at>now()
 		LIMIT 1
-	`, invoiceID, provider).Scan(&result.ID, &result.AccountID, &result.Provider, &result.MerchantReference, &result.Status, &result.CheckoutURL, &result.ExpiresAt)
+	`, invoiceID, provider).Scan(&result.ID, &result.AccountID, &result.Provider, &result.MerchantReference, &result.Status, &result.CheckoutURL, &result.ExpiresAt, &result.ChargeCurrency, &result.ChargeMinor)
 	if err == nil {
 		return result, tx.Commit(ctx)
 	}
@@ -99,11 +112,13 @@ func (s *BillingStore) PreparePaymentIntent(ctx context.Context, accountID, invo
 	return result, nil
 }
 
-func (s *BillingStore) SetPaymentIntentCheckoutURL(ctx context.Context, id, accountID, checkoutURL string) error {
+// SetPaymentIntentCheckoutURL records where the customer pays and, when the
+// gateway charges another currency than the invoice's, what it charges.
+func (s *BillingStore) SetPaymentIntentCheckoutURL(ctx context.Context, id, accountID, checkoutURL, chargeCurrency string, chargeMinor int64) error {
 	command, err := s.db.Exec(ctx, `
-		UPDATE payment_intents SET checkout_url=$3,status='redirected',updated_at=now()
+		UPDATE payment_intents SET checkout_url=$3,status='redirected',charge_currency=nullif($4,''),charge_minor=nullif($5::bigint,0),updated_at=now()
 		WHERE id=$1 AND account_id=$2 AND status IN ('pending','redirected') AND expires_at>now()
-	`, id, accountID, checkoutURL)
+	`, id, accountID, checkoutURL, chargeCurrency, chargeMinor)
 	if err != nil {
 		return err
 	}
@@ -115,8 +130,8 @@ func (s *BillingStore) SetPaymentIntentCheckoutURL(ctx context.Context, id, acco
 
 func (s *BillingStore) PaymentIntentByMerchantReference(ctx context.Context, reference, provider string) (PaymentIntent, error) {
 	var result PaymentIntent
-	err := s.db.QueryRow(ctx, `SELECT p.id,p.account_id,p.invoice_id,i.number,p.provider,p.merchant_reference,p.status,p.currency,p.amount_minor,coalesce(p.checkout_url,''),p.expires_at
+	err := s.db.QueryRow(ctx, `SELECT p.id,p.account_id,p.invoice_id,i.number,p.provider,p.merchant_reference,p.status,p.currency,p.amount_minor,coalesce(p.checkout_url,''),p.expires_at,coalesce(p.charge_currency,''),coalesce(p.charge_minor,0)
 		FROM payment_intents p JOIN invoices i ON i.id=p.invoice_id WHERE p.merchant_reference=$1 AND p.provider=$2`, reference, provider).
-		Scan(&result.ID, &result.AccountID, &result.InvoiceID, &result.InvoiceNumber, &result.Provider, &result.MerchantReference, &result.Status, &result.Currency, &result.AmountMinor, &result.CheckoutURL, &result.ExpiresAt)
+		Scan(&result.ID, &result.AccountID, &result.InvoiceID, &result.InvoiceNumber, &result.Provider, &result.MerchantReference, &result.Status, &result.Currency, &result.AmountMinor, &result.CheckoutURL, &result.ExpiresAt, &result.ChargeCurrency, &result.ChargeMinor)
 	return result, err
 }

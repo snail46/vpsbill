@@ -80,7 +80,7 @@ func (a *marketplaceAPI) customerTopup(w http.ResponseWriter, r *http.Request) {
 	identity := customerPrincipalFromContext(r.Context())
 	invoice, err := a.billing.CreateTopupInvoice(r.Context(), identity.AccountID, identity.UserID, input.AmountMinor)
 	if errors.Is(err, postgres.ErrInvalidAmount) {
-		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "invalid_amount", "message": "充值金额需在 ¥1 到 ¥100000 之间"})
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "invalid_amount", "message": "充值金额需在 1 到 100000 之间"})
 		return
 	}
 	if err != nil {
@@ -125,7 +125,7 @@ func (a *marketplaceAPI) adminAdjustWallet(w http.ResponseWriter, r *http.Reques
 	wallet, err := a.billing.AdjustWallet(r.Context(), r.PathValue("id"), principalFromContext(r.Context()).UserID, input.AmountMinor, input.Reason)
 	switch {
 	case errors.Is(err, postgres.ErrInvalidAmount):
-		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "invalid_amount", "message": "请填写非零金额（不超过 ¥100000）和调整原因"})
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "invalid_amount", "message": "请填写非零金额（不超过 100000）和调整原因"})
 	case errors.Is(err, postgres.ErrInsufficientBalance):
 		writeJSON(w, http.StatusConflict, map[string]any{"error": "insufficient_balance", "message": "扣减后余额不能为负"})
 	case err != nil:
@@ -515,10 +515,10 @@ func (in *hostedPlanInput) plan(node postgres.Node) (postgres.Plan, string) {
 		case seen[cycle]:
 			return postgres.Plan{}, "计费周期不能重复"
 		case amount < 100 || amount > 10_000_000:
-			return postgres.Plan{}, "价格需在 ¥1 到 ¥100000 之间"
+			return postgres.Plan{}, "价格需在 1 到 100000 之间"
 		}
 		seen[cycle] = true
-		price := postgres.Price{Currency: "CNY", BillingCycle: cycle, AmountMinor: amount}
+		price := postgres.Price{BillingCycle: cycle, AmountMinor: amount}
 		if limit, ok := in.PriceLimits[raw]; ok && limit > 0 {
 			price.PurchaseLimit = &limit
 		}

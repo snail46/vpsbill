@@ -278,15 +278,20 @@ export function AuthPage({
     <main className="auth-page">
       <div className="auth-theme"><LocaleMenu /><ThemeToggle /></div>
       <section className="auth-brand-panel">
-        <Brand className="auth-brand" name={appName} subtitle={t('VPS 商业运营控制平面')} />
+        <Brand className="auth-brand" name={appName} subtitle={t('商家控制中心')} />
         <div>
-          <p className="eyebrow">SECURE INFRASTRUCTURE</p>
-          <h1>{t('账务、客户与自动化虚拟化，在一个可信边界内运行。')}</h1>
-          <p>{t('管理员会话保护、细粒度权限控制与节点密钥全链路 AES-256-GCM 加密已经启用。')}</p>
+          <p className="eyebrow">OPERATIONS CONSOLE</p>
+          <h1>{t('自营销售、机主托管和交易市场，在一处运营。')}</h1>
+          <p>{t('套餐与库存、节点与宿主机、订单账单与余额、工单与聊天室、托管清退与举报，都从这里处理。')}</p>
+          <ul className="auth-points">
+            <li><ServerCog size={16} />{t('对接 Hatch Agent、CLICD 和 LXD API 节点，开通、续费和到期回收自动执行')}</li>
+            <li><CreditCard size={16} />{t('支付网关、邮件与 Telegram 通知、中英文界面，人民币或美元记账')}</li>
+            <li><UserCog size={16} />{t('六级管理员角色，各司其职，操作写入审计日志')}</li>
+          </ul>
         </div>
         <div className="auth-proof">
           <ShieldCheck size={18} />
-          <span>{t('Argon2id · CSRF 防护 · AES-256-GCM 凭据加密')}</span>
+          <span>{t('Argon2id · 二步验证 · CSRF 防护 · AES-256-GCM 凭据加密')}</span>
         </div>
       </section>
       <section className="auth-form-panel">

@@ -8,6 +8,7 @@ import { AdminLink, FilterBar, SearchFilter, SelectFilter, adminHref, includesTe
 import { confirmDialog } from '../shared/dialog'
 import { toast } from '../shared/toast'
 import { t } from '../shared/i18n'
+import { ledgerCurrency } from '../shared/currency'
 
 const customerKinds: Option[] = [['individual', t('个人客户')], ['business', t('企业客户')]]
 const customerStatuses: Option[] = [['active', t('正常')], ['suspended', t('已暂停')], ['pending', t('待激活')], ['closed', t('已关闭')]]
@@ -250,7 +251,7 @@ export function CustomerForm({ onClose, onCreated }: { onClose: () => void; onCr
           legal_name: data.get('legal_name'),
           tax_id: data.get('tax_id'),
           country_code: data.get('country_code'),
-          default_currency: data.get('default_currency'),
+          default_currency: ledgerCurrency(),
         }),
       })
       onCreated()
@@ -298,13 +299,6 @@ export function CustomerForm({ onClose, onCreated }: { onClose: () => void; onCr
         <label>
           <span>{t('国家 / 地区代码')}</span>
           <input name="country_code" maxLength={2} defaultValue="CN" />
-        </label>
-        <label>
-          <span>{t('默认计费币种')}</span>
-          <select name="default_currency">
-            <option value="CNY">{t('CNY 人民币')}</option>
-            <option value="USD">{t('USD 美元')}</option>
-          </select>
         </label>
 
         {error && <div className="form-error wide">{error}</div>}

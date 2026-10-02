@@ -32,7 +32,7 @@ export type Meta = {
   // telegram_enabled offers linking a Telegram account for rewards.
   telegram_enabled?: boolean
   // locale is the site's default language and the USD display rate.
-  locale?: { default_lang?: 'zh' | 'en'; usd_enabled?: boolean; usd_rate?: number; currencies?: string[]; default_currency?: string }
+  locale?: { default_lang?: 'zh' | 'en'; usd_enabled?: boolean; usd_rate?: number; currencies?: string[]; default_currency?: string; ledger_currency?: string }
 }
 
 // useReveal brings a form that just opened into view, flashes it and puts

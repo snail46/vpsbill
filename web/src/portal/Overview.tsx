@@ -5,6 +5,7 @@ import { money } from '../shared/ui'
 import { navigatePortal } from '../shared/nav'
 import { formatDate, formatTime } from '../shared/time'
 import { t } from '../shared/i18n'
+import { ledgerCurrency } from '../shared/currency'
 
 const soon = 7 * 24 * 3600 * 1000
 
@@ -51,7 +52,7 @@ export function CustomerOverview({ customer }: { customer: CustomerIdentity }) {
   const open = invoices.filter(item => item.status === 'open')
   const due = open.reduce((sum, item) => sum + item.balance_minor, 0)
   const expiring = services.filter(item => item.next_due_at && new Date(item.next_due_at).getTime() - Date.now() < soon)
-  const currency = overview?.currency || invoices[0]?.currency || 'CNY'
+  const currency = overview?.currency || invoices[0]?.currency || ledgerCurrency()
   const hosting = overview?.hosting
 
   return (

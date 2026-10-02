@@ -5237,3 +5237,50 @@ input, select, textarea { min-height: 34px; padding: 6px 10px; font-size: 13px; 
 .role-select {
   min-width: 132px;
 }
+
+/* What the site does, on the sign-in pages. */
+.auth-points {
+  list-style: none;
+  margin: 22px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+  max-width: 540px;
+}
+
+.auth-points li {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.auth-points svg {
+  flex: none;
+  margin-top: 3px;
+  color: var(--accent-text);
+}
+
+@media (max-width: 900px) {
+  .auth-points {
+    margin-top: 16px;
+    gap: 8px;
+  }
+
+  .auth-points li {
+    font-size: 13px;
+  }
+}
+
+@media (max-width: 640px) {
+  .auth-points {
+    display: none;
+  }
+}
+
+.sidebar-user strong {
+  flex-wrap: wrap;
+  row-gap: 2px;
+}

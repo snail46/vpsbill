@@ -2,12 +2,14 @@ package app
 
 import (
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
 
 	"vpsbill/internal/fx"
 	"vpsbill/internal/settings"
+	"vpsbill/internal/store/postgres"
 )
 
 func (a adminSettings) locale(w http.ResponseWriter, _ *http.Request) {
@@ -83,4 +85,44 @@ func (a *authenticator) customerSetLocale(w http.ResponseWriter, r *http.Request
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// ledger says what the books are kept in and what a switch would convert.
+func (a adminSettings) ledger(w http.ResponseWriter, r *http.Request) {
+	state, err := a.settings.LedgerState(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "internal_error"})
+		return
+	}
+	locale := a.settings.Current().Locale
+	writeJSON(w, http.StatusOK, map[string]any{"data": map[string]any{"ledger_currency": locale.Ledger(), "usd_rate": locale.USDRate, "state": state}})
+}
+
+// switchLedger re-denominates the books in the other currency at the
+// current rate. The caller names the currency it expects to leave, so a
+// repeated request cannot switch back.
+func (a adminSettings) switchLedger(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		From string `json:"from"`
+		To   string `json:"to"`
+	}
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	if current := a.settings.Current().Locale.Ledger(); input.From != current {
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "ledger_changed", "message": "记账币种已经变化，请刷新页面后再操作"})
+		return
+	}
+	counts, err := a.settings.SwitchLedger(r.Context(), input.To, principalFromContext(r.Context()).UserID)
+	switch {
+	case errors.Is(err, postgres.ErrLedgerBusy):
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "ledger_busy", "message": "有在线支付正在进行，暂时不能切换记账币种。请先停用支付网关，等 30 分钟后未完成的支付过期再切换"})
+	case errors.Is(err, settings.ErrInvalidSettings):
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "validation_error", "message": strings.TrimPrefix(err.Error(), settings.ErrInvalidSettings.Error()+": ")})
+	case err != nil:
+		slog.Default().Error("switch ledger currency", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "ledger_switch_failed", "message": "切换失败，账本没有任何改动"})
+	default:
+		writeJSON(w, http.StatusOK, map[string]any{"data": map[string]any{"ledger_currency": input.To, "counts": counts, "locale": a.settings.Current().Locale}})
+	}
 }

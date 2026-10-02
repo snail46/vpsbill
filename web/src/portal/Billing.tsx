@@ -86,7 +86,7 @@ export function CustomerBilling() {
       {notice && <div className="form-success">{notice}</div>}
       <CurrencyNote />
       <div className="note-banner">
-        {t('账户余额')} <strong>{money(balance, invoices[0]?.currency || 'CNY')}</strong>{t('，可直接用于支付新购和续费账单。')}<a href="/portal/wallet">{t('充值或查看明细')}</a>
+        {t('账户余额')} <strong>{money(balance, invoices[0]?.currency)}</strong>{t('，可直接用于支付新购和续费账单。')}<a href="/portal/wallet">{t('充值或查看明细')}</a>
       </div>
       <div className="note-banner">
         {t('余额充值和平台自营产品可以在线支付；托管产品（新购和续费）只支持余额支付，余额不足时请先充值。平台自营产品非产品问题不退款，退款只退到账户余额。')}

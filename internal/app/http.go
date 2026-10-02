@@ -281,6 +281,9 @@ func NewHandler(deps Dependencies) (http.Handler, error) {
 	mux.Handle("PUT /api/v1/customer/notifications", auth.requireCustomer(http.HandlerFunc(tg.customerSetNotifications)))
 	mux.Handle("GET /api/v1/admin/settings/locale", auth.require("settings:read", http.HandlerFunc(adminSettings.locale)))
 	mux.Handle("PUT /api/v1/admin/settings/locale", auth.require("settings:write", http.HandlerFunc(adminSettings.updateLocale)))
+	// Only the super administrator switches the currency of the books.
+	mux.Handle("GET /api/v1/admin/settings/ledger", auth.require("settings:read", http.HandlerFunc(adminSettings.ledger)))
+	mux.Handle("POST /api/v1/admin/settings/ledger", auth.require("ledger:switch", http.HandlerFunc(adminSettings.switchLedger)))
 	mux.Handle("POST /api/v1/admin/settings/locale/rate", auth.require("settings:write", http.HandlerFunc(adminSettings.fetchRate)))
 	mux.Handle("POST /api/v1/admin/settings/site/test-mail", auth.require("settings:write", http.HandlerFunc(adminSettings.testMail)))
 	mux.Handle("GET /api/v1/admin/services", auth.require("services:read", http.HandlerFunc(automation.listServices)))

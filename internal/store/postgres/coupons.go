@@ -67,7 +67,7 @@ func (in *CouponInput) Validate() string {
 	case in.DiscountType == "percent" && (in.DiscountValue < 1 || in.DiscountValue > 99):
 		return "折扣比例需在 1%-99% 之间"
 	case in.DiscountType == "amount" && (in.DiscountValue < 1 || in.DiscountValue > 10_000_000):
-		return "减免金额需在 ¥0.01 到 ¥100000 之间"
+		return "减免金额需在 0.01 到 100000 之间"
 	case in.DiscountType != "percent" && in.DiscountType != "amount":
 		return "请选择折扣方式"
 	case in.MaxUses < 0 || in.MaxUses > 1_000_000:

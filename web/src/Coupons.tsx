@@ -4,6 +4,7 @@ import { api, cached, type CouponQuoteRecord, type CouponRecord } from './api'
 import { walletMoney } from './Wallet'
 import { formatDate } from './shared/time'
 import { t } from './shared/i18n'
+import { ledgerUnit } from './shared/currency'
 
 export function couponDiscountLabel(coupon: Pick<CouponRecord, 'discount_type' | 'discount_value'>) {
   if (coupon.discount_type === 'amount') return t('每台减 {0}', walletMoney(coupon.discount_value))
@@ -242,7 +243,7 @@ function CouponForm({ endpoint, plans, coupon, onClose, onSaved }: { endpoint: s
           </select>
         </label>
         <label>
-          <span>{type === 'percent' ? t('减免比例 %（1-99）') : t('每台每期减免金额（元）')}</span>
+          <span>{type === 'percent' ? t('减免比例 %（1-99）') : t('每台每期减免金额（{0}）', ledgerUnit())}</span>
           <input
             key={type}
             name="discount_value"

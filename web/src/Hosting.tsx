@@ -973,7 +973,7 @@ function HostedPlanForm({ node, plan, onClose, onSaved }: { node: HostedNodeReco
         <DiskIOFields plan={plan} capacity={capacity} />
         <CyclePriceFields
           prices={plan?.prices ?? []}
-          hint={t('留空表示不支持该计费周期，至少填写一个。母机到期日早于周期结束时，买家按剩余时间折算付款（例如季付 ¥30、母机只剩 2 个月，买家付 ¥20），实例到期日与母机到期日相同。')}
+          hint={t('留空表示不支持该计费周期，至少填写一个。母机到期日早于周期结束时，买家按剩余时间折算付款（例如季付 30、母机只剩 2 个月，买家付 20），实例到期日与母机到期日相同。')}
         />
         <fieldset className="wide template-picker">
           <legend>{t('可选系统镜像（读取自母机）')}</legend>

@@ -221,13 +221,12 @@ func (s *AuthStore) RegisterCustomer(ctx context.Context, email, displayName, pa
 	}
 	err = tx.QueryRow(ctx, `
 		INSERT INTO accounts(kind,status,display_name,billing_email,country_code,default_currency)
-		VALUES('individual','active',$1,$2,'CN','CNY') RETURNING id,status
-	`, displayName, email).Scan(&identity.AccountID, &identity.AccountStatus)
+		VALUES('individual','active',$1,$2,'CN',`+LedgerCurrencySQL+`) RETURNING id,status,default_currency
+	`, displayName, email).Scan(&identity.AccountID, &identity.AccountStatus, &identity.DefaultCurrency)
 	if err != nil {
 		return CustomerIdentity{}, err
 	}
 	identity.Role = "owner"
-	identity.DefaultCurrency = "CNY"
 	if _, err := tx.Exec(ctx, "INSERT INTO memberships(account_id,user_id,role) VALUES($1,$2,'owner')", identity.AccountID, identity.UserID); err != nil {
 		return CustomerIdentity{}, err
 	}

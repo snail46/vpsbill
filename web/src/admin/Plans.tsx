@@ -3,6 +3,7 @@ import { Copy, FolderPlus, Layers, ListChecks, Pencil, Trash2, X } from 'lucide-
 import { api, cached, NodeRecord, PlanCategoryRecord, PlanPresetRecord, PlanRecord } from '../api'
 import { CouponManager } from '../Coupons'
 import { PageActions, StatusBadge, bandwidthLabel, cycleLabel } from '../shared/ui'
+import { chargedMoney } from '../shared/currency'
 import { cycleOrder } from '../shared/cycles'
 import { StockTag } from '../shared/stock'
 import { diskIOText } from '../shared/diskio'
@@ -298,7 +299,7 @@ export function PlansView() {
                         .sort((a, b) => cycleOrder(a.billing_cycle) - cycleOrder(b.billing_cycle))
                         .map(price => (
                           <span key={price.billing_cycle} className="price-chip">
-                            <strong>¥{(price.amount_minor / 100).toFixed(2)}</strong>
+                            <strong>{chargedMoney(price.amount_minor, price.currency)}</strong>
                             <span>/ {cycleLabel(price.billing_cycle)}</span>
                           </span>
                         ))

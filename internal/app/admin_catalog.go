@@ -611,14 +611,15 @@ func validatePlan(plan postgres.Plan) string {
 	}
 	seen := map[string]bool{}
 	for i, price := range plan.Prices {
-		if len(strings.TrimSpace(price.Currency)) != 3 || price.AmountMinor <= 0 {
+		// Prices are stored in the ledger currency, whatever is sent.
+		if price.AmountMinor <= 0 {
 			return "价格币种或金额无效"
 		}
 		cycle := postgres.NormalizeBillingCycle(price.BillingCycle)
 		if cycle == "" {
 			return "计费周期无效（自定义周期为 1-365 天或 1-60 个月）"
 		}
-		key := strings.ToUpper(strings.TrimSpace(price.Currency)) + "/" + cycle
+		key := cycle
 		if seen[key] {
 			return "同一币种的计费周期不能重复"
 		}

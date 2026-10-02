@@ -2,7 +2,7 @@ import { FormEvent, useEffect, useState } from 'react'
 import { AlertTriangle, ArrowLeftRight, RefreshCw, Tag, Upload, X } from 'lucide-react'
 import { api, cached, type CustomerServiceRecord, type TradeListingRecord, type TradeRecord, type WalletRecord } from './api'
 import { walletMoney } from './Wallet'
-import { converted } from './shared/currency'
+import { converted, ledgerUnit } from './shared/currency'
 import { Charged, CurrencyNote } from './shared/LocaleMenu'
 import { formatDate, formatTime } from './shared/time'
 import { cycleName } from './shared/cycles'
@@ -423,7 +423,7 @@ export function ListServiceDialog({ service, onClose, onDone }: { service: Custo
         {error && <div className="form-error">{error}</div>}
         <div className="form-grid">
           <label>
-            <span>{t('挂售价格（人民币 元）')}{converted() && price > 0 && <small> ≈ {walletMoney(Math.round(price * 100))}</small>}</span>
+            <span>{t('挂售价格（{0}）', ledgerUnit())}{converted() && price > 0 && <small> ≈ {walletMoney(Math.round(price * 100))}</small>}</span>
             <input name="price" type="number" min="1" max="100000" step="0.01" required onChange={event => setPrice(Number(event.target.value))} />
           </label>
           <label className="wide">

@@ -228,7 +228,7 @@ func (s *TradeStore) CreateListing(ctx context.Context, seller, userID, serviceI
 	note = strings.TrimSpace(note)
 	switch {
 	case price < 100 || price > 10_000_000:
-		return "", &TradeError{"挂售价格需在 ¥1 到 ¥100000 之间"}
+		return "", &TradeError{"挂售价格需在 1 到 100000 之间"}
 	case len([]rune(note)) > 500:
 		return "", &TradeError{"说明不能超过 500 个字符"}
 	}

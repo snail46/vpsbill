@@ -22,6 +22,7 @@ import { TagInput } from '../shared/tags'
 import { virtualizationLabel } from './Nodes'
 import { toast } from '../shared/toast'
 import { t, tr } from '../shared/i18n'
+import { ledgerCurrency, ledgerUnit } from '../shared/currency'
 
 type Virtualization = PlanRecord['virtualization']
 
@@ -322,7 +323,7 @@ export function PlanForm({
     return {
       error: priceError,
       prices: Object.entries(prices).map(([billing_cycle, amount_minor]) => ({
-        currency: 'CNY',
+        currency: ledgerCurrency(),
         billing_cycle,
         amount_minor,
         setup_fee_minor: 0,
@@ -396,7 +397,7 @@ export function PlanForm({
       if (row.vcpu < 1 || row.ram_mb < 64 || row.disk_gb < 1) return t('{0}：CPU 至少 1 核、内存至少 64 MB、磁盘至少 1 GB', label)
       const prices = cycles
         .filter(cycle => Number(row.prices[cycle] || 0) > 0)
-        .map(cycle => ({ currency: 'CNY', billing_cycle: cycle, amount_minor: Math.round(Number(row.prices[cycle]) * 100), setup_fee_minor: 0, purchase_limit: null }))
+        .map(cycle => ({ currency: ledgerCurrency(), billing_cycle: cycle, amount_minor: Math.round(Number(row.prices[cycle]) * 100), setup_fee_minor: 0, purchase_limit: null }))
       if (!prices.length) return t('{0}：至少填写一个价格', label)
       const stock = row.stock.trim()
       if (stock !== '' && !(Number.isInteger(Number(stock)) && Number(stock) >= 0)) return t('{0}：库存需为非负整数，留空不限', label)
@@ -803,12 +804,12 @@ export function PlanForm({
               <div className="price-formula-grid">
                 {(
                   [
-                    ['base', t('基础费 元/月')],
-                    ['vcpu', t('每核 元')],
-                    ['ram_gb', t('每 GB 内存 元')],
-                    ['disk_10gb', t('每 10 GB 磁盘 元')],
-                    ['traffic_100gb', t('每 100 GB 流量 元')],
-                    ['mbps_10', t('每 10 Mbps 元')],
+                    ['base', t('基础费 {0}/月', ledgerUnit())],
+                    ['vcpu', t('每核 {0}', ledgerUnit())],
+                    ['ram_gb', t('每 GB 内存 {0}', ledgerUnit())],
+                    ['disk_10gb', t('每 10 GB 磁盘 {0}', ledgerUnit())],
+                    ['traffic_100gb', t('每 100 GB 流量 {0}', ledgerUnit())],
+                    ['mbps_10', t('每 10 Mbps {0}', ledgerUnit())],
                   ] as const
                 ).map(([field, label]) => (
                   <label key={field}>
@@ -836,7 +837,7 @@ export function PlanForm({
                   <select value={formula.step} onChange={event => setFormulaField('step', event.target.value)}>
                     <option value={0.01}>{t('到分')}</option>
                     <option value={0.1}>{t('到角')}</option>
-                    <option value={1}>{t('到元')}</option>
+                    <option value={1}>{t('到整数')}</option>
                   </select>
                 </label>
               </div>
@@ -878,7 +879,7 @@ export function PlanForm({
                       <th>{t('流量 GB')}</th>
                       <th>{t('下行 Mbps')}</th>
                       <th>{t('上行 Mbps')}</th>
-                      {cycles.map(cycle => <th key={cycle}>{t('{0} 元', cycleName(cycle))}</th>)}
+                      {cycles.map(cycle => <th key={cycle}>{t('{0}（{1}）', cycleName(cycle), ledgerUnit())}</th>)}
                       <th>{t('库存')}</th>
                       <th aria-label={t('操作')} />
                     </tr>

@@ -82,7 +82,7 @@ func Run(ctx context.Context, runtime *settings.Manager, logger *slog.Logger) {
 		}
 		wait = updateInterval
 		current := runtime.Current()
-		if !current.Installed || !current.Locale.USDRateAuto || (!current.Locale.USDEnabled && current.Telegram.Currency != "USD") {
+		if !current.Installed || !current.Locale.USDRateAuto || (!current.Locale.USDEnabled && current.Telegram.Currency != "USD" && current.Locale.Ledger() != "USD") {
 			continue
 		}
 		rate, err := Fetch(ctx, client)

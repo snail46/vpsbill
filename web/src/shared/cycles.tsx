@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { t } from './i18n'
+import { ledgerUnit } from './currency'
 
 // Billing cycles are the four named ones or a custom length: "d<N>" for N
 // days (1-365) or "m<N>" for N months (1-60), mirroring the API.
@@ -53,7 +54,7 @@ export function CyclePriceFields({ prices, hint }: { prices: PriceLike[]; hint?:
   const sold = (price?: PriceLike) => (price?.sold ? <small className="field-hint">{t('已售 {0} 次', price.sold)}</small> : null)
   return (
     <fieldset className="wide cycle-prices">
-      <legend>{t('计费周期与价格（元）')}</legend>
+      <legend>{t('计费周期与价格（{0}）', ledgerUnit())}</legend>
       <p className="field-hint">
         {t('{0}「限购次数」是该价格累计最多卖出几次（含待支付订单），卖完后该周期自动不可选，已买的实例续费不受影响；留空不限。', hint ?? t('留空表示不支持该计费周期，至少填写一个。'))}
       </p>

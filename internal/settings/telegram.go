@@ -72,8 +72,8 @@ func (t TelegramSettings) In(locale LocaleSettings, currency string) TelegramSet
 }
 
 // TelegramLedger is the Telegram settings with every amount in ledger
-// (CNY) minor units, which is what rewards are paid in.
-func (r Runtime) TelegramLedger() TelegramSettings { return r.Telegram.In(r.Locale, "CNY") }
+// minor units, which is what rewards are paid in.
+func (r Runtime) TelegramLedger() TelegramSettings { return r.Telegram.In(r.Locale, r.Locale.Ledger()) }
 
 // Ready reports whether the bot can run.
 func (t TelegramSettings) Ready() bool {

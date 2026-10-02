@@ -151,6 +151,8 @@ export function CustomerAuthPage({
   const register = mode === 'register'
   const forgot = mode === 'forgot'
   const reset = mode === 'reset'
+  // The hosting centre can be turned off; the introduction follows it.
+  const hosting = meta?.marketplace_enabled !== false
   const [displayName, setDisplayName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -229,13 +231,23 @@ export function CustomerAuthPage({
       <section className="auth-brand-panel customer-brand-panel">
         <Brand className="auth-brand" name={siteName} subtitle={t('客户服务中心')} />
         <div>
-          <p className="eyebrow">YOUR CLOUD, UNDER CONTROL</p>
-          <h1>{t('随心挑选、配置与管理你的 VPS 实例。')}</h1>
-          <p>{t('实时运行监控、端口映射规则、密码管理与财务账单集中在统一入口。')}</p>
+          <p className="eyebrow">{hosting ? 'BUY · HOST · TRADE' : 'VPS, READY IN MINUTES'}</p>
+          <h1>{hosting ? t('买 VPS、出租闲置服务器、转让实例，一个账户就够了。') : t('下单即开通的 VPS，管理和账单都在这里。')}</h1>
+          <p>
+            {hosting
+              ? t('平台自营和机主托管的 VPS 下单后自动开通；自己的服务器可以托管到平台出租，用不上的实例可以在交易市场转给别人。')
+              : t('选好套餐后自动开通，运行状态、流量、续费和账单一目了然；用不上的实例可以在交易市场转给别人。')}
+          </p>
+          <ul className="auth-points">
+            <li><Boxes size={16} />{t('几分钟内自动开通，网页终端、重装系统、端口映射都能自己操作')}</li>
+            <li><WalletCards size={16} />{meta?.telegram_enabled ? t('余额支付、自动续费，到期和流量提醒发到邮箱或 Telegram') : t('余额支付、自动续费，到期和流量提醒发到邮箱')}</li>
+            {hosting && <li><Store size={16} />{t('托管出租的收入按使用时间结算到余额，买家可按剩余天数退款')}</li>}
+            {meta?.telegram_enabled && <li><Coins size={16} />{t('绑定 Telegram，在交流群签到、邀请好友领余额')}</li>}
+          </ul>
         </div>
         <div className="auth-proof">
           <ShieldCheck size={18} />
-          <span>{t('多租户严格隔离 · 服务端会话 · 全链路审计')}</span>
+          <span>{t('二步验证 · 服务端会话 · 中文 / English')}</span>
         </div>
       </section>
       <section className="auth-form-panel">

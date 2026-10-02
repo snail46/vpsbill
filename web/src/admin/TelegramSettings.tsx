@@ -143,8 +143,9 @@ export function TelegramSettings() {
       </p>
       <p className="muted-text">
         {saved?.currency === 'USD'
-          ? t('下面的金额按站点默认币种美元（USD）填写，机器人和前台也按美元展示；发放时按当前汇率换算成人民币存入余额。')
-          : t('下面的金额按站点默认币种人民币（CNY）填写和展示。默认币种在上方「语言与币种」里设置。')}
+          ? t('下面的金额按站点默认币种美元（USD）填写，机器人和前台也按美元展示。')
+          : t('下面的金额按站点默认币种人民币（CNY）填写，机器人和前台也按人民币展示。')}
+        {t('默认币种在上方「语言与币种」里设置；它和记账币种不同时，奖励在发放时按当前汇率换算后存入余额。')}
       </p>
       <ol className="telegram-steps muted-text">
         <li>{t('在 Telegram 找 @BotFather 发送 /newbot 创建机器人，把得到的 Token 填到下面并保存。')}</li>

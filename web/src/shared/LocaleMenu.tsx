@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Globe } from 'lucide-react'
 import { t, lang, setLang } from './i18n'
-import { chargedMoney, converted, displayCurrency, setDisplayCurrency, shownCurrencies, usdRateText } from './currency'
+import { chargedMoney, converted, currencyName, displayCurrency, ledgerCurrency, setDisplayCurrency, shownCurrencies, usdRateText } from './currency'
 
 // LocaleMenu chooses the language and, in the portal, the currency amounts
 // are shown in. Either choice reloads the page.
@@ -49,7 +49,7 @@ export function LocaleMenu() {
                 <button type="button" className={currency === 'CNY' ? 'active' : ''} aria-pressed={currency === 'CNY'} onClick={() => (currency === 'CNY' ? setOpen(false) : setDisplayCurrency('CNY'))}>CNY ¥</button>
                 <button type="button" className={currency === 'USD' ? 'active' : ''} aria-pressed={currency === 'USD'} onClick={() => (currency === 'USD' ? setOpen(false) : setDisplayCurrency('USD'))}>USD $</button>
               </div>
-              <small>{t('美元金额按 {0} 换算显示，付款统一按人民币（CNY）结算。', usdRateText())}</small>
+              <small>{t('账户按{0}记账；另一种币种的金额按 {1} 换算显示。', currencyName(ledgerCurrency()), usdRateText())}</small>
             </>
           )}
         </div>
@@ -58,19 +58,19 @@ export function LocaleMenu() {
   )
 }
 
-// CurrencyNote tells a visitor reading USD amounts that payments are
-// charged in CNY; it shows nothing otherwise.
+// CurrencyNote tells a visitor reading amounts in another currency than
+// the ledger's that they are converted; it shows nothing otherwise.
 export function CurrencyNote() {
   if (!converted()) return null
   return (
     <div className="note-banner currency-note">
-      {t('金额按 {0} 换算为美元显示，仅供参考；充值和付款时统一按人民币（CNY）结算，实付金额以括号内的人民币金额为准。', usdRateText())}
+      {t('金额按 {0} 换算为{1}显示，仅供参考；账户余额和账单按{2}记账，实际扣款以括号内的金额为准。', usdRateText(), currencyName(displayCurrency()), currencyName(ledgerCurrency()))}
     </div>
   )
 }
 
-// Charged adds the CNY amount actually charged beside a converted amount.
-export function Charged({ minor, currency = 'CNY' }: { minor: number; currency?: string }) {
+// Charged adds the amount actually charged beside a converted amount.
+export function Charged({ minor, currency = ledgerCurrency() }: { minor: number; currency?: string }) {
   if (!converted(currency)) return null
   return <small className="charged-amount">{t('（{0}）', chargedMoney(minor, currency))}</small>
 }

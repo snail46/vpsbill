@@ -91,9 +91,9 @@ func (s *BillingStore) CreateAccount(ctx context.Context, input Account) (Accoun
 	input.CountryCode = strings.ToUpper(strings.TrimSpace(input.CountryCode))
 	err := s.db.QueryRow(ctx, `
 		INSERT INTO accounts(kind, status, display_name, billing_email, legal_name, tax_id, country_code, default_currency)
-		VALUES($1, 'active', $2, lower($3), nullif($4,''), nullif($5,''), nullif($6,''), $7)
-		RETURNING id, status, created_at
-	`, input.Kind, strings.TrimSpace(input.DisplayName), strings.TrimSpace(input.BillingEmail), strings.TrimSpace(input.LegalName), strings.TrimSpace(input.TaxID), input.CountryCode, input.DefaultCurrency).Scan(&input.ID, &input.Status, &input.CreatedAt)
+		VALUES($1, 'active', $2, lower($3), nullif($4,''), nullif($5,''), nullif($6,''), `+LedgerCurrencySQL+`)
+		RETURNING id, status, created_at, default_currency
+	`, input.Kind, strings.TrimSpace(input.DisplayName), strings.TrimSpace(input.BillingEmail), strings.TrimSpace(input.LegalName), strings.TrimSpace(input.TaxID), input.CountryCode).Scan(&input.ID, &input.Status, &input.CreatedAt, &input.DefaultCurrency)
 	return input, err
 }
 

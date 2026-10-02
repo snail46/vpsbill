@@ -5,7 +5,7 @@ import { setSiteFavicon, setSiteLogo, type LogoMode } from '../shared/boot'
 import { Brand, StatusBadge } from '../shared/ui'
 import type { ContactLink } from '../shared/contact'
 import { ContactSettings } from './ContactSettings'
-import { LocaleSettings } from './LocaleSettings'
+import { LedgerSettings, LocaleSettings } from './LocaleSettings'
 import { TelegramSettings } from './TelegramSettings'
 import { t, tr } from '../shared/i18n'
 
@@ -456,6 +456,7 @@ export function SiteSettingsView() {
       )}
       {settings && <ContactSettings intro={settings.contact_intro ?? ''} links={settings.contact_links ?? []} />}
       <LocaleSettings />
+      <LedgerSettings />
       <TelegramSettings />
 
       <form className="panel site-settings" onSubmit={submit}>

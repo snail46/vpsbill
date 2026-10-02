@@ -268,8 +268,11 @@ func formatBytes(value int64) string {
 
 func money(amountMinor int64, currency string) string {
 	symbol := strings.TrimSpace(currency) + " "
-	if strings.EqualFold(strings.TrimSpace(currency), "CNY") {
+	switch strings.ToUpper(strings.TrimSpace(currency)) {
+	case "CNY":
 		symbol = "¥"
+	case "USD":
+		symbol = "$"
 	}
 	return fmt.Sprintf("%s%.2f", symbol, float64(amountMinor)/100)
 }

@@ -4,7 +4,7 @@ import { api, cached, type CustomerCatalogRecord, type PaymentIntentRecord, type
 import { formatTime } from './shared/time'
 import { confirmDialog } from './shared/dialog'
 import { toast } from './shared/toast'
-import { chargedMoney, converted, displayCurrency, money, plainMoney, toLedgerMinor } from './shared/currency'
+import { convertMinor, displayCurrency, ledgerCurrency, ledgerUnit, money, plainMoney, toLedgerMinor } from './shared/currency'
 import { Charged, CurrencyNote } from './shared/LocaleMenu'
 import { t, tr } from './shared/i18n'
 
@@ -65,7 +65,8 @@ export function WalletLedger({ entries }: { entries: WalletEntryRecord[] }) {
   )
 }
 
-// Top-ups are typed in the visitor's display currency and charged in CNY.
+// Top-ups are typed in the visitor's display currency and added to the
+// balance in the ledger currency.
 const quickAmounts = displayCurrency() === 'USD' ? [5, 10, 20, 50, 100] : [10, 50, 100, 200, 500]
 const topupMinMinor = 100
 const topupMaxMinor = 10_000_000
@@ -79,15 +80,19 @@ export function topupLink(shortMinor: number) {
 // neededAmount is the amount a top-up link asks for, in the display
 // currency and rounded up so that it covers what is short.
 function neededAmount() {
-  const need = Number(new URLSearchParams(window.location.search).get('need'))
+  const need = Math.min(Number(new URLSearchParams(window.location.search).get('need')), topupMaxMinor)
   if (!Number.isFinite(need) || need <= 0) return ''
-  const rate = toLedgerMinor(1) / 100
-  return String(Math.ceil(Math.min(need, topupMaxMinor) / rate) / 100)
+  const display = displayCurrency()
+  let amount = convertMinor(need, ledgerCurrency(), display)
+  while (convertMinor(amount, display, ledgerCurrency()) < need) amount++
+  return String(amount / 100)
 }
 
 export default function CustomerWallet() {
   const [wallet, setWallet] = useState<WalletRecord | null>(() => cached<WalletRecord>('/api/v1/customer/wallet') ?? null)
   const [checkoutEnabled, setCheckoutEnabled] = useState(() => cached<CustomerCatalogRecord>('/api/v1/customer/catalog')?.checkout_enabled ?? false)
+  // What an online payment is charged in: CNY with Alipay and Epay.
+  const [checkoutCurrency, setCheckoutCurrency] = useState(() => cached<CustomerCatalogRecord>('/api/v1/customer/catalog')?.checkout_currency || ledgerCurrency())
   const [amount, setAmount] = useState(() => neededAmount() || String(quickAmounts[1]))
   const needed = neededAmount()
   const [created, setCreated] = useState<TopupInvoiceRecord | null>(null)
@@ -106,6 +111,7 @@ export default function CustomerWallet() {
       ])
       setWallet(w)
       setCheckoutEnabled(c.checkout_enabled)
+      setCheckoutCurrency(c.checkout_currency || ledgerCurrency())
       // The overview's top-up button lands here with #topup.
       if (window.location.hash === '#topup') {
         window.setTimeout(() => {
@@ -165,7 +171,11 @@ export default function CustomerWallet() {
     }
   }
 
-  const currency = wallet?.currency || 'CNY'
+  const currency = wallet?.currency || ledgerCurrency()
+  // The amount typed, in the currency the payment is charged in, when
+  // that is another one than the customer is typing in.
+  const payCurrency = checkoutEnabled ? checkoutCurrency : ledgerCurrency()
+  const payMinor = convertMinor(toLedgerMinor(Number(amount)), ledgerCurrency(), payCurrency)
   const entries = wallet?.entries || []
   const earned = entries.filter(item => item.kind === 'earning').reduce((sum, item) => sum + item.amount_minor, 0)
 
@@ -213,7 +223,7 @@ export default function CustomerWallet() {
             </button>
           ))}
           <label className="topup-amount">
-            <span>{displayCurrency() === 'USD' ? t('金额（美元）') : t('金额（人民币 元）')}{converted() && Number(amount) > 0 && <small> {t('实付 {0}', chargedMoney(toLedgerMinor(Number(amount))))}</small>}</span>
+            <span>{displayCurrency() === 'USD' ? t('金额（美元）') : t('金额（人民币 元）')}{payCurrency !== displayCurrency() && Number(amount) > 0 && <small> {t('实付约 {0}', plainMoney(payMinor, payCurrency))}</small>}</span>
             <input type="number" min="0.01" step="0.01" value={amount} onChange={event => setAmount(event.target.value)} />
           </label>
           <button className={agreed ? 'primary-button compact' : 'primary-button compact needs-agree'} disabled={busy}>
@@ -234,7 +244,7 @@ export default function CustomerWallet() {
         </div>
         {created && !checkoutEnabled && (
           <p className="muted-text">
-            {t('已生成充值账单 {0}（{1}）。当前未配置在线支付，请联系商家线下付款，商家确认到账后余额自动增加。', created.number, chargedMoney(created.total_minor, created.currency))}
+            {t('已生成充值账单 {0}（{1}）。当前未配置在线支付，请联系商家线下付款，商家确认到账后余额自动增加。', created.number, plainMoney(created.total_minor, created.currency))}
           </p>
         )}
       </form>
@@ -272,7 +282,7 @@ export function AdminWalletPanel({ accountID, name, onClose, onChanged }: { acco
       setError(t('请输入非零金额，负数表示扣减'))
       return
     }
-    if (!(await confirmDialog({ title: t('为「{0}」{1}余额 ¥{2}？', name, yuan > 0 ? t('增加') : t('扣减'), Math.abs(yuan).toFixed(2)), message: t('调整会记入账户流水。'), confirmText: yuan > 0 ? t('增加余额') : t('扣减余额'), danger: yuan < 0 }))) return
+    if (!(await confirmDialog({ title: t('为「{0}」{1}余额 {2}？', name, yuan > 0 ? t('增加') : t('扣减'), plainMoney(Math.round(Math.abs(yuan) * 100), ledgerCurrency())), message: t('调整会记入账户流水。'), confirmText: yuan > 0 ? t('增加余额') : t('扣减余额'), danger: yuan < 0 }))) return
     setBusy(true)
     setError('')
     try {
@@ -304,7 +314,7 @@ export function AdminWalletPanel({ accountID, name, onClose, onChanged }: { acco
       {error && <div className="form-error">{error}</div>}
       <form className="topup-row" onSubmit={adjust}>
         <label className="topup-amount">
-          <span>{t('调整金额（元，负数为扣减）')}</span>
+          <span>{t('调整金额（{0}，负数为扣减）', ledgerUnit())}</span>
           <input type="number" step="0.01" value={amount} onChange={event => setAmount(event.target.value)} />
         </label>
         <label className="topup-reason">
