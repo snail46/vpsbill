@@ -1,6 +1,7 @@
 # 安全运行说明
 
 - 密码使用 Argon2id；登录失败按邮箱哈希和来源 IP 在 15 分钟窗口限流。
+- 后台可以再加一层 Cloudflare Access（只放行指定邮箱），步骤见 [ACCESS.md「给后台加 Cloudflare Access」](ACCESS.md#给后台加-cloudflare-access)。
 - 管理员可在“登录安全”启用 TOTP 二步验证。TOTP 密钥使用 `ENCRYPTION_KEY` 通过 AES-256-GCM 加密保存。
 - 会话仅使用 HttpOnly、SameSite=Strict Cookie；写操作要求双提交 CSRF Token。
 - 暂停客户账户会立即撤销该账户全部会话，但不会自动删除或关闭 VPS。

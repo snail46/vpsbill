@@ -18,6 +18,8 @@ export type Meta = {
   // logo_url is the site logo; empty shows the default mark.
   logo_url?: string
   logo_mode?: 'auto' | 'icon' | 'wordmark'
+  // logo_dark_url is the dark theme's logo; empty uses logo_url.
+  logo_dark_url?: string
   trade_hold_days?: number
   ticket_attachment_max_mb?: number
   marketplace_enabled?: boolean

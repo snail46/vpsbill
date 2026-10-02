@@ -256,6 +256,8 @@ export type SiteSettingsRecord = {
   logo_url: string
   logo_external_url: string
   logo_mode: LogoMode
+  logo_dark_url?: string
+  logo_dark_external_url?: string
   // contact_intro and contact_links fill the portal's "联系我们" page.
   contact_intro?: string
   contact_links?: ContactLink[]
@@ -432,7 +434,17 @@ export function SiteSettingsView() {
       {notice && <div className="success-note">{notice}</div>}
 
       {settings?.proxy_warning && <div className="note-banner warn" role="alert">{settings.proxy_warning}</div>}
-      {settings && <LogoSettings key={settings.logo_url} current={settings.logo_url} external={settings.logo_external_url} mode={settings.logo_mode || 'auto'} siteName={settings.app_name} />}
+      {settings && (
+        <LogoSettings
+          key={settings.logo_url + '|' + (settings.logo_dark_url ?? '')}
+          current={settings.logo_url}
+          external={settings.logo_external_url}
+          dark={settings.logo_dark_url ?? ''}
+          darkExternal={settings.logo_dark_external_url ?? ''}
+          mode={settings.logo_mode || 'auto'}
+          siteName={settings.app_name}
+        />
+      )}
       {settings && <ContactSettings intro={settings.contact_intro ?? ''} links={settings.contact_links ?? []} />}
 
       <form className="panel site-settings" onSubmit={submit}>
@@ -704,24 +716,31 @@ export function SiteSettingsView() {
 
 // LogoSettings changes the logo in the top-left corner on its own, apart
 // from the site settings form: upload an image or link one.
-function LogoSettings({ current, external, mode: savedMode, siteName }: { current: string; external: string; mode: LogoMode; siteName: string }) {
-  const [logo, setLogo] = useState(current)
-  const [link, setLink] = useState(external)
-  const [mode, setMode] = useState<LogoMode>(savedMode)
+type LogoResult = { logo_url: string; logo_external_url: string; logo_mode?: LogoMode; logo_dark_url?: string; logo_dark_external_url?: string }
+type LogoVariant = '' | 'dark'
+
+// LogoSettings sets the logo for the light theme and, optionally, a second
+// one for the dark theme (a white logo, say); without it the dark theme
+// shows the light one.
+function LogoSettings(props: { current: string; external: string; dark: string; darkExternal: string; mode: LogoMode; siteName: string }) {
+  const [logos, setLogos] = useState({ '': props.current, dark: props.dark })
+  const [links, setLinks] = useState({ '': props.external, dark: props.darkExternal })
+  const [mode, setMode] = useState<LogoMode>(props.mode)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
 
-  async function save(request: Promise<{ logo_url: string; logo_external_url: string; logo_mode?: LogoMode }>, message: string) {
+  async function save(request: Promise<LogoResult>, message: string) {
     setBusy(true)
     setError('')
     setNotice('')
     try {
       const result = await request
-      setLogo(result.logo_url)
-      setLink(result.logo_external_url)
+      const dark = result.logo_dark_url ?? logos.dark
+      setLogos({ '': result.logo_url, dark })
+      setLinks({ '': result.logo_external_url, dark: result.logo_dark_external_url ?? links.dark })
       if (result.logo_mode) setMode(result.logo_mode)
-      setSiteLogo(result.logo_url, result.logo_mode)
+      setSiteLogo(result.logo_url, result.logo_mode, dark)
       setNotice(message)
     } catch (err) {
       setError(err instanceof Error ? err.message : '保存失败')
@@ -730,7 +749,9 @@ function LogoSettings({ current, external, mode: savedMode, siteName }: { curren
     }
   }
 
-  function upload(event: ChangeEvent<HTMLInputElement>) {
+  const query = (variant: LogoVariant) => (variant ? `?variant=${variant}` : '')
+
+  function upload(variant: LogoVariant, event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]
     event.target.value = ''
     if (!file) return
@@ -740,69 +761,89 @@ function LogoSettings({ current, external, mode: savedMode, siteName }: { curren
     }
     const body = new FormData()
     body.append('file', file)
-    void save(api('/api/v1/admin/settings/logo', { method: 'POST', body }), '新 Logo 已上传，前台和后台立即生效。')
+    void save(api(`/api/v1/admin/settings/logo${query(variant)}`, { method: 'POST', body }), `${variant ? '夜间' : '白天'}主题 Logo 已上传，前台和后台立即生效。`)
   }
 
-  const linkLogo = (url: string, message: string) =>
-    save(api('/api/v1/admin/settings/logo', { method: 'PUT', body: JSON.stringify({ url }) }), message)
+  const linkLogo = (variant: LogoVariant, url: string, message: string) =>
+    save(api(`/api/v1/admin/settings/logo${query(variant)}`, { method: 'PUT', body: JSON.stringify({ url }) }), message)
 
   const changeMode = (value: LogoMode) =>
     save(api('/api/v1/admin/settings/logo/mode', { method: 'PUT', body: JSON.stringify({ mode: value }) }), '显示方式已保存，前台和后台立即生效。')
+
+  const slots: [LogoVariant, string, string][] = [
+    ['', '白天主题', '浅色背景下显示，也用作浏览器标签图标。'],
+    ['dark', '夜间主题（可选）', '深色背景下显示，例如白色字的 Logo；不设置时夜间也用白天主题的 Logo。'],
+  ]
 
   return (
     <section className="panel logo-settings">
       <div className="panel-heading">
         <h3>站点 Logo</h3>
       </div>
-      <div className="logo-settings-body">
-        <div className="logo-preview" aria-label="左上角预览">
-          <Brand name={siteName || 'VPSBill'} subtitle="商家控制中心" />
-        </div>
-        <div className="logo-settings-actions">
-          <p className="muted-text">显示在前台和后台左上角、登录页和浏览器标签上。支持 SVG、PNG、JPG、WebP、GIF、ICO，不超过 512 KB；按 36 像素高显示。自带品牌名的横向 Logo 会放在站点名称的位置，见下方「显示方式」。</p>
-          <div className="form-actions">
-            <label className={busy ? 'primary-button disabled' : 'primary-button'}>
-              <ImageUp size={15} />
-              上传图片
-              <input type="file" accept=".svg,.png,.jpg,.jpeg,.webp,.gif,.ico,image/*" hidden disabled={busy} onChange={upload} />
-            </label>
-            {logo && (
-              <button type="button" className="secondary-button" disabled={busy} onClick={() => void linkLogo('', '已恢复默认 Logo。')}>
-                <RotateCcw size={15} />
-                恢复默认
-              </button>
-            )}
-          </div>
-          <form
-            className="input-with-button"
-            onSubmit={event => {
-              event.preventDefault()
-              void linkLogo(link, '已改用该地址的 Logo。')
-            }}
-          >
-            <input type="url" value={link} onChange={event => setLink(event.target.value)} placeholder="或填写图片地址，例如 https://cdn.example.com/logo.svg" aria-label="Logo 图片地址" />
-            <button className="secondary-button compact" disabled={busy || !link.trim()}>使用此地址</button>
-          </form>
-          <fieldset className="logo-mode" disabled={busy}>
-            <legend>显示方式</legend>
-            {([
-              ['auto', '自动识别', '横向的长条 Logo 当作已含品牌名，方形 Logo 旁边显示站点名称'],
-              ['icon', '图标 + 站点名称', 'Logo 是图标，旁边照常显示站点名称'],
-              ['wordmark', 'Logo 已含品牌名', 'Logo 放在站点名称的位置，不再重复显示名称'],
-            ] as [LogoMode, string, string][]).map(([value, label, help]) => (
-              <label key={value} className="radio-option">
-                <input type="radio" name="logo_mode" value={value} checked={mode === value} onChange={() => void changeMode(value)} />
-                <span>
-                  <strong>{label}</strong>
-                  <small>{help}</small>
-                </span>
-              </label>
-            ))}
-          </fieldset>
-          {error && <div className="form-error">{error}</div>}
-          {notice && <div className="success-note">{notice}</div>}
-        </div>
+      <p className="muted-text logo-settings-intro">显示在前台和后台左上角、登录页和浏览器标签上。支持 SVG、PNG、JPG、WebP、GIF、ICO，不超过 512 KB；按 36 像素高显示。白天和夜间主题可以各传一张，页面随访客的主题自动切换。</p>
+      <div className="logo-variants">
+        {slots.map(([variant, title, help]) => {
+          const current = logos[variant]
+          return (
+            <div className={variant ? 'logo-variant dark-preview' : 'logo-variant light-preview'} key={variant || 'light'}>
+              <div className="logo-variant-head">
+                <strong>{title}</strong>
+                <small>{help}</small>
+              </div>
+              <div className="logo-preview" aria-label={`${title}预览`}>
+                {current || (variant && logos['']) ? (
+                  <img className="logo-preview-image" src={current || logos['']} alt="" />
+                ) : (
+                  <div className="brand-mark">VB</div>
+                )}
+                <span>{props.siteName || 'VPSBill'}</span>
+                {variant && !current && <em>沿用白天主题</em>}
+              </div>
+              <div className="form-actions">
+                <label className={busy ? 'primary-button compact disabled' : 'primary-button compact'}>
+                  <ImageUp size={15} />
+                  上传图片
+                  <input type="file" accept=".svg,.png,.jpg,.jpeg,.webp,.gif,.ico,image/*" hidden disabled={busy} onChange={event => upload(variant, event)} />
+                </label>
+                {current && (
+                  <button type="button" className="secondary-button compact" disabled={busy} onClick={() => void linkLogo(variant, '', variant ? '已移除夜间主题 Logo，夜间改用白天主题的 Logo。' : '已恢复默认 Logo。')}>
+                    <RotateCcw size={15} />
+                    {variant ? '移除' : '恢复默认'}
+                  </button>
+                )}
+              </div>
+              <form
+                className="input-with-button"
+                onSubmit={event => {
+                  event.preventDefault()
+                  void linkLogo(variant, links[variant], '已改用该地址的 Logo。')
+                }}
+              >
+                <input type="url" value={links[variant]} onChange={event => setLinks(current => ({ ...current, [variant]: event.target.value }))} placeholder="或填写图片地址 https://…" aria-label={`${title} Logo 图片地址`} />
+                <button className="secondary-button compact" disabled={busy || !links[variant].trim()}>使用此地址</button>
+              </form>
+            </div>
+          )
+        })}
       </div>
+      <fieldset className="logo-mode" disabled={busy}>
+        <legend>显示方式</legend>
+        {([
+          ['auto', '自动识别', '横向的长条 Logo 当作已含品牌名，方形 Logo 旁边显示站点名称'],
+          ['icon', '图标 + 站点名称', 'Logo 是图标，旁边照常显示站点名称'],
+          ['wordmark', 'Logo 已含品牌名', 'Logo 放在站点名称的位置，不再重复显示名称'],
+        ] as [LogoMode, string, string][]).map(([value, label, help]) => (
+          <label key={value} className="radio-option">
+            <input type="radio" name="logo_mode" value={value} checked={mode === value} onChange={() => void changeMode(value)} />
+            <span>
+              <strong>{label}</strong>
+              <small>{help}</small>
+            </span>
+          </label>
+        ))}
+      </fieldset>
+      {error && <div className="form-error">{error}</div>}
+      {notice && <div className="success-note">{notice}</div>}
     </section>
   )
 }

@@ -182,7 +182,9 @@ func (a *adminBilling) paymentWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 	runtime := a.settings.Current()
 	config := runtime.PaymentGateway
-	if config.Type != "generic" || !validPaymentSignature(body, r.Header.Get("X-Payment-Signature"), config.GenericSecret) {
+	// An empty key would make signatures forgeable; settings refuse to save
+	// one, and this guards against a damaged configuration as well.
+	if config.Type != "generic" || len(config.GenericSecret) < 32 || !validPaymentSignature(body, r.Header.Get("X-Payment-Signature"), config.GenericSecret) {
 		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "invalid_signature"})
 		return
 	}
@@ -211,7 +213,7 @@ func (a *adminBilling) epayWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	config := a.settings.Current().PaymentGateway
-	if config.Type != "epay" || r.Form.Get("pid") != config.EpayPartnerID || !payment.VerifyEpay(r.Form, config.EpayMerchantKey) || r.Form.Get("trade_status") != "TRADE_SUCCESS" {
+	if config.Type != "epay" || config.EpayMerchantKey == "" || config.EpayPartnerID == "" || r.Form.Get("pid") != config.EpayPartnerID || !payment.VerifyEpay(r.Form, config.EpayMerchantKey) || r.Form.Get("trade_status") != "TRADE_SUCCESS" {
 		plainWebhook(w, "fail")
 		return
 	}
@@ -237,7 +239,7 @@ func (a *adminBilling) alipayWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 	config := a.settings.Current().PaymentGateway
 	status := r.Form.Get("trade_status")
-	if config.Type != "alipay_f2f" || r.Form.Get("app_id") != config.AlipayAppID || (status != "TRADE_SUCCESS" && status != "TRADE_FINISHED") || !payment.VerifyAlipay(r.Form, config.AlipayPublicKey) {
+	if config.Type != "alipay_f2f" || config.AlipayPublicKey == "" || config.AlipayAppID == "" || r.Form.Get("app_id") != config.AlipayAppID || (status != "TRADE_SUCCESS" && status != "TRADE_FINISHED") || !payment.VerifyAlipay(r.Form, config.AlipayPublicKey) {
 		plainWebhook(w, "failure")
 		return
 	}
@@ -290,6 +292,9 @@ func plainWebhook(w http.ResponseWriter, value string) {
 
 func validPaymentSignature(body []byte, signature, secret string) bool {
 	supplied := strings.TrimPrefix(strings.TrimSpace(signature), "sha256=")
+	if secret == "" {
+		return false
+	}
 	expectedMAC := hmac.New(sha256.New, []byte(secret))
 	_, _ = expectedMAC.Write(body)
 	expected := hex.EncodeToString(expectedMAC.Sum(nil))

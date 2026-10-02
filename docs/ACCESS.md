@@ -106,6 +106,33 @@ location / {
 
 页面 HTML 里嵌着当前的登录状态（打开页面时不用再等 API，见下文「页面加载」），代理和 CDN 不要缓存 HTML；`/assets/` 下的脚本和样式带内容哈希，可以长期缓存。
 
+## 给后台加 Cloudflare Access
+
+Cloudflare Access（Zero Trust 的一部分，50 人以内免费）在后台域名前面多加一道登录：访问后台时先过 Cloudflare 的邮箱验证码或 Google / GitHub 登录，通过后才看到 VPSBill 的后台登录页。这样即使后台账号密码泄露，没有被放行的邮箱也打不开后台。
+
+**前提：后台只能经过 Cloudflare 访问。** Access 拦在 Cloudflare 上，如果后台端口还能从公网直连，就能绕过它。
+
+- 用 `ACCESS_MODE=cloudflare` 或 `ACCESS_MODE=proxy`（cloudflared 装在宿主机上时，见上文）。这两种模式下后台端口只监听 `127.0.0.1`，公网连不上。`docker compose ps` 里 web 的后台端口应为 `127.0.0.1:8081->7081/tcp`。
+- `ACCESS_MODE=direct`（IP + 端口）时后台端口对公网开放，先改成上面两种之一，或在防火墙里关掉后台端口。
+- 前台和后台要用两个不同的域名，例如前台 `vps.example.com`、后台 `admin.example.com`。前台域名打不开后台页面和后台接口（会返回 404），所以只保护后台域名就够了。
+
+**设置步骤**（Cloudflare 后台的菜单名称以实际界面为准）：
+
+1. 打开 [Cloudflare Zero Trust](https://one.dash.cloudflare.com/)。第一次用要先起一个团队名并选免费方案（Free）。
+2. 进入 **Access → Applications → Add an application**，选 **Self-hosted**。
+3. 应用名称随意（如「VPSBill 后台」）；**Application domain** 填后台域名 `admin.example.com`，路径留空，表示整个域名都受保护。会话时长（Session Duration）按习惯选，例如 24 小时。
+4. 登录方式：默认的 **One-time PIN**（往邮箱发验证码）不用额外配置；也可以在 **Settings → Authentication** 里接入 Google、GitHub 等再在这里勾选。
+5. 添加策略（Policy）：动作选 **Allow**，规则 **Include → Emails** 填允许进入后台的邮箱（多个管理员就填多个），或 **Emails ending in** 填公司邮箱后缀。不要用 Everyone。
+6. 保存。用浏览器的无痕窗口打开 `https://admin.example.com`，应先看到 Cloudflare 的验证页，输入邮箱收到验证码后，才进入 VPSBill 的后台登录页。
+
+**注意事项：**
+
+- **不要保护前台域名。** 客户、支付平台的回调（`/api/v1/webhooks/payments/…`）和母机上的 Agent 都走前台域名，加了 Access 它们都会被挡住。
+- 后台「站点设置」里的**后台地址**填 `https://admin.example.com`，邮件里的后台链接才指向正确的地址。
+- Access 是额外的一层，VPSBill 自己的后台密码和二步验证（「登录安全」里的 TOTP）照常保留，建议都开着。
+- 新增管理员时，除了在后台建账号，还要把他的邮箱加进 Access 策略。
+- 检查是否生效：在服务器以外的机器上执行 `curl -sI https://admin.example.com`，应返回 302 跳转到 `*.cloudflareaccess.com`；再试 `http://服务器IP:8081`，应连不上。
+
 ## 页面加载
 
 Web 容器的 nginx 在返回页面时，通过 SSI 把 `/api/v1/boot`（站点名称、Logo、是否需要安装、当前登录的管理员或客户）直接嵌进 HTML，并让浏览器同时下载前台或后台的代码。所以打开页面只等两次往返（HTML 和脚本），再次打开时脚本走缓存，只等 HTML 一次。使用 HTTPS 时，浏览器还会启用 Service Worker（`/sw.js`）：再次打开时直接用浏览器保存的页面，不用等网络；同时在后台取新页面，并核对登录状态（在别处退出或会话过期会立即切到登录页）。发布新版本后，下一次打开即用上新版本。HTTP 访问时浏览器不允许 Service Worker，行为不变。进入后台或客户中心约 1.5 秒后，浏览器在空闲时预取各菜单页的数据，之后点任一菜单都先显示已加载的数据，再在后台刷新。已加载的数据还会存在当前标签页的 sessionStorage 里（只属于当前登录的账号，退出登录或关闭标签页即清除），所以刷新页面时数据也立即显示。

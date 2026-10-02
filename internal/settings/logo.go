@@ -26,6 +26,35 @@ func (r Runtime) Logo() string {
 	return r.LogoURL
 }
 
+// LogoDark is the logo for the dark theme, or "" when the dark theme shows
+// the light one.
+func (r Runtime) LogoDark() string {
+	if r.LogoDarkVersion != "" {
+		return "/api/v1/site/logo?variant=dark&v=" + r.LogoDarkVersion
+	}
+	return r.LogoDarkURL
+}
+
+// LogoVariants are the logos a site has: "" for the light (default) theme
+// and "dark".
+var LogoVariants = []string{"", "dark"}
+
+// logoColumns is the column prefix of a logo variant, or "" for an
+// unknown one.
+func logoColumns(variant string) string {
+	switch variant {
+	case "":
+		return "logo_"
+	case "dark":
+		return "logo_dark_"
+	}
+	return ""
+}
+
+func invalidVariant() error {
+	return fmt.Errorf("%w: Logo 主题无效", ErrInvalidSettings)
+}
+
 // LogoContentType sniffs an uploaded logo: PNG, JPEG, GIF, WebP, ICO or
 // SVG. It returns "" for anything else.
 func LogoContentType(data []byte) string {
@@ -48,8 +77,13 @@ func LogoContentType(data []byte) string {
 	}
 }
 
-// SetLogoImage stores an uploaded logo, replacing an external URL.
-func (m *Manager) SetLogoImage(ctx context.Context, data []byte, actorID string) error {
+// SetLogoImage stores an uploaded logo for a variant, replacing an
+// external URL.
+func (m *Manager) SetLogoImage(ctx context.Context, variant string, data []byte, actorID string) error {
+	prefix := logoColumns(variant)
+	if prefix == "" {
+		return invalidVariant()
+	}
 	if len(data) == 0 || len(data) > LogoMaxBytes {
 		return fmt.Errorf("%w: Logo 图片不能为空，且不超过 %d KB", ErrInvalidSettings, LogoMaxBytes>>10)
 	}
@@ -58,20 +92,25 @@ func (m *Manager) SetLogoImage(ctx context.Context, data []byte, actorID string)
 		return fmt.Errorf("%w: 仅支持 SVG、PNG、JPG、GIF、WebP 或 ICO 图片", ErrInvalidSettings)
 	}
 	sum := sha256.Sum256(data)
-	return m.updateLogo(ctx, `logo_url='',logo_image=$1,logo_content_type=$2,logo_version=$3`, "site_logo.uploaded", actorID, data, contentType, hex.EncodeToString(sum[:6]))
+	return m.updateLogo(ctx, prefix+`url='',`+prefix+`image=$1,`+prefix+`content_type=$2,`+prefix+`version=$3`, "site_logo.uploaded", actorID, data, contentType, hex.EncodeToString(sum[:6]))
 }
 
-// SetLogoURL shows the logo from an external address, dropping an uploaded
-// image; an empty URL restores the default mark.
-func (m *Manager) SetLogoURL(ctx context.Context, raw, actorID string) error {
+// SetLogoURL shows a variant's logo from an external address, dropping an
+// uploaded image; an empty URL restores the default (for the dark variant:
+// the light logo).
+func (m *Manager) SetLogoURL(ctx context.Context, variant, raw, actorID string) error {
+	prefix := logoColumns(variant)
+	if prefix == "" {
+		return invalidVariant()
+	}
 	value := strings.TrimSpace(raw)
 	if value == "" {
-		return m.updateLogo(ctx, `logo_url='',logo_image=NULL,logo_content_type='',logo_version=''`, "site_logo.cleared", actorID)
+		return m.updateLogo(ctx, prefix+`url='',`+prefix+`image=NULL,`+prefix+`content_type='',`+prefix+`version=''`, "site_logo.cleared", actorID)
 	}
 	if len(value) > 2000 || absoluteURL(value, true) != nil {
 		return fmt.Errorf("%w: Logo 地址必须是完整的 http(s):// 图片地址", ErrInvalidSettings)
 	}
-	return m.updateLogo(ctx, `logo_url=$1,logo_image=NULL,logo_content_type='',logo_version=''`, "site_logo.linked", actorID, value)
+	return m.updateLogo(ctx, prefix+`url=$1,`+prefix+`image=NULL,`+prefix+`content_type='',`+prefix+`version=''`, "site_logo.linked", actorID, value)
 }
 
 // SetLogoMode sets how the logo sits beside the site name: auto, icon or
@@ -107,9 +146,13 @@ func (m *Manager) updateLogo(ctx context.Context, assignments, action, actorID s
 	return m.reload(ctx)
 }
 
-// LogoImage reads the uploaded logo from the database, so every API
-// instance serves the current one.
-func (m *Manager) LogoImage(ctx context.Context) (contentType string, data []byte, version string, err error) {
-	err = m.db.QueryRow(ctx, `SELECT logo_content_type,coalesce(logo_image,''::bytea),logo_version FROM system_settings WHERE singleton=true`).Scan(&contentType, &data, &version)
+// LogoImage reads a variant's uploaded logo from the database, so every
+// API instance serves the current one.
+func (m *Manager) LogoImage(ctx context.Context, variant string) (contentType string, data []byte, version string, err error) {
+	prefix := logoColumns(variant)
+	if prefix == "" {
+		return "", nil, "", invalidVariant()
+	}
+	err = m.db.QueryRow(ctx, `SELECT `+prefix+`content_type,coalesce(`+prefix+`image,''::bytea),`+prefix+`version FROM system_settings WHERE singleton=true`).Scan(&contentType, &data, &version)
 	return contentType, data, version, err
 }

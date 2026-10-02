@@ -51,6 +51,8 @@ type Runtime struct {
 	// LogoURL is an external logo address; LogoVersion is set instead when
 	// a logo image was uploaded (see Logo).
 	LogoURL, LogoVersion string
+	// LogoDarkURL and LogoDarkVersion are the same for the dark theme.
+	LogoDarkURL, LogoDarkVersion string
 	// LogoMode is how the logo sits beside the site name: auto, icon or
 	// wordmark (see SiteInput).
 	LogoMode string
@@ -280,14 +282,14 @@ func (m *Manager) reload(ctx context.Context) error {
 		mail_notifications,ticket_attachment_max_mb,
 		marketplace_enabled,marketplace_fee_percent::float8,marketplace_offline_hours,trade_fee_percent::float8,admin_url,
 		max_overcommit_cpu::float8,max_overcommit_ram::float8,max_overcommit_disk::float8,max_overcommit_traffic::float8,
-		logo_url,logo_version,logo_mode,trade_hold_days,contact_intro,contact_links
+		logo_url,logo_version,logo_mode,trade_hold_days,contact_intro,contact_links,logo_dark_url,logo_dark_version
 		FROM system_settings WHERE singleton=true`).Scan(&v.AppName, &v.PublicURL, &v.Timezone, &v.PaymentProviderName, &v.PaymentCheckoutURL,
 		&payment, &v.NotificationWebhookURL, &notification, &metrics, &poll, &reconcile, &lifecycle, &lead, &grace, &retention, &gatewayType, &gatewayConfig,
 		&v.SMTP.Host, &v.SMTP.Port, &v.SMTP.Username, &smtpPassword, &v.SMTP.From, &v.SMTP.Security,
 		&mailNotifications, &v.TicketAttachmentMaxMB,
 		&v.Marketplace.Enabled, &v.Marketplace.FeePercent, &v.Marketplace.OfflineHours, &v.Marketplace.TradeFeePercent, &v.AdminURL,
 		&v.Marketplace.MaxOvercommitCPU, &v.Marketplace.MaxOvercommitRAM, &v.Marketplace.MaxOvercommitDisk, &v.Marketplace.MaxOvercommitTraffic,
-		&v.LogoURL, &v.LogoVersion, &v.LogoMode, &v.Marketplace.TradeHoldDays, &v.ContactIntro, &contactLinks)
+		&v.LogoURL, &v.LogoVersion, &v.LogoMode, &v.Marketplace.TradeHoldDays, &v.ContactIntro, &contactLinks, &v.LogoDarkURL, &v.LogoDarkVersion)
 	if err != nil {
 		return err
 	}

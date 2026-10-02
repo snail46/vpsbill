@@ -22,6 +22,7 @@ func siteMeta(cfg config.Config, runtime *settings.Manager, r *http.Request) map
 		"name":                     current.AppName,
 		"logo_url":                 current.Logo(),
 		"logo_mode":                current.LogoMode,
+		"logo_dark_url":            current.LogoDark(),
 		"environment":              cfg.Environment,
 		"installed":                current.Installed,
 		"password_reset_mail":      current.SMTP.Configured(),
@@ -85,24 +86,38 @@ func (a *authenticator) boot(w http.ResponseWriter, r *http.Request) {
 type siteLogo struct {
 	settings *settings.Manager
 	mu       sync.Mutex
-	version  string
-	kind     string
-	data     []byte
+	// cached holds the last image read for each variant.
+	cached map[string]logoImage
+}
+
+type logoImage struct {
+	version, kind string
+	data          []byte
 }
 
 func (s *siteLogo) serve(w http.ResponseWriter, r *http.Request) {
 	requested := r.URL.Query().Get("v")
+	variant := r.URL.Query().Get("variant")
+	if variant != "" && variant != "dark" {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "not_found"})
+		return
+	}
 	s.mu.Lock()
-	if requested == "" || requested != s.version {
-		kind, data, version, err := s.settings.LogoImage(r.Context())
+	if s.cached == nil {
+		s.cached = map[string]logoImage{}
+	}
+	current, ok := s.cached[variant]
+	if !ok || requested == "" || requested != current.version {
+		kind, data, version, err := s.settings.LogoImage(r.Context(), variant)
 		if err != nil {
 			s.mu.Unlock()
 			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "internal_error"})
 			return
 		}
-		s.version, s.kind, s.data = version, kind, data
+		current = logoImage{version: version, kind: kind, data: data}
+		s.cached[variant] = current
 	}
-	version, kind, data := s.version, s.kind, s.data
+	version, kind, data := current.version, current.kind, current.data
 	s.mu.Unlock()
 	if len(data) == 0 {
 		writeJSON(w, http.StatusNotFound, map[string]any{"error": "not_found"})
@@ -132,7 +147,7 @@ func (a adminSettings) uploadLogo(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "validation_error", "message": "无法读取上传的图片"})
 		return
 	}
-	a.logoResult(w, a.settings.SetLogoImage(r.Context(), data, principalFromContext(r.Context()).UserID))
+	a.logoResult(w, a.settings.SetLogoImage(r.Context(), r.URL.Query().Get("variant"), data, principalFromContext(r.Context()).UserID))
 }
 
 func (a adminSettings) linkLogo(w http.ResponseWriter, r *http.Request) {
@@ -142,7 +157,7 @@ func (a adminSettings) linkLogo(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &input) {
 		return
 	}
-	a.logoResult(w, a.settings.SetLogoURL(r.Context(), input.URL, principalFromContext(r.Context()).UserID))
+	a.logoResult(w, a.settings.SetLogoURL(r.Context(), r.URL.Query().Get("variant"), input.URL, principalFromContext(r.Context()).UserID))
 }
 
 func (a adminSettings) logoMode(w http.ResponseWriter, r *http.Request) {
@@ -183,6 +198,9 @@ func (a adminSettings) logoResult(w http.ResponseWriter, err error) {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "settings_update_failed"})
 	default:
 		current := a.settings.Current()
-		writeJSON(w, http.StatusOK, map[string]any{"data": map[string]string{"logo_url": current.Logo(), "logo_external_url": current.LogoURL, "logo_mode": current.LogoMode}})
+		writeJSON(w, http.StatusOK, map[string]any{"data": map[string]string{
+			"logo_url": current.Logo(), "logo_external_url": current.LogoURL, "logo_mode": current.LogoMode,
+			"logo_dark_url": current.LogoDark(), "logo_dark_external_url": current.LogoDarkURL,
+		}})
 	}
 }

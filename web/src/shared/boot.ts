@@ -118,7 +118,7 @@ export function siteMeta() {
 function applyMeta(value: Meta) {
   meta = value
   if (value.name) document.title = value.name
-  setSiteLogo(value.logo_url ?? '', value.logo_mode)
+  setSiteLogo(value.logo_url ?? '', value.logo_mode, value.logo_dark_url ?? '')
 }
 
 // LogoMode is how the logo sits beside the site name: auto decides by the
@@ -128,24 +128,44 @@ export type LogoMode = 'auto' | 'icon' | 'wordmark'
 
 // The site logo is a small store so changing it in the settings updates
 // every mark on the page at once.
-let logo = ''
+// The dark theme shows logoDark when there is one, the light logo
+// otherwise; the store follows the page's theme (data-theme on <html>).
+let lightLogo = ''
+let logoDark = ''
 let logoMode: LogoMode = 'auto'
+let logo = ''
 let brand: { logo: string; mode: LogoMode } = { logo, mode: logoMode }
 const listeners = new Set<() => void>()
+let watchingTheme = false
 
-export function setSiteLogo(url: string, mode?: LogoMode) {
-  const nextMode = mode ?? logoMode
-  if (url === logo && nextMode === logoMode) return
-  logoMode = nextMode
-  brand = { logo: url, mode: nextMode }
-  if (url === logo) {
-    listeners.forEach(listener => listener())
-    return
+function darkTheme() {
+  return document.documentElement.dataset.theme === 'dark'
+}
+
+// refresh picks the logo for the current theme and tells the marks.
+function refresh() {
+  const next = darkTheme() && logoDark ? logoDark : lightLogo
+  if (next === logo && brand.mode === logoMode) return
+  if (next !== logo) {
+    const icon = document.querySelector<HTMLLinkElement>('link[rel="icon"]')
+    if (icon) icon.href = next || icon.dataset.default || ''
   }
-  logo = url
-  const icon = document.querySelector<HTMLLinkElement>('link[rel="icon"]')
-  if (icon) icon.href = url || icon.dataset.default || ''
+  logo = next
+  brand = { logo: next, mode: logoMode }
   listeners.forEach(listener => listener())
+}
+
+// setSiteLogo sets the light logo, how it shows and, unless undefined, the
+// dark theme's logo ('' = use the light one there too).
+export function setSiteLogo(url: string, mode?: LogoMode, dark?: string) {
+  lightLogo = url
+  logoMode = mode ?? logoMode
+  if (dark !== undefined) logoDark = dark
+  if (!watchingTheme && typeof MutationObserver !== 'undefined') {
+    watchingTheme = true
+    new MutationObserver(refresh).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
+  }
+  refresh()
 }
 
 function subscribe(listener: () => void) {
