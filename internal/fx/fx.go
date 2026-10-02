@@ -24,7 +24,7 @@ const (
 // answers wins.
 var Sources = []string{
 	"https://open.er-api.com/v6/latest/USD",
-	"https://api.frankfurter.app/latest?from=USD&to=CNY",
+	"https://api.frankfurter.dev/v1/latest?base=USD&symbols=CNY",
 }
 
 // Fetch reads how many CNY one USD is worth.
