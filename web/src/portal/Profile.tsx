@@ -1,6 +1,7 @@
 import { CustomerIdentity } from '../api'
 import { StatusBadge, SecuritySettings } from '../shared/ui'
-import { TelegramPanel } from '../Telegram'
+import { NotifyPanel, TelegramPanel } from '../Telegram'
+import { displayCurrency } from '../shared/currency'
 import { t } from '../shared/i18n'
 
 export function CustomerProfile({ customer }: { customer: CustomerIdentity }) {
@@ -36,12 +37,13 @@ export function CustomerProfile({ customer }: { customer: CustomerIdentity }) {
           <code>{customer.account_id}</code>
         </div>
         <div>
-          <span>{t('默认计费币种')}</span>
-          <code>{customer.default_currency}</code>
+          <span>{t('显示币种')}</span>
+          <code>{displayCurrency()}</code>
         </div>
       </div>
 
       <TelegramPanel />
+      <NotifyPanel email={customer.email} />
       <SecuritySettings enabled={customer.mfa_enabled} customer />
     </section>
   )

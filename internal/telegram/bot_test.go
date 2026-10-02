@@ -30,14 +30,32 @@ func TestCommand(t *testing.T) {
 }
 
 func TestMoneyAndNames(t *testing.T) {
-	if got := yuan(5); got != "¥0.05" {
-		t.Errorf("yuan(5) = %s", got)
+	cny := settings.LocaleSettings{USDEnabled: true, USDRate: 7, DefaultCurrency: "CNY"}
+	usd := settings.LocaleSettings{USDEnabled: true, USDRate: 7, DefaultCurrency: "USD"}
+	if got := cny.Money(5); got != "¥0.05" {
+		t.Errorf("cny.Money(5) = %s", got)
 	}
-	if got := yuan(12345); got != "¥123.45" {
-		t.Errorf("yuan(12345) = %s", got)
+	if got := cny.Money(12345); got != "¥123.45" {
+		t.Errorf("cny.Money(12345) = %s", got)
 	}
-	if got := amountRange(settings.TelegramSettings{CheckinMinMinor: 30, CheckinMaxMinor: 30}); got != "¥0.30" {
+	if got := usd.Money(700); got != "$1.00" {
+		t.Errorf("usd.Money(700) = %s", got)
+	}
+	if got := amountRange(settings.TelegramSettings{CheckinMinMinor: 30, CheckinMaxMinor: 30}, cny.Money); got != "¥0.30" {
 		t.Errorf("fixed range = %s", got)
+	}
+	// Rewards typed in USD are paid in the ledger currency and read the
+	// same when shown in USD again.
+	rewards := settings.TelegramSettings{Currency: "USD", BindRewardMinor: 100, CheckinMinMinor: 10, CheckinMaxMinor: 50, DailyBudgetMinor: 10000}
+	ledger := rewards.In(usd, "CNY")
+	if ledger.BindRewardMinor != 700 || ledger.CheckinMinMinor != 70 || ledger.DailyBudgetMinor != 70000 || ledger.Currency != "CNY" {
+		t.Errorf("ledger rewards = %+v", ledger)
+	}
+	if got := amountRange(ledger, usd.Money); got != "$0.10–$0.50" {
+		t.Errorf("usd range = %s", got)
+	}
+	if back := ledger.In(usd, "USD"); back.BindRewardMinor != 100 || back.CheckinMaxMinor != 50 {
+		t.Errorf("round trip = %+v", back)
 	}
 	if got := maskEmail("a@example.com"); got != "a***@example.com" {
 		t.Errorf("maskEmail = %s", got)

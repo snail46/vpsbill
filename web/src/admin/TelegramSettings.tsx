@@ -9,6 +9,8 @@ import { t, tr } from '../shared/i18n'
 type SeenChat = { id: number; title: string; username: string; admin: boolean }
 type TelegramSettingsRecord = {
   enabled: boolean
+  // currency is the site's default currency, which the amounts are in.
+  currency: 'CNY' | 'USD'
   bot_token_configured: boolean
   bot_username: string
   chat_id: number
@@ -126,6 +128,7 @@ export function TelegramSettings() {
 
   const status = saved?.status
   const stats = saved?.stats
+  const unit = saved?.currency === 'USD' ? t('美元') : t('元')
   return (
     <form className="panel telegram-settings" onSubmit={save}>
       <div className="panel-heading">
@@ -136,6 +139,12 @@ export function TelegramSettings() {
       </div>
       <p className="muted-text">
         {t('客户把站点账号和 Telegram 账号绑定后，在交流群里签到、邀请新成员可以获得账户余额（只能在本站消费，不能提现）。启用后，未绑定的客户会在前台右下角看到绑定提示。')}
+        {t('绑定后的客户还可以在「账户资料」里选择用 Telegram 接收到期提醒、工单回复等通知。')}
+      </p>
+      <p className="muted-text">
+        {saved?.currency === 'USD'
+          ? t('下面的金额按站点默认币种美元（USD）填写，机器人和前台也按美元展示；发放时按当前汇率换算成人民币存入余额。')
+          : t('下面的金额按站点默认币种人民币（CNY）填写和展示。默认币种在上方「语言与币种」里设置。')}
       </p>
       <ol className="telegram-steps muted-text">
         <li>{t('在 Telegram 找 @BotFather 发送 /newbot 创建机器人，把得到的 Token 填到下面并保存。')}</li>
@@ -188,12 +197,12 @@ export function TelegramSettings() {
           <small>{t('服务器无法直接访问 Telegram 时，填反向代理地址。')}</small>
         </label>
         <label>
-          <span>{t('绑定奖励（元，0 为不奖励）')}</span>
+          <span>{t('绑定奖励（{0}，0 为不奖励）', unit)}</span>
           <input type="number" min="0" max="1000" step="0.01" value={bind} onChange={event => setBind(event.target.value)} required />
           <small>{t('每个站点账号和每个 Telegram 账号各只发一次。')}</small>
         </label>
         <label>
-          <span>{t('每日签到奖励（元，最小 – 最大）')}</span>
+          <span>{t('每日签到奖励（{0}，最小 – 最大）', unit)}</span>
           <div className="inline-fields">
             <input aria-label={t('签到奖励最小值')} type="number" min="0" max="1000" step="0.01" value={checkinMin} onChange={event => setCheckinMin(event.target.value)} required />
             <input aria-label={t('签到奖励最大值')} type="number" min="0" max="1000" step="0.01" value={checkinMax} onChange={event => setCheckinMax(event.target.value)} required />
@@ -201,7 +210,7 @@ export function TelegramSettings() {
           <small>{t('在两个数之间随机；填相同的数为固定金额。')}</small>
         </label>
         <label>
-          <span>{t('邀请奖励（元 / 人，0 为关闭）')}</span>
+          <span>{t('邀请奖励（{0} / 人，0 为关闭）', unit)}</span>
           <input type="number" min="0" max="1000" step="0.01" value={invite} onChange={event => setInvite(event.target.value)} required />
         </label>
         <label>
@@ -218,7 +227,7 @@ export function TelegramSettings() {
           <input type="number" min="0" max="1000" step="1" value={dailyCap} onChange={event => setDailyCap(event.target.value)} required />
         </label>
         <label>
-          <span>{t('全站每日奖励总预算（元，0 为不限）')}</span>
+          <span>{t('全站每日奖励总预算（{0}，0 为不限）', unit)}</span>
           <input type="number" min="0" max="1000000" step="0.01" value={budget} onChange={event => setBudget(event.target.value)} required />
           <small>{t('当天发完后，签到提示「奖励已发完」，邀请奖励顺延到次日。')}</small>
         </label>

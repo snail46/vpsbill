@@ -4,6 +4,7 @@ import { api, cached, CustomerCatalogRecord, CustomerInvoiceRecord, CustomerTran
 import { StatusBadge, money } from '../shared/ui'
 import { Charged, CurrencyNote } from '../shared/LocaleMenu'
 import { formatDate, formatTime } from '../shared/time'
+import { topupLink } from '../Wallet'
 import { t } from '../shared/i18n'
 
 export function CustomerBilling() {
@@ -87,6 +88,9 @@ export function CustomerBilling() {
       <div className="note-banner">
         {t('账户余额')} <strong>{money(balance, invoices[0]?.currency || 'CNY')}</strong>{t('，可直接用于支付新购和续费账单。')}<a href="/portal/wallet">{t('充值或查看明细')}</a>
       </div>
+      <div className="note-banner">
+        {t('余额充值和平台自营产品可以在线支付；托管产品（新购和续费）只支持余额支付，余额不足时请先充值。平台自营产品非产品问题不退款，退款只退到账户余额。')}
+      </div>
 
       <div className="panel">
         <div className="panel-heading">
@@ -156,17 +160,17 @@ export function CustomerBilling() {
                   <td><StatusBadge status={item.status} /></td>
                   <td>{formatDate(item.due_at)}</td>
                   <td className="row-actions">
-                    {item.status === 'open' && item.kind !== 'topup' && (
-                      <button
-                        className="primary-button compact"
-                        disabled={paying === item.id || balance < item.balance_minor}
-                        title={balance < item.balance_minor ? t('余额 {0} 不足', money(balance, item.currency)) : ''}
-                        onClick={() => void payWithBalance(item)}
-                      >
+                    {item.status === 'open' && item.kind !== 'topup' && balance >= item.balance_minor && (
+                      <button className="primary-button compact" disabled={paying === item.id} onClick={() => void payWithBalance(item)}>
                         {t('余额支付')}
                       </button>
                     )}
-                    {item.status === 'open' &&
+                    {item.status === 'open' && item.kind !== 'topup' && balance < item.balance_minor && (
+                      <a className={item.gateway ? 'secondary-button compact' : 'primary-button compact'} href={topupLink(item.balance_minor - balance)} title={t('余额 {0} 不足', money(balance, item.currency))}>
+                        {t('余额不足，去充值')}
+                      </a>
+                    )}
+                    {item.status === 'open' && item.gateway &&
                       (checkoutEnabled ? (
                         <button
                           className="primary-button compact"

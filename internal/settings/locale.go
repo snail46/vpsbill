@@ -9,15 +9,20 @@ import (
 	"time"
 )
 
-// LocaleSettings is the site's display language and currency. The ledger
-// is kept in CNY; USD is a display currency converted at USDRate, and
-// every payment is charged in CNY.
+// LocaleSettings is the site's display language and currencies. The ledger
+// is kept in CNY; USD amounts are converted at USDRate, and every payment
+// is charged in CNY.
 type LocaleSettings struct {
 	// DefaultLang is the language a visitor sees before choosing one, when
 	// the browser's language is neither Chinese nor English.
 	DefaultLang string `json:"default_lang"`
-	// USDEnabled offers the USD display currency in the portal.
+	// CNYHidden and USDEnabled say which currencies the portal offers; at
+	// least one is shown.
+	CNYHidden  bool `json:"cny_hidden"`
 	USDEnabled bool `json:"usd_enabled"`
+	// DefaultCurrency is the currency visitors see before choosing one,
+	// and the one top-ups and Telegram rewards are quoted in.
+	DefaultCurrency string `json:"default_currency"`
 	// USDRate is how many CNY one USD is worth.
 	USDRate float64 `json:"usd_rate"`
 	// USDRateAuto follows the market rate (see internal/fx).
@@ -31,7 +36,7 @@ const (
 )
 
 func DefaultLocaleSettings() LocaleSettings {
-	return LocaleSettings{DefaultLang: "zh", USDEnabled: true, USDRate: 7.2, USDRateAuto: true}
+	return LocaleSettings{DefaultLang: "zh", USDEnabled: true, DefaultCurrency: "CNY", USDRate: 7.2, USDRateAuto: true}
 }
 
 func decodeLocaleSettings(raw []byte) LocaleSettings {
@@ -45,7 +50,76 @@ func decodeLocaleSettings(raw []byte) LocaleSettings {
 	if value.USDRate < minUSDRate || value.USDRate > maxUSDRate {
 		value.USDRate = DefaultLocaleSettings().USDRate
 	}
+	if value.CNYHidden && !value.USDEnabled {
+		value.CNYHidden = false
+	}
+	value.DefaultCurrency = value.Currency()
 	return value
+}
+
+// Currency is the site's default currency, always one that is shown.
+func (l LocaleSettings) Currency() string {
+	switch {
+	case l.CNYHidden:
+		return "USD"
+	case l.DefaultCurrency == "USD" && l.USDEnabled:
+		return "USD"
+	}
+	return "CNY"
+}
+
+// Currencies lists the currencies the portal offers.
+func (l LocaleSettings) Currencies() []string {
+	shown := make([]string, 0, 2)
+	if !l.CNYHidden {
+		shown = append(shown, "CNY")
+	}
+	if l.USDEnabled {
+		shown = append(shown, "USD")
+	}
+	return shown
+}
+
+// ToLedger turns an amount in a currency into ledger (CNY) minor units.
+func (l LocaleSettings) ToLedger(minor int64, currency string) int64 {
+	if currency == "USD" && l.USDRate > 0 {
+		return int64(math.Round(float64(minor) * l.USDRate))
+	}
+	return minor
+}
+
+// FromLedger turns ledger (CNY) minor units into an amount in a currency.
+func (l LocaleSettings) FromLedger(minor int64, currency string) int64 {
+	if currency == "USD" && l.USDRate > 0 {
+		return int64(math.Round(float64(minor) / l.USDRate))
+	}
+	return minor
+}
+
+// Convert moves an amount between two currencies.
+func (l LocaleSettings) Convert(minor int64, from, to string) int64 {
+	if from == to || (from != "USD" && to != "USD") {
+		return minor
+	}
+	return l.FromLedger(l.ToLedger(minor, from), to)
+}
+
+// Money prints a ledger amount in the site's default currency.
+func (l LocaleSettings) Money(ledgerMinor int64) string {
+	currency := l.Currency()
+	return FormatMoney(l.FromLedger(ledgerMinor, currency), currency)
+}
+
+// FormatMoney prints minor units with the currency's sign.
+func FormatMoney(minor int64, currency string) string {
+	sign, symbol := "", "¥"
+	if minor < 0 {
+		sign, minor = "-", -minor
+	}
+	if currency == "USD" {
+		symbol = "$"
+	}
+	return fmt.Sprintf("%s%s%d.%02d", sign, symbol, minor/100, minor%100)
 }
 
 // Lang is "zh" or "en": the given language when it is one of them, the
@@ -71,6 +145,14 @@ func (m *Manager) SetLocale(ctx context.Context, in LocaleSettings, actorID stri
 	}
 	if math.IsNaN(in.USDRate) || in.USDRate < minUSDRate || in.USDRate > maxUSDRate {
 		return fmt.Errorf("%w: 美元汇率必须在 %d–%d 之间", ErrInvalidSettings, minUSDRate, maxUSDRate)
+	}
+	switch {
+	case in.CNYHidden && !in.USDEnabled:
+		return fmt.Errorf("%w: 至少要显示一种币种", ErrInvalidSettings)
+	case in.DefaultCurrency != "CNY" && in.DefaultCurrency != "USD":
+		return fmt.Errorf("%w: 默认币种只能是 CNY 或 USD", ErrInvalidSettings)
+	case in.DefaultCurrency == "CNY" && in.CNYHidden, in.DefaultCurrency == "USD" && !in.USDEnabled:
+		return fmt.Errorf("%w: 默认币种必须是正在显示的币种", ErrInvalidSettings)
 	}
 	in.USDRate = roundRate(in.USDRate)
 	current := m.Current().Locale

@@ -10,7 +10,11 @@
 
 - 前台和后台都有中文和 English，按浏览器语言显示，可在页面右上角切换；邮件按收件人的语言发送。见 [docs/I18N.md](docs/I18N.md)。
 - 账本以人民币记账；访客可以选择用美元查看金额（按站点汇率换算，可自动跟随市场汇率），付款仍按人民币结算。
-- 客户可以绑定 Telegram 账号，在站点的交流群里签到、邀请新成员获得账户余额。见 [docs/TELEGRAM.md](docs/TELEGRAM.md)。
+- 前台可以显示人民币、美元或两者，并设置默认币种；充值和 Telegram 奖励跟随默认币种。
+- 客户可以绑定 Telegram 账号，在站点的交流群里签到、邀请新成员获得账户余额，并可选择用 Telegram 代替或配合邮件接收通知。见 [docs/TELEGRAM.md](docs/TELEGRAM.md)。
+- 支付网关只用于余额充值和平台自营产品；托管产品、交易市场只支持余额支付。见 [docs/PAYMENT-CHECKOUT.md](docs/PAYMENT-CHECKOUT.md)。
+- 后台管理员分六级角色（超级管理员、管理员、运营、财务、客服、只读）。见 [docs/STAFF.md](docs/STAFF.md)。
+- 二步验证支持扫码配置，前台和后台都可用。
 
 ## 一键部署
 

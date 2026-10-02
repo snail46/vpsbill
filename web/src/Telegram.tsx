@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Check, Copy, Gift, Send, X } from 'lucide-react'
+import { Bell, Check, Copy, Gift, Mail, Send, X } from 'lucide-react'
 import { api, cached } from './api'
 import { money } from './shared/currency'
 import { formatDate, formatTime } from './shared/time'
@@ -172,12 +172,79 @@ export function TelegramPrompt() {
   )
 }
 
+const linkChanged = 'vpsbill-telegram-link'
+
+type NotifyRecord = { email: boolean; telegram: boolean; telegram_linked: boolean; telegram_enabled: boolean; mail_enabled: boolean }
+
+// NotifyPanel lets a customer choose where notices go: mail, the linked
+// Telegram account, or both, but never neither.
+export function NotifyPanel({ email }: { email: string }) {
+  const notifyPath = '/api/v1/customer/notifications'
+  const [data, setData] = useState<NotifyRecord | null>(() => cached<NotifyRecord>(notifyPath) ?? null)
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    const load = () => void api<NotifyRecord>(notifyPath).then(setData).catch(() => undefined)
+    load()
+    window.addEventListener(linkChanged, load)
+    return () => window.removeEventListener(linkChanged, load)
+  }, [])
+
+  // Without a bot there is nothing to choose: everything goes by mail.
+  if (!data?.telegram_enabled) return null
+
+  async function choose(next: { email: boolean; telegram: boolean }) {
+    if (!next.email && !next.telegram) {
+      toast('info', t('至少保留一种通知方式'), t('邮件和 Telegram 不能同时关闭。'))
+      return
+    }
+    setBusy(true)
+    try {
+      setData(await api<NotifyRecord>(notifyPath, { method: 'PUT', body: JSON.stringify(next) }))
+      toast('success', t('通知方式已保存'))
+    } catch (err) {
+      toast('error', t('保存失败'), err instanceof Error ? err.message : undefined)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="panel notify-panel" id="notifications">
+      <div className="panel-heading">
+        <h3><Bell size={16} /> {t('通知方式')}</h3>
+        <span className="tag">{data.email && data.telegram ? t('邮件 + Telegram') : data.telegram ? 'Telegram' : t('邮件')}</span>
+      </div>
+      <p className="muted-text">{t('到期提醒、流量告警、工单回复、交易和清退通知发到这里选择的渠道，至少选一种。邮箱验证和找回密码的邮件始终发到邮箱。')}</p>
+      <div className="notify-options">
+        <label className="check-row">
+          <input type="checkbox" checked={data.email} disabled={busy} onChange={event => void choose({ email: event.target.checked, telegram: data.telegram })} />
+          <Mail size={15} />
+          <span>{t('邮件')}<small>{email}</small></span>
+        </label>
+        <label className="check-row">
+          <input type="checkbox" checked={data.telegram} disabled={busy || !data.telegram_linked} onChange={event => void choose({ email: data.email, telegram: event.target.checked })} />
+          <Send size={15} />
+          <span>Telegram<small>{data.telegram_linked ? t('由站点机器人私聊发送') : t('绑定 Telegram 后可选')}</small></span>
+        </label>
+      </div>
+      {data.email && !data.mail_enabled && <p className="muted-text">{t('站点暂未配置发信邮箱，邮件通知暂时发不出去。')}</p>}
+    </div>
+  )
+}
+
 // TelegramPanel is the Telegram section of the profile page: linking, the
 // rewards, the customer's own invite link and what they earned.
 export function TelegramPanel() {
   const { data, load, bind, bindURL, error } = useTelegram()
   const [busy, setBusy] = useState(false)
   const [copied, setCopied] = useState(false)
+
+  // The notification panel below follows the link.
+  const linked = Boolean(data?.linked)
+  useEffect(() => {
+    window.dispatchEvent(new Event(linkChanged))
+  }, [linked])
 
   if (!data?.enabled || !data.rules) return null
   const rules = data.rules

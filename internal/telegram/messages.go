@@ -8,11 +8,6 @@ import (
 	"vpsbill/internal/settings"
 )
 
-// yuan prints an amount of CNY minor units.
-func yuan(minor int64) string {
-	return fmt.Sprintf("¥%d.%02d", minor/100, minor%100)
-}
-
 // text is one message in both languages.
 type text struct{ zh, en string }
 
@@ -128,11 +123,11 @@ var (
 )
 
 // amountRange prints the check-in reward: one amount, or the two ends.
-func amountRange(cfg settings.TelegramSettings) string {
+func amountRange(cfg settings.TelegramSettings, money func(int64) string) string {
 	if cfg.CheckinMinMinor == cfg.CheckinMaxMinor {
-		return yuan(cfg.CheckinMinMinor)
+		return money(cfg.CheckinMinMinor)
 	}
-	return yuan(cfg.CheckinMinMinor) + "–" + yuan(cfg.CheckinMaxMinor)
+	return money(cfg.CheckinMinMinor) + "–" + money(cfg.CheckinMaxMinor)
 }
 
 // mention is a member's name as text safe to put into a message.

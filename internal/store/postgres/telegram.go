@@ -260,10 +260,50 @@ func (s *TelegramStore) Unlink(ctx context.Context, userID string, now time.Time
 	if _, err := tx.Exec(ctx, `DELETE FROM telegram_links WHERE user_id=$1`, userID); err != nil {
 		return err
 	}
+	// Notices that went to Telegram go to the mailbox again.
+	if _, err := tx.Exec(ctx, `UPDATE users SET notify_email=true,notify_telegram=false WHERE id=$1`, userID); err != nil {
+		return err
+	}
 	if _, err := tx.Exec(ctx, `INSERT INTO audit_logs(actor_type,actor_id,action,target_type,target_id,metadata) VALUES('customer',$1,'telegram.unlinked','user',$1,jsonb_build_object('telegram_id',$2::bigint))`, userID, telegramID); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
+}
+
+// NotifyChannels is where a user's notices go.
+type NotifyChannels struct {
+	Email    bool `json:"email"`
+	Telegram bool `json:"telegram"`
+}
+
+var ErrNotifyChannels = errors.New("at least one notification channel is required")
+
+func (s *TelegramStore) NotifyChannels(ctx context.Context, userID string) (NotifyChannels, error) {
+	var channels NotifyChannels
+	err := s.db.QueryRow(ctx, `SELECT notify_email,notify_telegram FROM users WHERE id=$1`, userID).Scan(&channels.Email, &channels.Telegram)
+	return channels, err
+}
+
+// SetNotifyChannels stores a user's choice: at least one channel, and
+// Telegram only with a linked account.
+func (s *TelegramStore) SetNotifyChannels(ctx context.Context, userID string, channels NotifyChannels) error {
+	if !channels.Email && !channels.Telegram {
+		return ErrNotifyChannels
+	}
+	command, err := s.db.Exec(ctx, `
+		UPDATE users SET notify_email=$2,notify_telegram=$3,updated_at=now()
+		WHERE id=$1 AND (NOT $3 OR EXISTS(SELECT 1 FROM telegram_links l WHERE l.user_id=$1))
+	`, userID, channels.Email, channels.Telegram)
+	if err != nil {
+		return err
+	}
+	if command.RowsAffected() == 0 {
+		return ErrTelegramNotLinked
+	}
+	if _, err := s.db.Exec(ctx, `INSERT INTO audit_logs(actor_type,actor_id,action,target_type,target_id,metadata) VALUES('customer',$1,'notifications.channels_changed','user',$1,jsonb_build_object('email',$2::boolean,'telegram',$3::boolean))`, userID, channels.Email, channels.Telegram); err != nil {
+		return err
+	}
+	return nil
 }
 
 // TelegramCheckin is the outcome of a check-in.

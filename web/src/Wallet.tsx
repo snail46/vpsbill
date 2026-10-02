@@ -4,7 +4,7 @@ import { api, cached, type CustomerCatalogRecord, type PaymentIntentRecord, type
 import { formatTime } from './shared/time'
 import { confirmDialog } from './shared/dialog'
 import { toast } from './shared/toast'
-import { chargedMoney, converted, money } from './shared/currency'
+import { chargedMoney, converted, displayCurrency, money, plainMoney, toLedgerMinor } from './shared/currency'
 import { Charged, CurrencyNote } from './shared/LocaleMenu'
 import { t, tr } from './shared/i18n'
 
@@ -65,12 +65,31 @@ export function WalletLedger({ entries }: { entries: WalletEntryRecord[] }) {
   )
 }
 
-const quickAmounts = [10, 50, 100, 200, 500]
+// Top-ups are typed in the visitor's display currency and charged in CNY.
+const quickAmounts = displayCurrency() === 'USD' ? [5, 10, 20, 50, 100] : [10, 50, 100, 200, 500]
+const topupMinMinor = 100
+const topupMaxMinor = 10_000_000
+
+// topupLink opens the top-up form asking for at least what is short (in
+// ledger minor units).
+export function topupLink(shortMinor: number) {
+  return `/portal/wallet?need=${Math.max(Math.ceil(shortMinor), topupMinMinor)}#topup`
+}
+
+// neededAmount is the amount a top-up link asks for, in the display
+// currency and rounded up so that it covers what is short.
+function neededAmount() {
+  const need = Number(new URLSearchParams(window.location.search).get('need'))
+  if (!Number.isFinite(need) || need <= 0) return ''
+  const rate = toLedgerMinor(1) / 100
+  return String(Math.ceil(Math.min(need, topupMaxMinor) / rate) / 100)
+}
 
 export default function CustomerWallet() {
   const [wallet, setWallet] = useState<WalletRecord | null>(() => cached<WalletRecord>('/api/v1/customer/wallet') ?? null)
   const [checkoutEnabled, setCheckoutEnabled] = useState(() => cached<CustomerCatalogRecord>('/api/v1/customer/catalog')?.checkout_enabled ?? false)
-  const [amount, setAmount] = useState('50')
+  const [amount, setAmount] = useState(() => neededAmount() || String(quickAmounts[1]))
+  const needed = neededAmount()
   const [created, setCreated] = useState<TopupInvoiceRecord | null>(null)
   const [agreed, setAgreed] = useState(false)
   // nudge marks the terms when someone tries to pay without agreeing.
@@ -114,7 +133,7 @@ export default function CustomerWallet() {
 
   async function topup(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    const yuan = Number(amount)
+    const chargeMinor = toLedgerMinor(Number(amount))
     if (!agreed) {
       // The button stays clickable so the reason can be said where it
       // applies: the terms light up and their checkbox gets focus.
@@ -122,8 +141,8 @@ export default function CustomerWallet() {
       toast('info', t('请先同意充值须知'), t('阅读下方充值须知并勾选「我已阅读并同意」后，才能生成充值账单。'))
       return
     }
-    if (!Number.isFinite(yuan) || yuan < 1 || yuan > 100000) {
-      setError(t('充值金额需在 ¥1 到 ¥100000 之间'))
+    if (!Number.isFinite(chargeMinor) || chargeMinor < topupMinMinor || chargeMinor > topupMaxMinor) {
+      setError(t('充值金额需在 {0} 到 {1} 之间', money(topupMinMinor), money(topupMaxMinor)))
       return
     }
     setBusy(true)
@@ -131,7 +150,7 @@ export default function CustomerWallet() {
     try {
       const invoice = await api<TopupInvoiceRecord>('/api/v1/customer/wallet/topup', {
         method: 'POST',
-        body: JSON.stringify({ amount_minor: Math.round(yuan * 100), agree_terms: agreed }),
+        body: JSON.stringify({ amount_minor: chargeMinor, agree_terms: agreed }),
       })
       setCreated(invoice)
       if (checkoutEnabled) {
@@ -186,16 +205,16 @@ export default function CustomerWallet() {
           <h3>{t('充值')}</h3>
           <span className="tag">{t('不可提现')}</span>
         </div>
+        {needed && <div className="note-banner">{t('待支付的订单还差 {0}，已为你填好充值金额；也可以多充一些。充值到账后回到「账单」用余额支付。', plainMoney(Math.round(Number(needed) * 100), displayCurrency()))}</div>}
         <div className="topup-row">
           {quickAmounts.map(value => (
             <button type="button" key={value} className={amount === String(value) ? 'chip-button active' : 'chip-button'} onClick={() => setAmount(String(value))}>
-              {chargedMoney(value * 100)}
-              {converted() && <small> ≈ {money(value * 100)}</small>}
+              {plainMoney(value * 100, displayCurrency())}
             </button>
           ))}
           <label className="topup-amount">
-            <span>{t('金额（人民币 元）')}{converted() && Number(amount) > 0 && <small> ≈ {money(Math.round(Number(amount) * 100))}</small>}</span>
-            <input type="number" min="1" max="100000" step="0.01" value={amount} onChange={event => setAmount(event.target.value)} />
+            <span>{displayCurrency() === 'USD' ? t('金额（美元）') : t('金额（人民币 元）')}{converted() && Number(amount) > 0 && <small> {t('实付 {0}', chargedMoney(toLedgerMinor(Number(amount))))}</small>}</span>
+            <input type="number" min="0.01" step="0.01" value={amount} onChange={event => setAmount(event.target.value)} />
           </label>
           <button className={agreed ? 'primary-button compact' : 'primary-button compact needs-agree'} disabled={busy}>
             {busy ? t('正在处理…') : checkoutEnabled ? t('前往支付') : t('生成充值账单')}

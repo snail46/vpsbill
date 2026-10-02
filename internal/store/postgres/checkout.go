@@ -10,7 +10,18 @@ import (
 	"vpsbill/internal/security"
 )
 
-var ErrInvoiceUnavailable = errors.New("invoice is unavailable for checkout")
+var (
+	ErrInvoiceUnavailable = errors.New("invoice is unavailable for checkout")
+	// ErrBalanceOnly marks an invoice the payment gateway does not take.
+	ErrBalanceOnly = errors.New("invoice can only be paid from the balance")
+)
+
+// invoiceGatewaySQL tells whether invoice i may be paid through the payment
+// gateway: top-ups and the platform's own products. Everything sold by a
+// host is paid from the balance.
+const invoiceGatewaySQL = `(i.kind='topup' OR NOT (
+	EXISTS(SELECT 1 FROM order_items oi JOIN plans gp ON gp.id=oi.plan_id WHERE oi.order_id=i.order_id AND gp.owner_account_id IS NOT NULL)
+	OR EXISTS(SELECT 1 FROM services gs JOIN plans gp ON gp.id=gs.plan_id WHERE gs.id=i.service_id AND gp.owner_account_id IS NOT NULL)))`
 
 type PaymentIntent struct {
 	ID                string    `json:"id"`
@@ -37,15 +48,19 @@ func (s *BillingStore) PreparePaymentIntent(ctx context.Context, accountID, invo
 	}
 	var result PaymentIntent
 	var invoiceStatus string
+	var gateway bool
 	err = tx.QueryRow(ctx, `
-		SELECT id,number,status,currency,balance_minor FROM invoices
-		WHERE id=$1 AND account_id=$2 FOR UPDATE
-	`, invoiceID, accountID).Scan(&result.InvoiceID, &result.InvoiceNumber, &invoiceStatus, &result.Currency, &result.AmountMinor)
-	if errors.Is(err, pgx.ErrNoRows) || invoiceStatus != "open" || result.AmountMinor <= 0 {
+		SELECT i.id,i.number,i.status,i.currency,i.balance_minor,`+invoiceGatewaySQL+` FROM invoices i
+		WHERE i.id=$1 AND i.account_id=$2 FOR UPDATE OF i
+	`, invoiceID, accountID).Scan(&result.InvoiceID, &result.InvoiceNumber, &invoiceStatus, &result.Currency, &result.AmountMinor, &gateway)
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && (invoiceStatus != "open" || result.AmountMinor <= 0)) {
 		return PaymentIntent{}, ErrInvoiceUnavailable
 	}
 	if err != nil {
 		return PaymentIntent{}, err
+	}
+	if !gateway {
+		return PaymentIntent{}, ErrBalanceOnly
 	}
 	err = tx.QueryRow(ctx, `
 		SELECT id,account_id,provider,merchant_reference,status,coalesce(checkout_url,''),expires_at

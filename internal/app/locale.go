@@ -16,16 +16,19 @@ func (a adminSettings) locale(w http.ResponseWriter, _ *http.Request) {
 
 func (a adminSettings) updateLocale(w http.ResponseWriter, r *http.Request) {
 	var input struct {
-		DefaultLang string  `json:"default_lang"`
-		USDEnabled  bool    `json:"usd_enabled"`
-		USDRate     float64 `json:"usd_rate"`
-		USDRateAuto bool    `json:"usd_rate_auto"`
+		DefaultLang     string  `json:"default_lang"`
+		CNYHidden       bool    `json:"cny_hidden"`
+		USDEnabled      bool    `json:"usd_enabled"`
+		DefaultCurrency string  `json:"default_currency"`
+		USDRate         float64 `json:"usd_rate"`
+		USDRateAuto     bool    `json:"usd_rate_auto"`
 	}
 	if !decodeJSON(w, r, &input) {
 		return
 	}
 	a.localeResult(w, a.settings.SetLocale(r.Context(), settings.LocaleSettings{
-		DefaultLang: input.DefaultLang, USDEnabled: input.USDEnabled, USDRate: input.USDRate, USDRateAuto: input.USDRateAuto,
+		DefaultLang: input.DefaultLang, CNYHidden: input.CNYHidden, USDEnabled: input.USDEnabled, DefaultCurrency: input.DefaultCurrency,
+		USDRate: input.USDRate, USDRateAuto: input.USDRateAuto,
 	}, principalFromContext(r.Context()).UserID))
 }
 

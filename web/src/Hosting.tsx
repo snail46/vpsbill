@@ -10,7 +10,6 @@ import {
   type MarketRecord,
   type NodeImageRecord,
   type OrderRecord,
-  type PaymentIntentRecord,
   type PendingAgentRecord,
   type PlanRecord,
   type StockCapacityRecord,
@@ -24,7 +23,7 @@ import { CouponField, CouponManager } from './Coupons'
 import { ReportDialog } from './Reports'
 import { StatusBadge, TicketConversation, ticketStatusLabel, useReveal , bandwidthLabel } from './shared/ui'
 import { ticketRequestBody, useAttachmentLimit } from './TicketAttachments'
-import { walletMoney } from './Wallet'
+import { topupLink, walletMoney } from './Wallet'
 import { CurrencyNote } from './shared/LocaleMenu'
 import { formatDate, formatTime } from './shared/time'
 import { cycleName, cycleOrder, CyclePriceFields, priceLeft, readCyclePrices } from './shared/cycles'
@@ -289,18 +288,6 @@ function BuyDialog({
     }
   }
 
-  async function payOnline() {
-    if (!order) return
-    setBusy(true)
-    try {
-      const intent = await api<PaymentIntentRecord>(`/api/v1/customer/invoices/${order.invoice_id}/checkout`, { method: 'POST' })
-      window.location.assign(intent.checkout_url)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t('在线支付暂不可用'))
-      setBusy(false)
-    }
-  }
-
   const enough = wallet && order ? wallet.balance_minor >= order.total_minor : false
   return (
     <div className="modal-backdrop" role="dialog" aria-modal="true">
@@ -375,9 +362,13 @@ function BuyDialog({
               <button className="primary-button compact" disabled={busy || !enough} onClick={payBalance}>
                 {enough ? t('用余额支付') : t('余额不足')}
               </button>
-              <button className="secondary-button" disabled={busy} onClick={payOnline}>{t('在线支付')}</button>
-              {!enough && <a className="secondary-button" href="/portal/wallet">{t('去充值')}</a>}
+              {!enough && <a className="primary-button compact" href={topupLink(order.total_minor - (wallet?.balance_minor || 0))}>{t('去充值')}</a>}
             </div>
+            <p className="muted-text">
+              {enough
+                ? t('托管产品只支持余额支付。')
+                : t('托管产品只支持余额支付，还差 {0}。充值后到「账单」里用余额支付这笔订单即可，订单会一直保留到账单到期。', walletMoney(order.total_minor - (wallet?.balance_minor || 0), order.currency))}
+            </p>
           </div>
         )}
       </div>

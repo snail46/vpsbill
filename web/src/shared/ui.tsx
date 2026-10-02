@@ -32,7 +32,7 @@ export type Meta = {
   // telegram_enabled offers linking a Telegram account for rewards.
   telegram_enabled?: boolean
   // locale is the site's default language and the USD display rate.
-  locale?: { default_lang?: 'zh' | 'en'; usd_enabled?: boolean; usd_rate?: number }
+  locale?: { default_lang?: 'zh' | 'en'; usd_enabled?: boolean; usd_rate?: number; currencies?: string[]; default_currency?: string }
 }
 
 // useReveal brings a form that just opened into view, flashes it and puts
@@ -461,6 +461,47 @@ export function TicketConversation({
   )
 }
 
+// QRCode draws a text as a QR code: dark modules on white whatever the
+// theme, so a phone camera reads it.
+export function QRCode({ value, label }: { value: string; label: string }) {
+  const [code, setCode] = useState<{ size: number; path: string } | null>(null)
+
+  useEffect(() => {
+    let live = true
+    void import('qrcode-generator').then(module => {
+      const factory = ((module as unknown as { default?: typeof module }).default ?? module) as unknown as (type: 0, level: 'M') => {
+        addData(data: string): void
+        make(): void
+        getModuleCount(): number
+        isDark(row: number, column: number): boolean
+      }
+      const qr = factory(0, 'M')
+      qr.addData(value)
+      qr.make()
+      const size = qr.getModuleCount()
+      let path = ''
+      for (let row = 0; row < size; row++) {
+        for (let column = 0; column < size; column++) {
+          if (qr.isDark(row, column)) path += `M${column},${row}h1v1h-1z`
+        }
+      }
+      if (live) setCode({ size, path })
+    })
+    return () => {
+      live = false
+    }
+  }, [value])
+
+  if (!code) return <div className="qr-code" aria-hidden="true" />
+  // Four modules of quiet zone on every side, as scanners expect.
+  return (
+    <svg className="qr-code" viewBox={`-4 -4 ${code.size + 8} ${code.size + 8}`} role="img" aria-label={label} shapeRendering="crispEdges">
+      <rect x={-4} y={-4} width={code.size + 8} height={code.size + 8} fill="#fff" />
+      <path d={code.path} fill="#000" />
+    </svg>
+  )
+}
+
 export function SecuritySettings({ enabled: initialEnabled, customer = false }: { enabled: boolean; customer?: boolean }) {
   const [enabled, setEnabled] = useState(initialEnabled)
   const [setup, setSetup] = useState<{ secret: string; otpauth_uri: string } | null>(null)
@@ -533,11 +574,17 @@ export function SecuritySettings({ enabled: initialEnabled, customer = false }: 
 
       {setup && (
         <>
-          <p>{t('请在 Authenticator 验证器中手动添加以下密钥，或直接点击配置链接：')}</p>
-          <code className="mfa-secret">{setup.secret}</code>
-          <a className="secondary-button mfa-link" href={setup.otpauth_uri}>
-            {t('在系统默认验证器中打开')}
-          </a>
+          <div className="mfa-setup">
+            <QRCode value={setup.otpauth_uri} label={t('二步验证配置二维码')} />
+            <div>
+              <p>{t('用手机上的验证器应用（Google Authenticator、Microsoft Authenticator、1Password 等）扫描二维码即可添加。')}</p>
+              <p>{t('无法扫码时，在验证器里选择手动输入，填入下面的密钥：')}</p>
+              <code className="mfa-secret">{setup.secret}</code>
+              <a className="secondary-button mfa-link" href={setup.otpauth_uri}>
+                {t('在本机的验证器中打开')}
+              </a>
+            </div>
+          </div>
           <label className="field" style={{ maxWidth: '320px', marginTop: '16px' }}>
             <span>{t('输入 6 位动态验证码确认绑定')}</span>
             <input

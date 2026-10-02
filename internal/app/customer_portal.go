@@ -692,6 +692,10 @@ func (p *customerPortal) checkout(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusConflict, map[string]any{"error": "invoice_unavailable", "message": "账单不存在、已支付或当前不可付款"})
 		return
 	}
+	if errors.Is(err, postgres.ErrBalanceOnly) {
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "balance_only", "message": "这张账单只能用账户余额支付，余额不足时请先充值"})
+		return
+	}
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "internal_error"})
 		return

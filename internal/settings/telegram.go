@@ -9,9 +9,12 @@ import (
 )
 
 // TelegramSettings configures the Telegram bot and what it pays. Amounts
-// are in CNY minor units.
+// are minor units of Currency, the site's default currency when they were
+// saved; rewards are converted to the ledger when they are paid.
 type TelegramSettings struct {
-	Enabled  bool   `json:"enabled"`
+	Enabled bool `json:"enabled"`
+	// Currency is "CNY" or "USD" ("" = CNY).
+	Currency string `json:"currency"`
 	BotToken string `json:"bot_token,omitempty"`
 	// BotUsername and ChatTitle are read from Telegram when the settings
 	// are saved.
@@ -55,6 +58,23 @@ func DefaultTelegramSettings() TelegramSettings {
 	}
 }
 
+// In returns the settings with every amount converted to a currency.
+func (t TelegramSettings) In(locale LocaleSettings, currency string) TelegramSettings {
+	from := t.Currency
+	if from == "" {
+		from = "CNY"
+	}
+	for _, amount := range []*int64{&t.BindRewardMinor, &t.CheckinMinMinor, &t.CheckinMaxMinor, &t.InviteRewardMinor, &t.DailyBudgetMinor} {
+		*amount = locale.Convert(*amount, from, currency)
+	}
+	t.Currency = currency
+	return t
+}
+
+// TelegramLedger is the Telegram settings with every amount in ledger
+// (CNY) minor units, which is what rewards are paid in.
+func (r Runtime) TelegramLedger() TelegramSettings { return r.Telegram.In(r.Locale, "CNY") }
+
 // Ready reports whether the bot can run.
 func (t TelegramSettings) Ready() bool {
 	return t.Enabled && t.BotToken != "" && t.BotUsername != "" && t.ChatID != 0
@@ -65,14 +85,15 @@ func (t TelegramSettings) InviteHold() time.Duration {
 	return time.Duration(t.InviteHoldHours) * time.Hour
 }
 
-// maxTelegramReward keeps a typo from paying out a fortune: ¥1000.
+// maxTelegramReward keeps a typo from paying out a fortune: 1000 of the
+// currency.
 const maxTelegramReward = 100_000
 
 func (t TelegramSettings) validate() error {
 	amounts := []int64{t.BindRewardMinor, t.CheckinMinMinor, t.CheckinMaxMinor, t.InviteRewardMinor}
 	for _, amount := range amounts {
 		if amount < 0 || amount > maxTelegramReward {
-			return fmt.Errorf("奖励金额必须在 0–%d 元之间", maxTelegramReward/100)
+			return fmt.Errorf("奖励金额必须在 0–%d 之间", maxTelegramReward/100)
 		}
 	}
 	switch {
@@ -121,6 +142,9 @@ func (m *Manager) SetTelegram(ctx context.Context, in TelegramSettings, actorID 
 	in.ChatURL = strings.TrimSpace(in.ChatURL)
 	if in.BotToken == "" {
 		in.BotToken = m.Current().Telegram.BotToken
+	}
+	if in.Currency != "USD" {
+		in.Currency = "CNY"
 	}
 	if err := in.validate(); err != nil {
 		return fmt.Errorf("%w: %v", ErrInvalidSettings, err)

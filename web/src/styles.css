@@ -5092,3 +5092,148 @@ input, select, textarea { min-height: 34px; padding: 6px 10px; font-size: 13px; 
 /* A long notice beside the buy button wraps instead of pushing it out. */
 .market-plan-buy .tag { white-space: normal; min-width: 0; line-height: 1.4; }
 .market-plan-buy button { flex: none; }
+
+/* Two-factor setup: the QR code beside the manual key. */
+.mfa-setup {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+  align-items: flex-start;
+  margin: 8px 0 4px;
+}
+
+.mfa-setup > div:last-child {
+  flex: 1 1 260px;
+  min-width: 0;
+}
+
+.mfa-setup p {
+  color: var(--text-muted);
+  line-height: 1.6;
+  margin: 0 0 8px;
+}
+
+.mfa-setup .mfa-secret {
+  margin: 8px 0 12px;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.qr-code {
+  flex: none;
+  width: 196px;
+  height: 196px;
+  background: #fff;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+}
+
+/* Notification channels on the profile page. */
+.notify-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.notify-options .check-row {
+  align-items: center;
+  padding: 12px 14px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--bg-input);
+}
+
+.notify-options .check-row span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.notify-options .check-row small {
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+/* The signed-in administrator at the foot of the admin menu. */
+.sidebar-user {
+  min-width: 0;
+}
+
+.sidebar-user > div:last-child {
+  min-width: 0;
+}
+
+.sidebar-user strong {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--text-primary);
+}
+
+.sidebar-user strong .tag {
+  flex: none;
+  font-size: 10.5px;
+  padding: 1px 6px;
+}
+
+.sidebar-user > div:last-child > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Staff roles: what each is for, and the permission table. */
+.role-notes {
+  list-style: none;
+  margin: 12px 0 16px;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.role-notes li {
+  display: grid;
+  grid-template-columns: 110px 1fr auto;
+  gap: 12px;
+  align-items: baseline;
+  font-size: 13px;
+}
+
+.role-notes li span {
+  color: var(--text-secondary);
+}
+
+.role-notes li small {
+  color: var(--text-muted);
+}
+
+.role-matrix th, .role-matrix td {
+  text-align: center;
+  white-space: nowrap;
+}
+
+.role-matrix th:first-child, .role-matrix td:first-child {
+  text-align: left;
+}
+
+@media (max-width: 720px) {
+  .role-notes li {
+    grid-template-columns: 1fr auto;
+  }
+
+  .role-notes li span {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+}
+
+.sidebar-user .avatar {
+  display: grid;
+  flex: none;
+}
+
+.role-select {
+  min-width: 132px;
+}

@@ -155,6 +155,9 @@ func (s *PortalStore) RecordServiceOperation(ctx context.Context, userID, servic
 }
 
 type CustomerInvoice struct {
+	// Gateway is true when the payment gateway takes this invoice;
+	// otherwise it is paid from the balance.
+	Gateway      bool       `json:"gateway"`
 	ID           string     `json:"id"`
 	Number       string     `json:"number"`
 	Status       string     `json:"status"`
@@ -228,7 +231,7 @@ func (s *PortalStore) ListServices(ctx context.Context, accountID string) ([]Cus
 }
 
 func (s *PortalStore) ListInvoices(ctx context.Context, accountID string) ([]CustomerInvoice, error) {
-	rows, err := s.db.Query(ctx, `SELECT id,number,status,kind,service_id,currency,total_minor,balance_minor,due_at,paid_at,period_start,period_end,created_at FROM invoices WHERE account_id=$1 ORDER BY created_at DESC`, accountID)
+	rows, err := s.db.Query(ctx, `SELECT i.id,i.number,i.status,i.kind,i.service_id,i.currency,i.total_minor,i.balance_minor,i.due_at,i.paid_at,i.period_start,i.period_end,i.created_at,`+invoiceGatewaySQL+` FROM invoices i WHERE i.account_id=$1 ORDER BY i.created_at DESC`, accountID)
 	if err != nil {
 		return nil, err
 	}
@@ -236,7 +239,7 @@ func (s *PortalStore) ListInvoices(ctx context.Context, accountID string) ([]Cus
 	result := make([]CustomerInvoice, 0)
 	for rows.Next() {
 		var row CustomerInvoice
-		if err := rows.Scan(&row.ID, &row.Number, &row.Status, &row.Kind, &row.ServiceID, &row.Currency, &row.TotalMinor, &row.BalanceMinor, &row.DueAt, &row.PaidAt, &row.PeriodStart, &row.PeriodEnd, &row.CreatedAt); err != nil {
+		if err := rows.Scan(&row.ID, &row.Number, &row.Status, &row.Kind, &row.ServiceID, &row.Currency, &row.TotalMinor, &row.BalanceMinor, &row.DueAt, &row.PaidAt, &row.PeriodStart, &row.PeriodEnd, &row.CreatedAt, &row.Gateway); err != nil {
 			return nil, err
 		}
 		result = append(result, row)

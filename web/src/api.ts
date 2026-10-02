@@ -419,6 +419,10 @@ export type CustomerInvoiceRecord = {
   number: string
   status: string
   kind: 'initial' | 'renewal' | 'topup'
+  // gateway is true when the payment gateway takes this invoice: top-ups
+  // and the platform's own products. Other invoices are paid from the
+  // balance.
+  gateway: boolean
   service_id?: string
   currency: string
   total_minor: number

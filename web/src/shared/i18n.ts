@@ -9,7 +9,7 @@ const storageKey = 'vpsbill-lang'
 
 // siteLocale is the site's language and currency settings as inlined into
 // the page (see boot.ts); empty without inline boot data.
-type SiteLocale = { default_lang?: string; usd_enabled?: boolean; usd_rate?: number }
+type SiteLocale = { default_lang?: string; usd_enabled?: boolean; usd_rate?: number; currencies?: string[]; default_currency?: string }
 
 export function inlineSiteLocale(): SiteLocale {
   try {

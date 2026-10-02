@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react'
-import { api, cached, CustomerCatalogRecord, CustomerIdentity, OrderRecord, PaymentIntentRecord } from '../api'
+import { api, cached, CustomerCatalogRecord, CustomerIdentity, OrderRecord, PaymentIntentRecord, WalletRecord } from '../api'
+import { topupLink } from '../Wallet'
 import { ArrowLeftRight, ArrowRight, ShieldCheck, Store } from 'lucide-react'
 import { navigatePortal, osOptions } from '../shared/nav'
 import { CouponField } from '../Coupons'
@@ -25,6 +26,8 @@ export function CustomerShop({ customer }: { customer: CustomerIdentity }) {
   const [saving, setSaving] = useState(false)
   const [created, setCreated] = useState<OrderRecord | null>(null)
   const [paying, setPaying] = useState(false)
+  const [paid, setPaid] = useState(false)
+  const [balance, setBalance] = useState(() => cached<WalletRecord>('/api/v1/customer/wallet')?.balance_minor ?? 0)
   const [coupon, setCoupon] = useState('')
   const [discount, setDiscount] = useState(0)
 
@@ -44,6 +47,10 @@ export function CustomerShop({ customer }: { customer: CustomerIdentity }) {
       })
       .catch(err => setError(err.message))
   }, [customer.default_currency])
+
+  useEffect(() => {
+    api<WalletRecord>('/api/v1/customer/wallet').then(value => setBalance(value.balance_minor)).catch(() => undefined)
+  }, [])
 
   const sellable = (catalog?.plans || []).filter(plan =>
     plan.prices.some(price => price.currency === customer.default_currency)
@@ -88,6 +95,7 @@ export function CustomerShop({ customer }: { customer: CustomerIdentity }) {
     setSaving(true)
     setError('')
     setCreated(null)
+    setPaid(false)
     try {
       const order = await api<OrderRecord>('/api/v1/customer/orders', {
         method: 'POST',
@@ -123,6 +131,21 @@ export function CustomerShop({ customer }: { customer: CustomerIdentity }) {
       window.location.assign(intent.checkout_url)
     } catch (err) {
       setError(err instanceof Error ? err.message : t('创建收银台失败'))
+      setPaying(false)
+    }
+  }
+
+  async function payBalance() {
+    if (!created) return
+    setPaying(true)
+    setError('')
+    try {
+      await api(`/api/v1/customer/invoices/${created.invoice_id}/pay-balance`, { method: 'POST' })
+      setPaid(true)
+      setBalance(value => value - created.total_minor)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('余额支付失败'))
+    } finally {
       setPaying(false)
     }
   }
@@ -309,15 +332,27 @@ export function CustomerShop({ customer }: { customer: CustomerIdentity }) {
                       <strong>{t('订单 {0} 已生成', created.number)}</strong>
                       <span>{t('应付总额 {0}{1}，关联账单 {2}', money(created.total_minor, created.currency), created.discount_minor ? t('（已优惠 {0}）', money(created.discount_minor, created.currency)) : '', created.invoice_number)}</span>
                     </div>
-                    {catalog?.checkout_enabled ? (
-                      <button className="primary-button compact" disabled={paying} onClick={checkout}>
-                        {paying ? t('正在前往收银台…') : t('前往在线支付')}
-                      </button>
+                    {paid ? (
+                      <a className="primary-button compact" href="/portal/services">{t('已支付，查看我的 VPS')}</a>
                     ) : (
-                      <span>{t('当前未配置在线支付渠道，请联系商家后台完成入账。')}</span>
+                      <div className="row-actions">
+                        {balance >= created.total_minor ? (
+                          <button className="primary-button compact" disabled={paying} onClick={() => void payBalance()}>
+                            {t('用余额支付（余额 {0}）', money(balance, created.currency))}
+                          </button>
+                        ) : (
+                          !catalog?.checkout_enabled && <a className="primary-button compact" href={topupLink(created.total_minor - balance)}>{t('余额不足，去充值')}</a>
+                        )}
+                        {catalog?.checkout_enabled && (
+                          <button className={balance >= created.total_minor ? 'secondary-button compact' : 'primary-button compact'} disabled={paying} onClick={checkout}>
+                            {paying ? t('正在前往收银台…') : t('前往在线支付')}
+                          </button>
+                        )}
+                      </div>
                     )}
                   </div>
                 )}
+                <p className="muted-text shop-refund-note">{t('平台自营产品非产品问题不支持退款；确因产品问题退款时，款项退回账户余额，不退回原支付渠道。')}</p>
               </aside>
             )}
           </div>

@@ -1,5 +1,5 @@
-import { FormEvent, Fragment, useEffect, useState } from 'react'
-import { ArrowLeftRight, Boxes, DatabaseBackup, CheckCircle2, ChevronRight, CircleDollarSign, Cpu, CreditCard, Headphones, LayoutDashboard, Megaphone, LogOut, Menu, X, PackageOpen, ReceiptText, ScrollText, ServerCog, Settings, SlidersHorizontal, ShieldCheck, Store, Users } from 'lucide-react'
+import { FormEvent, Fragment, useEffect, useMemo, useState } from 'react'
+import { ArrowLeftRight, Boxes, DatabaseBackup, CheckCircle2, ChevronRight, CircleDollarSign, Cpu, CreditCard, Headphones, LayoutDashboard, Megaphone, LogOut, Menu, X, PackageOpen, ReceiptText, ScrollText, ServerCog, Settings, SlidersHorizontal, ShieldCheck, Store, UserCog, Users } from 'lucide-react'
 import { adoptCache, api, clearCached, StaffUser } from '../api'
 import { prefetchPage, usePrefetch } from '../shared/prefetch'
 import HostDetailPanel from '../HostDetail'
@@ -19,6 +19,7 @@ import { NodesView, HostsView } from './Nodes'
 import { PlansView } from './Plans'
 import { AdminSupport, AuditView } from './Support'
 import { AnnouncementsView } from './Announcements'
+import { StaffView, can, roleName } from './Staff'
 import { t } from '../shared/i18n'
 
 export type View =
@@ -38,6 +39,7 @@ export type View =
   | 'announcements'
   | 'settings'
   | 'backups'
+  | 'staff'
   | 'security'
 
 export type AuthScreen = 'loading' | 'install' | 'login' | 'ready'
@@ -59,6 +61,7 @@ export const navItems: Array<{ id: View; label: string; icon: typeof LayoutDashb
   { id: 'announcements', label: t('平台公告'), icon: Megaphone },
   { id: 'settings', label: t('站点设置'), icon: SlidersHorizontal },
   { id: 'backups', label: t('数据备份'), icon: DatabaseBackup },
+  { id: 'staff', label: t('管理员与角色'), icon: UserCog },
   { id: 'security', label: t('安全中心'), icon: Settings },
 ]
 
@@ -79,8 +82,36 @@ export const adminViews: View[] = [
   'announcements',
   'settings',
   'backups',
+  'staff',
   'security',
 ]
+
+// viewPermissions is what a role needs to open each page: everything the
+// page loads. Pages a role cannot open are left out of its menu.
+const viewPermissions: Record<View, string[]> = {
+  overview: ['customers:read'],
+  customers: ['customers:read'],
+  orders: ['orders:read', 'customers:read', 'plans:read', 'nodes:read'],
+  billing: ['billing:read'],
+  payment: ['settings:read'],
+  services: ['services:read'],
+  plans: ['plans:read', 'nodes:read'],
+  nodes: ['nodes:read'],
+  hosts: ['nodes:read'],
+  support: ['tickets:read'],
+  marketplace: ['nodes:read', 'tickets:read'],
+  trade: ['services:read'],
+  audit: ['audit:read'],
+  announcements: ['settings:read'],
+  settings: ['settings:read'],
+  backups: ['backups:manage'],
+  staff: ['staff:manage'],
+  security: [],
+}
+
+export function canOpen(user: StaffUser, view: View) {
+  return can(user, ...viewPermissions[view])
+}
 
 // adminPageData is what each page loads first, for prefetching.
 const adminPageData: Record<string, string[]> = {
@@ -100,6 +131,7 @@ const adminPageData: Record<string, string[]> = {
   announcements: ['/api/v1/admin/announcements'],
   settings: ['/api/v1/admin/settings/site'],
   backups: ['/api/v1/admin/backups'],
+  staff: ['/api/v1/admin/staff'],
 }
 
 // An admin route is a page, with a host for the probe detail and the page's
@@ -422,7 +454,10 @@ export function AdminShell({ meta, user, onLogout }: { meta: Meta | null; user: 
   const [route, setRoute] = useState<AdminRoute>(adminRouteFromPath)
   const [menuOpen, setMenuOpen] = useState(false)
   const view = route.view
-  usePrefetch(adminPageData)
+  const menu = useMemo(() => navItems.filter(item => canOpen(user, item.id)), [user])
+  // Only what the role may read is loaded ahead.
+  const pageData = useMemo(() => Object.fromEntries(Object.entries(adminPageData).filter(([page]) => canOpen(user, page as View))), [user])
+  usePrefetch(pageData)
 
   useEffect(() => {
     const initial = adminRouteFromPath()
@@ -454,13 +489,13 @@ export function AdminShell({ meta, user, onLogout }: { meta: Meta | null; user: 
           <span>{navItems.find(item => item.id === view)?.label ?? t('菜单')}</span>
         </button>
         <nav aria-label={t('主导航')}>
-          {navItems.map(({ id, label, icon: Icon }) => (
+          {menu.map(({ id, label, icon: Icon }) => (
             <button
               className={id === view ? 'nav-item active' : 'nav-item'}
               key={label}
               type="button"
               onClick={() => navigate({ view: id })}
-              onPointerEnter={() => prefetchPage(adminPageData, id)}
+              onPointerEnter={() => prefetchPage(pageData, id)}
             >
               <Icon size={18} aria-hidden="true" />
               <span>{label}</span>
@@ -468,11 +503,11 @@ export function AdminShell({ meta, user, onLogout }: { meta: Meta | null; user: 
             </button>
           ))}
         </nav>
-        <div className="sidebar-status">
-          <span className="status-dot online" />
+        <div className="sidebar-status sidebar-user" title={`${user.display_name} · ${roleName(user.role)}\n${user.email}`}>
+          <div className="avatar" aria-hidden="true">{user.display_name.slice(0, 1)}</div>
           <div>
-            <strong>{t('控制平面在线')}</strong>
-            <span>{meta?.environment ?? 'production'}</span>
+            <strong>{user.display_name}<span className="tag">{roleName(user.role)}</span></strong>
+            <span>{user.email}</span>
           </div>
         </div>
       </aside>
@@ -496,6 +531,14 @@ export function AdminShell({ meta, user, onLogout }: { meta: Meta | null; user: 
 
         {/* A link that opens a page with other filters starts it afresh. */}
         <Fragment key={`${view}?${route.query ?? ''}#${route.stamp ?? 0}`}>
+        {!canOpen(user, view) ? (
+          <section className="workspace-panel">
+            <div className="note-banner warn">
+              {t('当前角色（{0}）没有查看「{1}」的权限。需要时请联系超级管理员调整角色。', roleName(user.role), viewTitle(view))}
+            </div>
+          </section>
+        ) : (
+        <>
         {view === 'overview' && <Overview />}
         {view === 'customers' && <CustomersView />}
         {view === 'orders' && <OrdersView />}
@@ -517,7 +560,10 @@ export function AdminShell({ meta, user, onLogout }: { meta: Meta | null; user: 
         {view === 'trade' && <section className="workspace-panel"><AdminTradeListings /></section>}
         {view === 'audit' && <AuditView />}
         {view === 'announcements' && <AnnouncementsView />}
+        {view === 'staff' && <StaffView user={user} />}
         {view === 'security' && <SecuritySettings enabled={user.mfa_enabled} />}
+        </>
+        )}
         </Fragment>
       </main>
     </div>
@@ -543,6 +589,7 @@ export function viewTitle(view: View) {
       announcements: t('平台公告'),
       settings: t('站点设置'),
       backups: t('数据备份与还原'),
+      staff: t('管理员与角色'),
       security: t('账户安全设置'),
     } as Record<View, string>)[view]
   )

@@ -140,7 +140,7 @@ func (b *Bot) Run(ctx context.Context) {
 			sleep(ctx, 3*idleWait)
 			continue
 		}
-		b.poll(ctx, current.Telegram)
+		b.poll(ctx, current.TelegramLedger())
 		release()
 		b.setStatus(false, nil)
 	}
@@ -155,7 +155,7 @@ func (b *Bot) poll(ctx context.Context, cfg settings.TelegramSettings) {
 	}
 	var settled time.Time
 	for ctx.Err() == nil {
-		current := b.settings.Current().Telegram
+		current := b.settings.Current().TelegramLedger()
 		if current.BotToken != cfg.BotToken || current.APIBase != cfg.APIBase {
 			return
 		}
@@ -187,6 +187,9 @@ func (b *Bot) poll(ctx context.Context, cfg settings.TelegramSettings) {
 	}
 }
 
+// money prints a ledger amount in the site's default currency.
+func (b *Bot) money(minor int64) string { return b.settings.Current().Locale.Money(minor) }
+
 func (b *Bot) budget(cfg settings.TelegramSettings) postgres.TelegramBudget {
 	return postgres.TelegramBudget{DailyMinor: cfg.DailyBudgetMinor, Now: b.now()}
 }
@@ -207,7 +210,7 @@ func (b *Bot) settle(ctx context.Context, client API, cfg settings.TelegramSetti
 			continue
 		}
 		lang := b.settings.Current().Lang(link.Locale)
-		_, _ = client.SendMessage(ctx, link.TelegramID, say(lang, msgInviteRewarded, html.EscapeString(item.InviteeName), yuan(item.RewardMinor)), 0)
+		_, _ = client.SendMessage(ctx, link.TelegramID, say(lang, msgInviteRewarded, html.EscapeString(item.InviteeName), b.money(item.RewardMinor)), 0)
 	}
 }
 
@@ -439,12 +442,12 @@ func (b *Bot) help(cfg settings.TelegramSettings, lang string) string {
 	site := b.settings.Current()
 	bindNote, inviteNote := "", ""
 	if cfg.BindRewardMinor > 0 {
-		bindNote = say(lang, msgHelpBind, yuan(cfg.BindRewardMinor))
+		bindNote = say(lang, msgHelpBind, b.money(cfg.BindRewardMinor))
 	}
 	if cfg.InviteRewardMinor > 0 {
-		inviteNote = say(lang, msgHelpInvite, yuan(cfg.InviteRewardMinor))
+		inviteNote = say(lang, msgHelpInvite, b.money(cfg.InviteRewardMinor))
 	}
-	return say(lang, msgHelp, html.EscapeString(site.AppName), bindNote, amountRange(cfg), inviteNote, site.PublicURL, siteHost(site.PublicURL))
+	return say(lang, msgHelp, html.EscapeString(site.AppName), bindNote, amountRange(cfg, b.money), inviteNote, site.PublicURL, siteHost(site.PublicURL))
 }
 
 func (b *Bot) notLinked(lang string) string {
@@ -471,7 +474,7 @@ func (b *Bot) bind(ctx context.Context, cfg settings.TelegramSettings, user User
 	lang = b.settings.Current().Lang(firstNonEmpty(result.Link.Locale, lang))
 	text := say(lang, msgBound, maskEmail(result.Link.Email))
 	if result.BonusMinor > 0 {
-		text += say(lang, msgBoundBonus, yuan(result.BonusMinor), yuan(result.BalanceMinor))
+		text += say(lang, msgBoundBonus, b.money(result.BonusMinor), b.money(result.BalanceMinor))
 	}
 	return text + "\n\n" + b.help(cfg, lang)
 }
@@ -505,13 +508,13 @@ func (b *Bot) checkin(ctx context.Context, cfg settings.TelegramSettings, user U
 	case result.Exhausted:
 		return say(lang, msgCheckinExhausted)
 	}
-	return say(lang, msgCheckinDone, mention(user), yuan(result.AmountMinor), yuan(result.BalanceMinor), result.Streak)
+	return say(lang, msgCheckinDone, mention(user), b.money(result.AmountMinor), b.money(result.BalanceMinor), result.Streak)
 }
 
 // InviteLink is the account's own invite link to the group, made on
 // first use.
 func (b *Bot) InviteLink(ctx context.Context, accountID string) (string, error) {
-	cfg := b.settings.Current().Telegram
+	cfg := b.settings.Current().TelegramLedger()
 	if !cfg.Ready() || cfg.InviteRewardMinor <= 0 {
 		return "", ErrNotReady
 	}
@@ -559,7 +562,7 @@ func (b *Bot) invite(ctx context.Context, client API, cfg settings.TelegramSetti
 	if cfg.InviteHoldHours > 0 {
 		conditions += say(lang, msgInviteHold, cfg.InviteHoldHours)
 	}
-	text := say(lang, msgInvite, html.EscapeString(url), conditions, yuan(cfg.InviteRewardMinor), stats.InvitesRewarded, stats.InvitesPending)
+	text := say(lang, msgInvite, html.EscapeString(url), conditions, b.money(cfg.InviteRewardMinor), stats.InvitesRewarded, stats.InvitesPending)
 	if cfg.InviteDailyCap > 0 {
 		text += say(lang, msgInviteCap, cfg.InviteDailyCap)
 	}
@@ -580,7 +583,7 @@ func (b *Bot) me(ctx context.Context, user User, lang string) string {
 	if stats.CheckedInToday {
 		today = say(lang, msgMeToday)
 	}
-	return say(lang, msgMe, maskEmail(link.Email), yuan(balance), stats.Checkins, today, stats.InvitesRewarded, stats.InvitesPending, yuan(stats.EarnedMinor))
+	return say(lang, msgMe, maskEmail(link.Email), b.money(balance), stats.Checkins, today, stats.InvitesRewarded, stats.InvitesPending, b.money(stats.EarnedMinor))
 }
 
 // Check is what Telegram says about a bot and the group it is set up for.

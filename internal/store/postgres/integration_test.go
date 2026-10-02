@@ -367,17 +367,17 @@ func TestBillingLifecycleIntegration(t *testing.T) {
 	if added, queueErr := mailStore.EnqueueMail(ctx, "ops@example.com", "subject", "body", "dedup-1"); queueErr != nil || added {
 		t.Fatalf("duplicate enqueue: added=%v err=%v", added, queueErr)
 	}
-	queued, err := mailStore.ClaimMail(ctx, 10)
+	queued, err := mailStore.ClaimMail(ctx, ChannelMail, 10)
 	if err != nil || len(queued) != 1 || queued[0].Attempts != 1 {
 		t.Fatalf("claim: %+v err=%v", queued, err)
 	}
-	if again, againErr := mailStore.ClaimMail(ctx, 10); againErr != nil || len(again) != 0 {
+	if again, againErr := mailStore.ClaimMail(ctx, ChannelMail, 10); againErr != nil || len(again) != 0 {
 		t.Fatalf("leased mail queued twice: %+v err=%v", again, againErr)
 	}
 	if err = mailStore.FailMail(ctx, queued[0].ID, 1, 8, 0, "smtp down"); err != nil {
 		t.Fatal(err)
 	}
-	if retried, retryErr := mailStore.ClaimMail(ctx, 10); retryErr != nil || len(retried) != 1 || retried[0].Attempts != 2 {
+	if retried, retryErr := mailStore.ClaimMail(ctx, ChannelMail, 10); retryErr != nil || len(retried) != 1 || retried[0].Attempts != 2 {
 		t.Fatalf("retry claim: %+v err=%v", retried, retryErr)
 	}
 	if err = mailStore.CompleteMail(ctx, queued[0].ID); err != nil {

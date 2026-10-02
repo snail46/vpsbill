@@ -516,13 +516,16 @@ func (s *BillingStore) ListOrdersByAccount(ctx context.Context, accountID string
 }
 
 type Invoice struct {
-	ID           string     `json:"id"`
-	Number       string     `json:"number"`
-	AccountID    string     `json:"account_id"`
-	CustomerName string     `json:"customer_name"`
-	OrderID      *string    `json:"order_id"`
-	ServiceID    *string    `json:"service_id,omitempty"`
-	Kind         string     `json:"kind"`
+	ID           string  `json:"id"`
+	Number       string  `json:"number"`
+	AccountID    string  `json:"account_id"`
+	CustomerName string  `json:"customer_name"`
+	OrderID      *string `json:"order_id"`
+	ServiceID    *string `json:"service_id,omitempty"`
+	Kind         string  `json:"kind"`
+	// Gateway is true when the payment gateway takes this invoice;
+	// otherwise it is paid from the balance.
+	Gateway      bool       `json:"gateway"`
 	Status       string     `json:"status"`
 	Currency     string     `json:"currency"`
 	TotalMinor   int64      `json:"total_minor"`
@@ -539,7 +542,7 @@ type Invoice struct {
 func (s *BillingStore) ListInvoices(ctx context.Context, accountID string) ([]Invoice, error) {
 	rows, err := s.db.Query(ctx, `
 		SELECT i.id, i.number, i.account_id, a.display_name, i.order_id,i.service_id,i.kind, i.status, i.currency,
-		       i.total_minor, i.balance_minor, i.due_at, i.paid_at,i.period_start,i.period_end, i.created_at
+		       i.total_minor, i.balance_minor, i.due_at, i.paid_at,i.period_start,i.period_end, i.created_at,`+invoiceGatewaySQL+`
 		FROM invoices i JOIN accounts a ON a.id=i.account_id
 		WHERE ($1='' OR i.account_id::text=$1)
 		ORDER BY i.created_at DESC LIMIT 500
@@ -551,7 +554,7 @@ func (s *BillingStore) ListInvoices(ctx context.Context, accountID string) ([]In
 	invoices := make([]Invoice, 0)
 	for rows.Next() {
 		var invoice Invoice
-		if err := rows.Scan(&invoice.ID, &invoice.Number, &invoice.AccountID, &invoice.CustomerName, &invoice.OrderID, &invoice.ServiceID, &invoice.Kind, &invoice.Status, &invoice.Currency, &invoice.TotalMinor, &invoice.BalanceMinor, &invoice.DueAt, &invoice.PaidAt, &invoice.PeriodStart, &invoice.PeriodEnd, &invoice.CreatedAt); err != nil {
+		if err := rows.Scan(&invoice.ID, &invoice.Number, &invoice.AccountID, &invoice.CustomerName, &invoice.OrderID, &invoice.ServiceID, &invoice.Kind, &invoice.Status, &invoice.Currency, &invoice.TotalMinor, &invoice.BalanceMinor, &invoice.DueAt, &invoice.PaidAt, &invoice.PeriodStart, &invoice.PeriodEnd, &invoice.CreatedAt, &invoice.Gateway); err != nil {
 			return nil, err
 		}
 		invoices = append(invoices, invoice)
@@ -563,9 +566,9 @@ func (s *BillingStore) InvoiceByID(ctx context.Context, id string) (Invoice, err
 	var invoice Invoice
 	err := s.db.QueryRow(ctx, `
 		SELECT i.id, i.number, i.account_id, a.display_name, i.order_id,i.service_id,i.kind, i.status, i.currency,
-		       i.total_minor, i.balance_minor, i.due_at, i.paid_at,i.period_start,i.period_end, i.created_at
+		       i.total_minor, i.balance_minor, i.due_at, i.paid_at,i.period_start,i.period_end, i.created_at,`+invoiceGatewaySQL+`
 		FROM invoices i JOIN accounts a ON a.id=i.account_id WHERE i.id=$1
-	`, id).Scan(&invoice.ID, &invoice.Number, &invoice.AccountID, &invoice.CustomerName, &invoice.OrderID, &invoice.ServiceID, &invoice.Kind, &invoice.Status, &invoice.Currency, &invoice.TotalMinor, &invoice.BalanceMinor, &invoice.DueAt, &invoice.PaidAt, &invoice.PeriodStart, &invoice.PeriodEnd, &invoice.CreatedAt)
+	`, id).Scan(&invoice.ID, &invoice.Number, &invoice.AccountID, &invoice.CustomerName, &invoice.OrderID, &invoice.ServiceID, &invoice.Kind, &invoice.Status, &invoice.Currency, &invoice.TotalMinor, &invoice.BalanceMinor, &invoice.DueAt, &invoice.PaidAt, &invoice.PeriodStart, &invoice.PeriodEnd, &invoice.CreatedAt, &invoice.Gateway)
 	return invoice, err
 }
 

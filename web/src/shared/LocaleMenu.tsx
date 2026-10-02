@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Globe } from 'lucide-react'
 import { t, lang, setLang } from './i18n'
-import { chargedMoney, converted, displayCurrency, setDisplayCurrency, usdAvailable, usdRateText } from './currency'
+import { chargedMoney, converted, displayCurrency, setDisplayCurrency, shownCurrencies, usdRateText } from './currency'
 
 // LocaleMenu chooses the language and, in the portal, the currency amounts
 // are shown in. Either choice reloads the page.
@@ -9,7 +9,8 @@ export function LocaleMenu() {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
   const currency = displayCurrency()
-  const currencies = usdAvailable()
+  // The currency is a choice only when the site shows more than one.
+  const currencies = shownCurrencies().length > 1
 
   useEffect(() => {
     if (!open) return

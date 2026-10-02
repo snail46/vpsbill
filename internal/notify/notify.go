@@ -6,7 +6,9 @@ package notify
 
 import (
 	"context"
+	"html"
 	"log/slog"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -16,6 +18,7 @@ import (
 	"vpsbill/internal/security"
 	"vpsbill/internal/settings"
 	"vpsbill/internal/store/postgres"
+	"vpsbill/internal/telegram"
 )
 
 const (
@@ -32,20 +35,47 @@ type Notifier struct {
 	box      *security.SecretBox
 	logger   *slog.Logger
 	send     func(ctx context.Context, config mail.Config, to, subject, body string) error
-	now      func() time.Time
+	// sendTelegram delivers one message to a Telegram chat.
+	sendTelegram func(ctx context.Context, config settings.TelegramSettings, chatID int64, text string) error
+	now          func() time.Time
 }
 
 func New(store *postgres.MailStore, runtime *settings.Manager, box *security.SecretBox, logger *slog.Logger) *Notifier {
-	return &Notifier{store: store, settings: runtime, box: box, logger: logger, send: mail.Send, now: time.Now}
+	return &Notifier{store: store, settings: runtime, box: box, logger: logger, send: mail.Send, sendTelegram: sendTelegram, now: time.Now}
 }
 
-// enabled reports whether mail can be sent at all; without SMTP nothing is
-// queued, so enabling it later does not flush a backlog of stale reminders.
-func (n *Notifier) enabled() bool { return n.settings.Current().SMTP.Configured() }
+// enabled reports whether anything can be sent at all; without SMTP or a
+// Telegram bot nothing is queued, so enabling one later does not flush a
+// backlog of stale reminders.
+func (n *Notifier) enabled() bool {
+	current := n.settings.Current()
+	return current.SMTP.Configured() || current.Telegram.Ready()
+}
 
+// enqueue queues a notice for the user with this address, through the
+// channels they chose: mail, their linked Telegram account, or both. Mail
+// is the fallback while Telegram cannot be used.
 func (n *Notifier) enqueue(ctx context.Context, to, subject, body, dedupKey string) {
-	if _, err := n.store.EnqueueMail(ctx, to, subject, body, dedupKey); err != nil {
-		n.logger.Error("queue notification mail", "to", to, "error", err)
+	current := n.settings.Current()
+	target, err := n.store.NotifyTarget(ctx, to)
+	if err != nil {
+		n.logger.Error("read notification channels", "to", to, "error", err)
+		target = postgres.NotifyTarget{Email: true}
+	}
+	viaTelegram := target.Telegram && target.TelegramID != 0 && current.Telegram.Ready()
+	if viaTelegram {
+		key := dedupKey
+		if key != "" {
+			key += ":telegram"
+		}
+		if _, err := n.store.EnqueueTelegram(ctx, target.TelegramID, subject, body, key); err != nil {
+			n.logger.Error("queue telegram notification", "to", to, "error", err)
+		}
+	}
+	if (target.Email || !viaTelegram) && current.SMTP.Configured() {
+		if _, err := n.store.EnqueueMail(ctx, to, subject, body, dedupKey); err != nil {
+			n.logger.Error("queue notification mail", "to", to, "error", err)
+		}
 	}
 }
 
@@ -119,31 +149,69 @@ func (n *Notifier) RunSender(ctx context.Context) {
 }
 
 func (n *Notifier) sendDue(ctx context.Context) {
-	config := n.settings.Current().SMTP
-	if !config.Configured() {
-		return
+	current := n.settings.Current()
+	if config := current.SMTP; config.Configured() {
+		n.deliver(ctx, postgres.ChannelMail, func(ctx context.Context, item postgres.QueuedMail) error {
+			return n.send(ctx, config, item.Recipient, item.Subject, item.Body)
+		})
 	}
-	batch, err := n.store.ClaimMail(ctx, sendBatch)
+	if config := current.Telegram; config.Ready() {
+		n.deliver(ctx, postgres.ChannelTelegram, func(ctx context.Context, item postgres.QueuedMail) error {
+			chatID, err := strconv.ParseInt(item.Recipient, 10, 64)
+			if err != nil {
+				return finalError{err}
+			}
+			err = n.sendTelegram(ctx, config, chatID, telegramText(item.Subject, item.Body))
+			if telegram.Forbidden(err) {
+				// The user blocked the bot; trying again will not help.
+				return finalError{err}
+			}
+			return err
+		})
+	}
+}
+
+// finalError marks a failure that a retry cannot fix.
+type finalError struct{ error }
+
+// deliver sends the due messages of one channel.
+func (n *Notifier) deliver(ctx context.Context, channel string, send func(context.Context, postgres.QueuedMail) error) {
+	batch, err := n.store.ClaimMail(ctx, channel, sendBatch)
 	if err != nil {
-		n.logger.Error("claim notification mail", "error", err)
+		n.logger.Error("claim notifications", "channel", channel, "error", err)
 		return
 	}
 	for _, item := range batch {
 		sendCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
-		err := n.send(sendCtx, config, item.Recipient, item.Subject, item.Body)
+		err := send(sendCtx, item)
 		cancel()
 		if err == nil {
 			if err := n.store.CompleteMail(ctx, item.ID); err != nil {
-				n.logger.Error("complete notification mail", "id", item.ID, "error", err)
+				n.logger.Error("complete notification", "id", item.ID, "error", err)
 			}
 			continue
 		}
-		n.logger.Warn("send notification mail", "id", item.ID, "to", item.Recipient, "attempt", item.Attempts, "error", err)
+		n.logger.Warn("send notification", "channel", channel, "id", item.ID, "to", item.Recipient, "attempt", item.Attempts, "error", err)
+		attempts := item.Attempts
+		if _, final := err.(finalError); final {
+			attempts = maxAttempts
+		}
 		retry := time.Duration(1<<min(item.Attempts, 8)) * time.Minute
-		if err := n.store.FailMail(ctx, item.ID, item.Attempts, maxAttempts, retry, err.Error()); err != nil {
-			n.logger.Error("reschedule notification mail", "id", item.ID, "error", err)
+		if err := n.store.FailMail(ctx, item.ID, attempts, maxAttempts, retry, err.Error()); err != nil {
+			n.logger.Error("reschedule notification", "id", item.ID, "error", err)
 		}
 	}
+}
+
+// telegramText is a notice as a Telegram message: the subject in bold over
+// the text, cut to what one message holds.
+func telegramText(subject, body string) string {
+	return "<b>" + html.EscapeString(subject) + "</b>\n\n" + html.EscapeString(excerpt(body, 3200))
+}
+
+func sendTelegram(ctx context.Context, config settings.TelegramSettings, chatID int64, text string) error {
+	_, err := telegram.NewClient(config.APIBase, config.BotToken).SendMessage(ctx, chatID, text, 0)
+	return err
 }
 
 // excerpt shortens message text for a notification body.

@@ -33,7 +33,9 @@ type telegramSettingsView struct {
 }
 
 func (a *telegramAPI) view(ctx context.Context) telegramSettingsView {
-	current := a.settings.Current().Telegram
+	runtime := a.settings.Current()
+	// Staff read and write the amounts in the site's default currency.
+	current := runtime.Telegram.In(runtime.Locale, runtime.Locale.Currency())
 	view := telegramSettingsView{TelegramSettings: current, BotTokenConfigured: current.BotToken != "", Status: a.bot.Status()}
 	view.BotToken = ""
 	view.Stats, _ = a.store.SiteStats(ctx, time.Now())
@@ -108,7 +110,7 @@ func (a *telegramAPI) adminUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	current := a.settings.Current().Telegram
 	next := settings.TelegramSettings{
-		Enabled: input.Enabled, BotToken: input.BotToken, APIBase: input.APIBase, ChatURL: strings.TrimSpace(input.ChatURL),
+		Enabled: input.Enabled, Currency: a.settings.Current().Locale.Currency(), BotToken: input.BotToken, APIBase: input.APIBase, ChatURL: strings.TrimSpace(input.ChatURL),
 		BotUsername: current.BotUsername, ChatID: current.ChatID, ChatTitle: current.ChatTitle,
 		BindRewardMinor: input.BindRewardMinor, CheckinMinMinor: input.CheckinMinMinor, CheckinMaxMinor: input.CheckinMaxMinor,
 		InviteRewardMinor: input.InviteRewardMinor, InviteHoldHours: input.InviteHoldHours, InviteRequireLink: input.InviteRequireLink,
@@ -143,7 +145,7 @@ func (a *telegramAPI) adminUpdate(w http.ResponseWriter, r *http.Request) {
 // customer linked an account, what the rewards are and what they earned.
 func (a *telegramAPI) customerTelegram(w http.ResponseWriter, r *http.Request) {
 	identity := customerPrincipalFromContext(r.Context())
-	cfg := a.settings.Current().Telegram
+	cfg := a.settings.Current().TelegramLedger()
 	data := map[string]any{
 		"enabled":        cfg.Ready(),
 		"email_verified": identity.EmailVerified,
@@ -177,6 +179,47 @@ func (a *telegramAPI) customerTelegram(w http.ResponseWriter, r *http.Request) {
 	}
 	data["stats"] = stats
 	writeJSON(w, http.StatusOK, map[string]any{"data": data})
+}
+
+// customerNotifications says where the customer's notices go and which
+// channels can be chosen.
+func (a *telegramAPI) customerNotifications(w http.ResponseWriter, r *http.Request) {
+	a.writeNotifications(w, r)
+}
+
+func (a *telegramAPI) writeNotifications(w http.ResponseWriter, r *http.Request) {
+	identity := customerPrincipalFromContext(r.Context())
+	channels, err := a.store.NotifyChannels(r.Context(), identity.UserID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "internal_error"})
+		return
+	}
+	_, linkErr := a.store.LinkByUser(r.Context(), identity.UserID)
+	current := a.settings.Current()
+	writeJSON(w, http.StatusOK, map[string]any{"data": map[string]any{
+		"email": channels.Email, "telegram": channels.Telegram,
+		"telegram_linked": linkErr == nil, "telegram_enabled": current.Telegram.Ready(), "mail_enabled": current.SMTP.Configured(),
+	}})
+}
+
+// customerSetNotifications stores the customer's channels: mail, Telegram
+// or both, never neither.
+func (a *telegramAPI) customerSetNotifications(w http.ResponseWriter, r *http.Request) {
+	var input postgres.NotifyChannels
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	err := a.store.SetNotifyChannels(r.Context(), customerPrincipalFromContext(r.Context()).UserID, input)
+	switch {
+	case errors.Is(err, postgres.ErrNotifyChannels):
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "validation_error", "message": "邮件和 Telegram 至少要选一种通知方式"})
+	case errors.Is(err, postgres.ErrTelegramNotLinked):
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "not_linked", "message": "请先绑定 Telegram，再选择用 Telegram 接收通知"})
+	case err != nil:
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "internal_error"})
+	default:
+		a.writeNotifications(w, r)
+	}
 }
 
 // customerBind makes a link that opens the bot and ties the Telegram

@@ -365,7 +365,7 @@ func (a *authenticator) require(permission string, next http.Handler) http.Handl
 			return
 		}
 		if permission != "" && !hasPermission(identity.Permissions, permission) {
-			writeJSON(w, http.StatusForbidden, map[string]any{"error": "permission_denied"})
+			writeJSON(w, http.StatusForbidden, map[string]any{"error": "permission_denied", "message": "当前角色没有这项操作的权限"})
 			return
 		}
 		if r.Method != http.MethodGet && r.Method != http.MethodHead && r.Method != http.MethodOptions {

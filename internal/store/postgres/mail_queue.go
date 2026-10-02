@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"errors"
+	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -29,30 +30,68 @@ type QueuedMail struct {
 // verified them are skipped, so a sign-up with someone else's address
 // cannot make the platform mail them.
 func (s *MailStore) EnqueueMail(ctx context.Context, recipient, subject, body, dedupKey string) (bool, error) {
+	return s.enqueue(ctx, ChannelMail, recipient, subject, body, dedupKey)
+}
+
+// The channels a queued message goes out through. A Telegram message's
+// recipient is the chat id.
+const (
+	ChannelMail     = "mail"
+	ChannelTelegram = "telegram"
+)
+
+// EnqueueTelegram queues a message for a Telegram chat.
+func (s *MailStore) EnqueueTelegram(ctx context.Context, chatID int64, subject, body, dedupKey string) (bool, error) {
+	return s.enqueue(ctx, ChannelTelegram, strconv.FormatInt(chatID, 10), subject, body, dedupKey)
+}
+
+func (s *MailStore) enqueue(ctx context.Context, channel, recipient, subject, body, dedupKey string) (bool, error) {
 	command, err := s.db.Exec(ctx, `
-		INSERT INTO mail_queue(recipient,subject,body,dedup_key)
-		SELECT $1,$2,$3,nullif($4,'')
-		WHERE NOT EXISTS(SELECT 1 FROM users u WHERE lower(u.email)=lower($1) AND u.email_verified_at IS NULL)
+		INSERT INTO mail_queue(channel,recipient,subject,body,dedup_key)
+		SELECT $5,$1,$2,$3,nullif($4,'')
+		WHERE $5<>'mail' OR NOT EXISTS(SELECT 1 FROM users u WHERE lower(u.email)=lower($1) AND u.email_verified_at IS NULL)
 		ON CONFLICT (dedup_key) DO NOTHING
-	`, recipient, subject, body, dedupKey)
+	`, recipient, subject, body, dedupKey, channel)
 	if err != nil {
 		return false, err
 	}
 	return command.RowsAffected() == 1, nil
 }
 
+// NotifyTarget is how the user with an address wants to be told things.
+type NotifyTarget struct {
+	Email    bool
+	Telegram bool
+	// TelegramID is the linked Telegram account, 0 without one.
+	TelegramID int64
+}
+
+// NotifyTarget reads a user's channels; an address that is no user's gets
+// mail.
+func (s *MailStore) NotifyTarget(ctx context.Context, email string) (NotifyTarget, error) {
+	target := NotifyTarget{Email: true}
+	err := s.db.QueryRow(ctx, `
+		SELECT u.notify_email,u.notify_telegram,coalesce(l.telegram_id,0)
+		FROM users u LEFT JOIN telegram_links l ON l.user_id=u.id WHERE lower(u.email)=lower($1)
+	`, email).Scan(&target.Email, &target.Telegram, &target.TelegramID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return NotifyTarget{Email: true}, nil
+	}
+	return target, err
+}
+
 // ClaimMail leases due messages; a lease that runs out (crashed sender) makes
 // the message due again.
-func (s *MailStore) ClaimMail(ctx context.Context, limit int) ([]QueuedMail, error) {
+func (s *MailStore) ClaimMail(ctx context.Context, channel string, limit int) ([]QueuedMail, error) {
 	rows, err := s.db.Query(ctx, `
 		UPDATE mail_queue SET status='sending', attempts=attempts+1, locked_until=now()+interval '2 minutes'
 		WHERE id IN (
 			SELECT id FROM mail_queue
-			WHERE (status='pending' AND next_attempt_at<=now()) OR (status='sending' AND locked_until<now())
+			WHERE channel=$2 AND ((status='pending' AND next_attempt_at<=now()) OR (status='sending' AND locked_until<now()))
 			ORDER BY created_at LIMIT $1 FOR UPDATE SKIP LOCKED
 		)
 		RETURNING id,recipient,subject,body,attempts
-	`, limit)
+	`, limit, channel)
 	if err != nil {
 		return nil, err
 	}
