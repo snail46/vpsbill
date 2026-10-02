@@ -9,6 +9,7 @@ import { diskIOText } from '../shared/diskio'
 import { confirmDialog } from '../shared/dialog'
 import { placementText, PlanForm, PlanSeed } from './PlanForm'
 import { PlanBatchEdit } from './PlanBatchEdit'
+import { toast } from '../shared/toast'
 
 type FormState = { mode: 'single' | 'batch'; plan: PlanRecord | null; seed: PlanSeed | null; key: number }
 
@@ -78,7 +79,9 @@ export function PlansView() {
         body: JSON.stringify({ enabled: !plan.enabled }),
       })
       load()
+      toast('success', plan.enabled ? `套餐 ${plan.name} 已停售` : `套餐 ${plan.name} 已上架`)
     } catch (err) {
+      toast('error', '更新套餐状态失败', err instanceof Error ? err.message : undefined)
       setError(err instanceof Error ? err.message : '更新状态失败')
     }
   }
@@ -94,7 +97,9 @@ export function PlansView() {
     try {
       await api(`/api/v1/admin/plan-categories/${category.id}`, { method: 'DELETE' })
       await Promise.all([loadCategories(), load()])
+      toast('success', `分类「${category.name}」已删除`)
     } catch (err) {
+      toast('error', '删除分类失败', err instanceof Error ? err.message : undefined)
       setError(err instanceof Error ? err.message : '删除分类失败')
     }
   }

@@ -4,6 +4,7 @@ import { api, type ChatHistoryRecord, type ChatMessageRecord, type ChatMuteRecor
 import { ReportDialog } from './Reports'
 import { formatTime } from './shared/time'
 import { promptDialog } from './shared/dialog'
+import { toast } from './shared/toast'
 
 const roleLabels: Record<string, string> = { host: '机主', buyer: '用户', staff: '平台', system: '系统' }
 
@@ -32,14 +33,16 @@ export default function ChatRoom({ base, nodeID, title, staff = false }: { base:
       defaultValue: '24',
       confirmText: '禁言',
       danger: true,
-      validate: value => (/^d+$/.test(value.trim()) && Number(value) >= 1 && Number(value) <= 8760 ? '' : '请输入 1 到 8760 之间的整数小时'),
+      validate: value => (/^\d+$/.test(value.trim()) && Number(value) >= 1 && Number(value) <= 8760 ? '' : '请输入 1 到 8760 之间的整数小时'),
     })
     if (answer === null) return
     const hours = Number(answer)
     try {
       await api(`${base}/${nodeID}/mutes`, { method: 'POST', body: JSON.stringify({ account_id: message.author_account_id, hours, reason: '聊天室违规' }) })
       loadMutes()
+      toast('success', `已禁言 ${message.author_name}`)
     } catch (err) {
+      toast('error', '禁言失败', err instanceof Error ? err.message : undefined)
       setError(err instanceof Error ? err.message : '禁言失败')
     }
   }
@@ -47,7 +50,9 @@ export default function ChatRoom({ base, nodeID, title, staff = false }: { base:
     try {
       await api(`${base}/${nodeID}/mutes/${accountID}`, { method: 'DELETE' })
       loadMutes()
+      toast('success', '已解除禁言')
     } catch (err) {
+      toast('error', '解除禁言失败', err instanceof Error ? err.message : undefined)
       setError(err instanceof Error ? err.message : '操作失败')
     }
   }

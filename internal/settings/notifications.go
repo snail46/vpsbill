@@ -12,21 +12,24 @@ import (
 type MailNotifications struct {
 	// AdminEmails receives merchant notices; empty means every active staff
 	// member's login address.
-	AdminEmails            string `json:"admin_emails"`
-	CustomerExpiry         bool   `json:"customer_expiry"`
-	CustomerTraffic        bool   `json:"customer_traffic"`
-	CustomerTicketReply    bool   `json:"customer_ticket_reply"`
-	AdminNodeExpiry        bool   `json:"admin_node_expiry"`
-	AdminNodeTraffic       bool   `json:"admin_node_traffic"`
-	AdminTicket            bool   `json:"admin_ticket"`
-	ExpiryReminderDays     int    `json:"expiry_reminder_days"`
-	NodeExpiryReminderDays int    `json:"node_expiry_reminder_days"`
-	TrafficAlertPercent    int    `json:"traffic_alert_percent"`
+	AdminEmails         string `json:"admin_emails"`
+	CustomerExpiry      bool   `json:"customer_expiry"`
+	CustomerTraffic     bool   `json:"customer_traffic"`
+	CustomerTicketReply bool   `json:"customer_ticket_reply"`
+	// CustomerTrade covers trading market sales and listings closed by
+	// expiry, staff or the system.
+	CustomerTrade          bool `json:"customer_trade"`
+	AdminNodeExpiry        bool `json:"admin_node_expiry"`
+	AdminNodeTraffic       bool `json:"admin_node_traffic"`
+	AdminTicket            bool `json:"admin_ticket"`
+	ExpiryReminderDays     int  `json:"expiry_reminder_days"`
+	NodeExpiryReminderDays int  `json:"node_expiry_reminder_days"`
+	TrafficAlertPercent    int  `json:"traffic_alert_percent"`
 }
 
 func DefaultMailNotifications() MailNotifications {
 	return MailNotifications{
-		CustomerExpiry: true, CustomerTraffic: true, CustomerTicketReply: true,
+		CustomerExpiry: true, CustomerTraffic: true, CustomerTicketReply: true, CustomerTrade: true,
 		AdminNodeExpiry: true, AdminNodeTraffic: true, AdminTicket: true,
 		ExpiryReminderDays: 3, NodeExpiryReminderDays: 7, TrafficAlertPercent: 80,
 	}

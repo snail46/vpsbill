@@ -5,6 +5,7 @@ import { ticketRequestBody, useAttachmentLimit } from '../TicketAttachments'
 import { ticketStatusLabel, TicketConversation } from '../shared/ui'
 import { formatTime } from '../shared/time'
 import { useUrlFilters } from './filters'
+import { toast } from '../shared/toast'
 
 export function AdminSupport() {
   const [tickets, setTickets] = useState<TicketRecord[]>(() => cached<TicketRecord[]>('/api/v1/admin/tickets') ?? [])
@@ -59,7 +60,9 @@ export function AdminSupport() {
       })
       await open(detail.ticket.id)
       load()
+      toast('success', '工单状态已更新')
     } catch (err) {
+      toast('error', '更新工单状态失败', err instanceof Error ? err.message : undefined)
       setError(err instanceof Error ? err.message : '更新失败')
     }
   }

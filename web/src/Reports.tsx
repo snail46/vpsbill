@@ -127,7 +127,7 @@ export function AdminReports() {
       defaultValue: '24',
       confirmText: '禁言',
       danger: true,
-      validate: value => (/^d+$/.test(value.trim()) && Number(value) >= 1 && Number(value) <= 8760 ? '' : '请输入 1 到 8760 之间的整数小时'),
+      validate: value => (/^\d+$/.test(value.trim()) && Number(value) >= 1 && Number(value) <= 8760 ? '' : '请输入 1 到 8760 之间的整数小时'),
     })
     if (answer === null) return
     const hours = Number(answer)

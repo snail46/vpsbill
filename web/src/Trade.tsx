@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react'
-import { AlertTriangle, ArrowLeftRight, RefreshCw, Tag, X } from 'lucide-react'
+import { AlertTriangle, ArrowLeftRight, RefreshCw, Tag, Upload, X } from 'lucide-react'
 import { api, cached, type CustomerServiceRecord, type TradeListingRecord, type TradeRecord, type WalletRecord } from './api'
 import { walletMoney } from './Wallet'
 import { formatDate, formatTime } from './shared/time'
@@ -7,6 +7,8 @@ import { cycleName } from './shared/cycles'
 import { siteMeta } from './shared/boot'
 import { promptDialog } from './shared/dialog'
 import { bandwidthLabel } from './shared/ui'
+import { toast } from './shared/toast'
+import { navigatePortal } from './shared/nav'
 
 const statusNames: Record<TradeListingRecord['status'], string> = { listed: '挂售中', sold: '已售出', cancelled: '已下架' }
 
@@ -99,7 +101,7 @@ function ListingSpecs({ listing }: { listing: TradeListingRecord }) {
 
 export default function TradeMarket() {
   const [data, setData] = useState<TradeRecord | null>(() => cached<TradeRecord>('/api/v1/customer/trade') ?? null)
-  const [tab, setTab] = useState<'market' | 'mine'>('market')
+  const [tab, setTab] = useState<'market' | 'records'>('market')
   const [buying, setBuying] = useState<TradeListingRecord | null>(null)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
@@ -130,8 +132,8 @@ export default function TradeMarket() {
           <p className="eyebrow">TRADING MARKET</p>
           <h2>交易市场</h2>
           <p>
-            用户之间转让实例，用账户余额成交。持有满 {data?.hold_days ?? tradeHoldDays()} 天的实例可以在「我的 VPS」挂售；挂售期间实例停机、卖家不能使用，到期时间照常计算，
-            距到期不足 {data?.min_remaining_days ?? 3} 天自动下架。平台收取成交价 {data?.fee_percent ?? 20}% 的手续费，由卖家承担。
+            用户之间转让实例，用账户余额成交。持有满 {data?.hold_days ?? tradeHoldDays()} 天、距到期至少 {data?.min_remaining_days ?? 3} 天的实例可以在「我的 VPS」点「Push 挂售」上架；
+            挂售期间实例停机、卖家不能使用，到期时间照常计算。到期仍未售出会自动下架并暂停，3 天内续费可恢复，否则系统回收。平台收取成交价 {data?.fee_percent ?? 20}% 的手续费，由卖家承担。
           </p>
         </div>
         <button className="secondary-button" onClick={() => void load()}>
@@ -145,8 +147,8 @@ export default function TradeMarket() {
         <button role="tab" aria-selected={tab === 'market'} className={tab === 'market' ? 'active' : ''} onClick={() => setTab('market')}>
           <ArrowLeftRight size={15} />在售实例
         </button>
-        <button role="tab" aria-selected={tab === 'mine'} className={tab === 'mine' ? 'active' : ''} onClick={() => setTab('mine')}>
-          <Tag size={15} />我的挂售
+        <button role="tab" aria-selected={tab === 'records'} className={tab === 'records' ? 'active' : ''} onClick={() => setTab('records')}>
+          <Tag size={15} />挂售记录
         </button>
       </div>
       {tab === 'market' && (
@@ -170,55 +172,7 @@ export default function TradeMarket() {
           {data && !data.listings.length && <div className="empty-card">暂时没有在售的实例。</div>}
         </div>
       )}
-      {tab === 'mine' && (
-        <div className="panel">
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>实例</th>
-                  <th>价格</th>
-                  <th>状态</th>
-                  <th>挂售时间</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {data?.mine.map(listing => (
-                  <tr key={listing.id}>
-                    <td>
-                      <strong>{listing.instance_name}</strong>
-                      <small className="block">{listing.plan_name} · {listing.region_name}</small>
-                    </td>
-                    <td>
-                      {walletMoney(listing.price_minor, listing.currency)}
-                      {listing.seller_proceeds_minor != null && (
-                        <small className="block">到账 {walletMoney(listing.seller_proceeds_minor, listing.currency)}（手续费 {walletMoney(listing.fee_minor || 0, listing.currency)}）</small>
-                      )}
-                    </td>
-                    <td>
-                      <span className={listing.status === 'sold' ? 'tag success' : 'tag'}>{statusNames[listing.status]}</span>
-                      {listing.status === 'listed' && !listing.available && <small className="block">实例不是正常运行状态，买家看不到</small>}
-                      {listing.cancel_reason && <small className="block">{listing.cancel_reason}</small>}
-                    </td>
-                    <td>{formatTime(listing.created_at)}</td>
-                    <td>
-                      {listing.status === 'listed' && (
-                        <button className="secondary-button compact" onClick={() => void cancel(listing)}>下架</button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-                {data && !data.mine.length && (
-                  <tr>
-                    <td colSpan={5} className="muted-text">还没有挂售过实例。在「我的 VPS」里点实例的「挂售」即可上架。</td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
+      {tab === 'records' && <TradeRecords data={data} onCancel={listing => void cancel(listing)} />}
       {buying && (
         <BuyListing
           listing={buying}
@@ -231,6 +185,76 @@ export default function TradeMarket() {
         />
       )}
     </section>
+  )
+}
+
+const closedByNames: Record<string, string> = { seller: '你已下架', staff: '管理员下架', system: '系统自动下架', expiry: '到期自动下架' }
+
+// TradeRecords is the account's history in the market: what it listed
+// (open, sold or closed, and by whom) and what it bought.
+function TradeRecords({ data, onCancel }: { data: TradeRecord | null; onCancel: (listing: TradeListingRecord) => void }) {
+  const rows = [
+    ...(data?.mine ?? []).map(listing => ({ listing, bought: false })),
+    ...(data?.purchases ?? []).map(listing => ({ listing, bought: true })),
+  ].sort((a, b) => {
+    const open = Number(b.listing.status === 'listed') - Number(a.listing.status === 'listed')
+    return open || new Date(b.listing.updated_at || b.listing.created_at).getTime() - new Date(a.listing.updated_at || a.listing.created_at).getTime()
+  })
+  return (
+    <div className="panel">
+      <div className="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>类型</th>
+              <th>实例</th>
+              <th>价格</th>
+              <th>状态</th>
+              <th>挂售时间</th>
+              <th>结束时间</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(({ listing, bought }) => (
+              <tr key={(bought ? 'b' : 's') + listing.id}>
+                <td><span className={bought ? 'tag info' : 'tag'}>{bought ? '买入' : '卖出'}</span></td>
+                <td>
+                  <strong>{listing.instance_name}</strong>
+                  <small className="block">{listing.plan_name} · {listing.region_name}</small>
+                </td>
+                <td>
+                  {walletMoney(listing.price_minor, listing.currency)}
+                  {!bought && listing.seller_proceeds_minor != null && (
+                    <small className="block">到账 {walletMoney(listing.seller_proceeds_minor, listing.currency)}（手续费 {walletMoney(listing.fee_minor || 0, listing.currency)}）</small>
+                  )}
+                </td>
+                <td>
+                  <span className={listing.status === 'sold' ? 'tag success' : listing.status === 'listed' ? 'tag info' : 'tag'}>
+                    {listing.status === 'sold' ? (bought ? '已买入' : '已售出') : listing.status === 'listed' ? '挂售中' : closedByNames[listing.cancelled_by || 'seller']}
+                  </span>
+                  {listing.status === 'listed' && !listing.available && <small className="block">实例不是正常运行状态，买家看不到</small>}
+                  {listing.status === 'cancelled' && listing.cancel_reason && <small className="block">{listing.cancel_reason}</small>}
+                  {bought && <small className="block">卖家 {listing.seller_name}</small>}
+                </td>
+                <td>{formatTime(listing.created_at)}</td>
+                <td>{listing.status === 'sold' && listing.sold_at ? formatTime(listing.sold_at) : listing.status === 'cancelled' && listing.updated_at ? formatTime(listing.updated_at) : '—'}</td>
+                <td>
+                  {listing.status === 'listed' && !bought && (
+                    <button className="secondary-button compact" onClick={() => onCancel(listing)}>下架</button>
+                  )}
+                </td>
+              </tr>
+            ))}
+            {data && !rows.length && (
+              <tr>
+                <td colSpan={7} className="muted-text">还没有交易记录。在「我的 VPS」点实例上的「Push 挂售」即可上架。</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
   )
 }
 
@@ -297,6 +321,61 @@ function BuyListing({ listing, onClose, onDone }: { listing: TradeListingRecord;
   )
 }
 
+// minRemainingDays is how much paid time an instance needs to be listed.
+const minRemainingDays = 3
+
+// pushBlocker says why an instance cannot be listed now, or '' when it can.
+export function pushBlocker(service: CustomerServiceRecord) {
+  if (service.listing_id) return '这台实例已经在交易市场挂售中'
+  if (service.status !== 'active') return '只有正常运行中的实例可以挂售'
+  const eligibleAt = tradeEligibleAt(service)
+  if (eligibleAt.getTime() > Date.now()) return `持有满 ${tradeHoldDays()} 天的实例才能挂售，${formatDate(eligibleAt)} 起可挂售`
+  if (!service.next_due_at || new Date(service.next_due_at).getTime() - Date.now() < minRemainingDays * 86400000) {
+    return `距到期不足 ${minRemainingDays} 天的实例不能挂售，请先续费`
+  }
+  if (service.desired_runtime_status) return '实例正在开关机，请稍后再挂售'
+  if (service.traffic_locked_month) return '实例因流量用尽已停止，下月恢复后才能挂售'
+  return ''
+}
+
+// PushButton lists an instance in the trading market in one step: it
+// opens the price form, or says why the instance cannot be listed yet.
+export function PushButton({ service, onDone, className = 'secondary-button compact' }: { service: CustomerServiceRecord; onDone: () => void; className?: string }) {
+  const [open, setOpen] = useState(false)
+  if (service.listing_id) {
+    return (
+      <a className={className} href="/portal/trade" onClick={event => { event.preventDefault(); navigatePortal('/portal/trade') }} title="查看挂售">
+        <Tag size={14} />挂售中 · {walletMoney(service.listing_price_minor || 0)}
+      </a>
+    )
+  }
+  const blocker = pushBlocker(service)
+  return (
+    <>
+      <button
+        type="button"
+        className={blocker ? `${className} push-blocked` : className}
+        title={blocker || '挂售到交易市场'}
+        aria-disabled={Boolean(blocker)}
+        onClick={() => (blocker ? toast('info', '暂时不能挂售', blocker) : setOpen(true))}
+      >
+        <Upload size={14} />Push 挂售
+      </button>
+      {open && (
+        <ListServiceDialog
+          service={service}
+          onClose={() => setOpen(false)}
+          onDone={() => {
+            setOpen(false)
+            toast('success', '已上架到交易市场', `${service.instance_name} 已挂售，挂售期间实例保持停机。`)
+            onDone()
+          }}
+        />
+      )}
+    </>
+  )
+}
+
 // ListServiceDialog puts one of the customer's instances up for sale.
 export function ListServiceDialog({ service, onClose, onDone }: { service: CustomerServiceRecord; onClose: () => void; onDone: () => void }) {
   const [busy, setBusy] = useState(false)
@@ -348,7 +427,7 @@ export function ListServiceDialog({ service, onClose, onDone }: { service: Custo
             <textarea name="note" maxLength={500} rows={3} placeholder="例如出售原因、用途限制" />
           </label>
           <p className="muted-text wide">
-            挂售后实例会立即停机，挂售期间你不能开机、登录、重装或修改；到期时间照常计算，不会因为挂售而延长，距到期不足 3 天会自动下架。
+            挂售后实例会立即停机，挂售期间你不能开机、登录、重装或修改；到期时间照常计算，不会因为挂售而延长。实例到期时仍未售出会自动下架并暂停，3 天内续费即可恢复，否则系统回收实例。
             买家看得到套餐配置、地域、到期时间、续费价格和上架时的本月流量，看不到 IP 和密码。成交后扣除 {feePercent ?? 20}% 平台手续费，余下的存入你的余额（不可提现）。可以随时下架，下架后自行开机。
           </p>
           <div className="form-actions wide">
@@ -387,7 +466,9 @@ export function AdminTradeListings() {
     try {
       await api(`/api/v1/admin/trade/listings/${listing.id}/cancel`, { method: 'POST', body: JSON.stringify({ reason }) })
       void load()
+      toast('success', '已强制下架')
     } catch (err) {
+      toast('error', '下架失败', err instanceof Error ? err.message : undefined)
       setError(err instanceof Error ? err.message : '下架失败')
     }
   }

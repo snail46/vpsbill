@@ -20,6 +20,7 @@ import { DiskIOFields, readDiskIO } from '../shared/diskio'
 import { confirmDialog, promptDialog } from '../shared/dialog'
 import { TagInput } from '../shared/tags'
 import { virtualizationLabel } from './Nodes'
+import { toast } from '../shared/toast'
 
 type Virtualization = PlanRecord['virtualization']
 
@@ -507,7 +508,9 @@ export function PlanForm({
       await api(`/api/v1/admin/plan-presets/${preset.id}`, { method: 'DELETE' })
       setPresetID('')
       onPresetsChanged()
+      toast('success', `模板「${preset.name}」已删除`)
     } catch (err) {
+      toast('error', '删除模板失败', err instanceof Error ? err.message : undefined)
       setError(err instanceof Error ? err.message : '删除模板失败')
     }
   }

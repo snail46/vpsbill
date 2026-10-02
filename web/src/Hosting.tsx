@@ -32,6 +32,7 @@ import { DiskIOFields, diskIOText, readDiskIO } from './shared/diskio'
 import { OvercommitDialog, SupplyDetails, overcommitText } from './Supply'
 import { ConnectSteps, PendingAgents } from './shared/agents'
 import { confirmDialog } from './shared/dialog'
+import { toast } from './shared/toast'
 
 type Tab = 'market' | 'mine' | 'coupons' | 'tickets' | 'chat'
 const tabs: [Tab, string, typeof Store][] = [
@@ -413,7 +414,9 @@ function MyNodes() {
     try {
       await api(`/api/v1/customer/hosting/agents/${agent.id}`, { method: 'DELETE' })
       void load()
+      toast('success', '已从待接入列表移除')
     } catch (err) {
+      toast('error', '移除失败', err instanceof Error ? err.message : undefined)
       setError(err instanceof Error ? err.message : '移除失败')
     }
   }

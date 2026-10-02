@@ -332,6 +332,39 @@ func tradeMarket(t *testing.T, ctx context.Context, db *pgxpool.Pool, serviceID,
 		t.Fatalf("seller listings: %+v", mine)
 	}
 
+	// A listing runs until the instance expires; then it closes and the
+	// instance is suspended for the renewal window before it is recycled.
+	if _, err := db.Exec(ctx, `UPDATE services SET acquired_at=now()-interval '32 days',desired_runtime_status=NULL WHERE id=$1`, serviceID); err != nil {
+		t.Fatal(err)
+	}
+	// The jobs queued by the earlier listing and sale ran long ago.
+	if _, err := db.Exec(ctx, `UPDATE provisioning_jobs SET status='succeeded' WHERE service_id=$1 AND status='pending'`, serviceID); err != nil {
+		t.Fatal(err)
+	}
+	expiring, err := trade.CreateListing(ctx, buyerID, sellerUser, serviceID, 3000, "", snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dueBefore := time.Now()
+	if _, err := db.Exec(ctx, `UPDATE services SET next_due_at=now()-interval '1 minute' WHERE id=$1`, serviceID); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := NewLifecycleStore(db).expireListings(ctx); err != nil || n != 1 {
+		t.Fatalf("expire listings: %d err=%v", n, err)
+	}
+	var listingStatus, closedBy, serviceStatus string
+	var recycleAt time.Time
+	if err := db.QueryRow(ctx, `SELECT l.status,l.cancelled_by,s.status,s.termination_scheduled_at FROM service_listings l JOIN services s ON s.id=l.service_id WHERE l.id=$1`, expiring).Scan(&listingStatus, &closedBy, &serviceStatus, &recycleAt); err != nil {
+		t.Fatal(err)
+	}
+	if listingStatus != "cancelled" || closedBy != "expiry" || serviceStatus != "suspended" || recycleAt.Before(dueBefore.Add(TradeRenewalWindow-time.Minute)) || recycleAt.After(time.Now().Add(TradeRenewalWindow+time.Minute)) {
+		t.Fatalf("after expiry listing=%s by=%s service=%s recycle=%v", listingStatus, closedBy, serviceStatus, recycleAt)
+	}
+	closed, err := NewMailStore(db).ClosedListings(ctx, time.Hour)
+	if err != nil || len(closed) != 1 || closed[0].ListingID != expiring || closed[0].ClosedBy != "expiry" || closed[0].TerminationAt == nil {
+		t.Fatalf("closed listings for mail: %+v err=%v", closed, err)
+	}
+
 	// Staff terminating a hosted instance refunds the unused days to the
 	// current holder instead of leaving the escrow stuck.
 	holderBefore := balanceOf(buyerID)

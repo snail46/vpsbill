@@ -3,6 +3,7 @@ import { Pin, Plus } from 'lucide-react'
 import { api, cached, AnnouncementRecord } from '../api'
 import { formatTime } from '../shared/time'
 import { confirmDialog } from '../shared/dialog'
+import { toast } from '../shared/toast'
 
 // AnnouncementsView lets staff publish notices on the customer overview.
 export function AnnouncementsView() {
@@ -43,7 +44,9 @@ export function AnnouncementsView() {
     try {
       await api(`/api/v1/admin/announcements/${item.id}`, { method: 'DELETE' })
       await load()
+      toast('success', '公告已删除')
     } catch (err) {
+      toast('error', '删除公告失败', err instanceof Error ? err.message : undefined)
       setError(err instanceof Error ? err.message : '删除失败')
     }
   }

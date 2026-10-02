@@ -6,6 +6,7 @@ import { formatDate, formatTime } from '../shared/time'
 import { osOptions } from '../shared/nav'
 import { DateRangeFilter, FilterBar, SearchFilter, SelectFilter, includesText, matchesAny, uniqueOptions, useCustomerOptions, useSection, useUrlFilters, withinDays, type Option } from './filters'
 import { confirmDialog } from '../shared/dialog'
+import { toast } from '../shared/toast'
 
 const orderStatuses: Option[] = ['pending_payment', 'paid', 'fulfilling', 'completed', 'cancelled', 'review'].map(status => [status, statusLabel(status)])
 const invoiceStatuses: Option[] = ['open', 'paid', 'void', 'refunded', 'uncollectible', 'draft'].map(status => [status, statusLabel(status)])
@@ -335,7 +336,9 @@ export function BillingView() {
     try {
       await api(`/api/v1/admin/invoices/${invoice.id}/pay`, { method: 'POST', body: JSON.stringify({ reference: '' }) })
       await load()
+      toast('success', `账单 ${invoice.number} 已确认入账`)
     } catch (err) {
+      toast('error', '确认入账失败', err instanceof Error ? err.message : undefined)
       setError(err instanceof Error ? err.message : '确认入账失败')
     } finally {
       setPaying('')

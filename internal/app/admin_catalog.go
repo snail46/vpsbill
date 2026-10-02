@@ -168,17 +168,25 @@ func (a *adminCatalog) testNode(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	started := time.Now()
 	info, err := driver.HostInfo(r.Context())
 	if err != nil {
 		_ = a.store.UpdateNodeHealth(r.Context(), id, "offline", map[string]any{})
-		writeJSON(w, http.StatusBadGateway, map[string]any{"error": "node_unreachable", "message": "节点无响应"})
+		writeJSON(w, http.StatusBadGateway, map[string]any{"error": "node_unreachable", "message": "节点无响应：" + err.Error()})
 		return
 	}
+	latency := time.Since(started)
 	if err := a.store.RecordNodeReport(r.Context(), id, info); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "internal_error"})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": info.Raw})
+	// The summary lets the page say what the test found; raw is the
+	// backend's own document, kept for diagnostics.
+	writeJSON(w, http.StatusOK, map[string]any{"data": map[string]any{
+		"latency_ms": latency.Milliseconds(),
+		"capacity":   info.Capacity,
+		"raw":        info.Raw,
+	}})
 }
 
 // openNode decrypts the node credential and opens its driver, writing the

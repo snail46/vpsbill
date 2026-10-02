@@ -279,6 +279,9 @@ func (m *MarketplaceStore) RefundService(ctx context.Context, accountID, service
 		}
 	}
 	reason := "买家申请退款"
+	if _, err := tx.Exec(ctx, `UPDATE service_listings SET status='cancelled',cancel_reason='实例已退款',cancelled_by='seller',updated_at=now() WHERE service_id=$1 AND status='listed'`, serviceID); err != nil {
+		return RefundResult{}, err
+	}
 	if _, err := tx.Exec(ctx, `UPDATE provisioning_jobs SET status='dead',locked_at=NULL,locked_by=NULL,last_error='cancelled by refund',updated_at=now() WHERE service_id=$1 AND status IN ('pending','failed')`, serviceID); err != nil {
 		return RefundResult{}, err
 	}

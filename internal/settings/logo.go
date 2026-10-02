@@ -35,9 +35,18 @@ func (r Runtime) LogoDark() string {
 	return r.LogoDarkURL
 }
 
-// LogoVariants are the logos a site has: "" for the light (default) theme
-// and "dark".
-var LogoVariants = []string{"", "dark"}
+// Favicon is the browser tab icon, or "" when the tab shows the logo.
+func (r Runtime) Favicon() string {
+	if r.LogoFaviconVersion != "" {
+		return "/api/v1/site/logo?variant=favicon&v=" + r.LogoFaviconVersion
+	}
+	return r.LogoFaviconURL
+}
+
+// LogoVariants are the images a site has: "" for the light (default)
+// theme's logo, "dark" for the dark theme's and "favicon" for the browser
+// tab.
+var LogoVariants = []string{"", "dark", "favicon"}
 
 // logoColumns is the column prefix of a logo variant, or "" for an
 // unknown one.
@@ -47,6 +56,8 @@ func logoColumns(variant string) string {
 		return "logo_"
 	case "dark":
 		return "logo_dark_"
+	case "favicon":
+		return "logo_favicon_"
 	}
 	return ""
 }

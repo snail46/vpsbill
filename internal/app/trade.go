@@ -50,7 +50,12 @@ func (t *tradeAPI) market(w http.ResponseWriter, r *http.Request) {
 		writeTradeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": map[string]any{"listings": market, "mine": mine, "hold_days": t.settings.Current().Marketplace.TradeHoldDays,
+	purchases, err := t.store.Purchases(r.Context(), identity.AccountID)
+	if err != nil {
+		writeTradeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": map[string]any{"listings": market, "mine": mine, "purchases": purchases, "hold_days": t.settings.Current().Marketplace.TradeHoldDays,
 		"fee_percent": t.settings.Current().Marketplace.TradeFeePercent, "min_remaining_days": postgres.TradeMinRemainingDays}})
 }
 

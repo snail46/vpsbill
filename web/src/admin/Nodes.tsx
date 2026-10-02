@@ -9,6 +9,7 @@ const nodeStatuses: Option[] = [['online', '在线'], ['offline', '离线'], ['d
 import { formatTime } from '../shared/time'
 import { ConnectSteps, PendingAgents } from '../shared/agents'
 import { confirmDialog } from '../shared/dialog'
+import { toast } from '../shared/toast'
 
 type Enrollments = { install_command: string; agents: PendingAgentRecord[] }
 // FormTarget is what the node form opens for: a pending Hatch agent, a new
@@ -53,7 +54,9 @@ export function NodesView() {
     try {
       await api(`/api/v1/admin/nodes/${node.id}`, { method: 'DELETE' })
       await load()
+      toast('success', `节点 ${node.name} 已删除`)
     } catch (err) {
+      toast('error', '删除节点失败', err instanceof Error ? err.message : undefined)
       setError(err instanceof Error ? err.message : '删除失败')
     }
   }
@@ -63,18 +66,27 @@ export function NodesView() {
     try {
       await api(`/api/v1/admin/agent-enrollments/${agent.id}`, { method: 'DELETE' })
       void loadEnrollments()
+      toast('success', '已从待接入列表移除')
     } catch (err) {
+      toast('error', '移除失败', err instanceof Error ? err.message : undefined)
       setError(err instanceof Error ? err.message : '移除失败')
     }
   }
 
   async function testNode(id: string) {
+    const name = nodes.find(node => node.id === id)?.name ?? '节点'
     setTesting(id)
     setError('')
     try {
-      await api(`/api/v1/admin/nodes/${id}/test`, { method: 'POST' })
+      const result = await api<{ latency_ms: number; capacity?: { vcpu?: number; ram_mb?: number; disk_gb?: number } }>(`/api/v1/admin/nodes/${id}/test`, { method: 'POST' })
       await load()
+      const capacity = result.capacity
+      const parts: string[] = []
+      if (typeof result.latency_ms === 'number') parts.push(`耗时 ${result.latency_ms} 毫秒`)
+      if (capacity?.vcpu || capacity?.ram_mb) parts.push(`可分配 ${capacity.vcpu ?? 0} 核 / ${Math.round((capacity.ram_mb ?? 0) / 1024)} GB 内存 / ${capacity.disk_gb ?? 0} GB 磁盘`)
+      toast('success', `${name} 连通正常`, parts.join('，') || undefined)
     } catch (err) {
+      toast('error', `${name} 连接失败`, err instanceof Error ? err.message : undefined)
       setError(err instanceof Error ? err.message : '节点测试失败')
     } finally {
       setTesting('')

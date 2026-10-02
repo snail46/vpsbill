@@ -78,7 +78,7 @@ func (n *Notifier) ServiceRefunded(ctx context.Context, result postgres.RefundRe
 
 // TradeCompleted tells both sides of a trading market sale what happened.
 func (n *Notifier) TradeCompleted(ctx context.Context, result postgres.TradeResult) {
-	if !n.enabled() {
+	if !n.enabled() || !n.settings.Current().MailNotifications.CustomerTrade {
 		return
 	}
 	price := money(result.PriceMinor, result.Currency)
@@ -102,4 +102,56 @@ func clearanceSplit(item postgres.ClearedService, currency string) string {
 		return fmt.Sprintf("退还实例剩余价值 %s，另获机主赔付 %s", money(item.RemainingMinor, currency), money(item.PenaltyMinor, currency))
 	}
 	return fmt.Sprintf("退还实例剩余价值 %s", money(item.RemainingMinor, currency))
+}
+
+// closedListingWindow is how far back closed listings are looked at; mail
+// deduplication keeps each notice to one.
+const closedListingWindow = 10 * 24 * time.Hour
+
+// notifyClosedListings tells sellers about listings they did not close
+// themselves: expiry (with the renewal window, and later the recycling),
+// staff and the system.
+func (n *Notifier) notifyClosedListings(ctx context.Context) {
+	if !n.settings.Current().MailNotifications.CustomerTrade {
+		return
+	}
+	rows, err := n.store.ClosedListings(ctx, closedListingWindow)
+	if err != nil {
+		n.logger.Error("list closed trade listings", "error", err)
+		return
+	}
+	for _, row := range rows {
+		name := fmt.Sprintf("%s（%s）", row.InstanceName, row.PlanName)
+		switch row.ClosedBy {
+		case "expiry":
+			if row.ServiceStatus == "terminating" || row.ServiceStatus == "terminated" {
+				subject := fmt.Sprintf("[%s] 实例 %s 已被回收", n.siteName(), row.InstanceName)
+				body := fmt.Sprintf("您好，%s：\n\n你在交易市场挂售的实例 %s 到期后没有在缓冲期内续费，系统已回收该实例，实例和数据已删除。\n\n我的 VPS：%s\n",
+					row.CustomerName, name, n.link("/portal/services"))
+				n.enqueue(ctx, row.Email, subject, body, "trade-recycled:"+row.ListingID)
+				continue
+			}
+			deadline := "3 天内"
+			if row.TerminationAt != nil {
+				deadline = row.TerminationAt.In(n.location()).Format("2006-01-02 15:04") + " 前"
+			}
+			subject := fmt.Sprintf("[%s] 挂售的实例 %s 已到期下架", n.siteName(), row.InstanceName)
+			body := fmt.Sprintf("您好，%s：\n\n你在交易市场挂售的实例 %s 已到期，挂售已自动下架，实例已退回你的账户并暂停使用。\n\n请在 %s 支付续费账单，支付后实例自动恢复运行；逾期未续费，系统将回收实例并删除数据。\n\n前往支付：%s\n",
+				row.CustomerName, name, deadline, n.link("/portal/billing"))
+			n.enqueue(ctx, row.Email, subject, body, "trade-closed:"+row.ListingID)
+		default:
+			who := "系统"
+			if row.ClosedBy == "staff" {
+				who = "管理员"
+			}
+			reason := row.Reason
+			if reason == "" {
+				reason = "未说明"
+			}
+			subject := fmt.Sprintf("[%s] 挂售的实例 %s 已被下架", n.siteName(), row.InstanceName)
+			body := fmt.Sprintf("您好，%s：\n\n你在交易市场挂售的实例 %s（挂售价 %s）已被%s下架。原因：%s\n\n实例仍在你的账户中；挂售期间实例是停机的，需要使用请在「我的 VPS」开机，也可以重新挂售。\n\n交易市场：%s\n",
+				row.CustomerName, name, money(row.PriceMinor, row.Currency), who, reason, n.link("/portal/trade"))
+			n.enqueue(ctx, row.Email, subject, body, "trade-closed:"+row.ListingID)
+		}
+	}
 }

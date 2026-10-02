@@ -17,7 +17,7 @@ type LifecycleStore struct{ db *pgxpool.Pool }
 func NewLifecycleStore(db *pgxpool.Pool) *LifecycleStore { return &LifecycleStore{db: db} }
 
 type LifecycleResult struct {
-	RenewalInvoices, AutoRenewed, PricingReview, Overdue, LeaseEnded, Suspended, TerminationQueued, ExpiredOrders, ClosedListings int
+	RenewalInvoices, AutoRenewed, PricingReview, Overdue, LeaseEnded, Suspended, TerminationQueued, ExpiredOrders, ExpiredListings int
 }
 
 func (s *LifecycleStore) Run(ctx context.Context, lead, grace, retention time.Duration) (LifecycleResult, error) {
@@ -35,6 +35,12 @@ func (s *LifecycleStore) Run(ctx context.Context, lead, grace, retention time.Du
 	var err error
 	// Paying before overdue marking keeps auto-renewed instances active.
 	result.AutoRenewed, err = s.autoRenew(ctx)
+	if err != nil {
+		return result, err
+	}
+	// Listed instances that reached their due date leave the market before
+	// the overdue rules would keep them running through the grace period.
+	result.ExpiredListings, err = s.expireListings(ctx)
 	if err != nil {
 		return result, err
 	}
@@ -59,10 +65,6 @@ func (s *LifecycleStore) Run(ctx context.Context, lead, grace, retention time.Du
 		return result, err
 	}
 	result.ExpiredOrders, err = s.expireUnpaidOrders(ctx)
-	if err != nil {
-		return result, err
-	}
-	result.ClosedListings, err = s.closeExpiringListings(ctx)
 	return result, err
 }
 
@@ -132,19 +134,66 @@ func (s *LifecycleStore) autoRenew(ctx context.Context) (int, error) {
 	return paid, nil
 }
 
-// closeExpiringListings withdraws trading market listings whose instance
-// has less than TradeMinRemainingDays of paid time left. Listed time keeps
-// counting down, so parking an instance in the market saves nothing.
-func (s *LifecycleStore) closeExpiringListings(ctx context.Context) (int, error) {
-	command, err := s.db.Exec(ctx, `
-		UPDATE service_listings l SET status='cancelled',cancel_reason=$1,updated_at=now()
-		FROM services s WHERE s.id=l.service_id AND l.status='listed'
-		  AND (s.next_due_at IS NULL OR s.next_due_at < now() + make_interval(days => $2))
-	`, fmt.Sprintf("距到期不足 %d 天，已自动下架", TradeMinRemainingDays), TradeMinRemainingDays)
+// TradeRenewalWindow is how long an instance whose listing ran out stays
+// suspended for its owner to renew before it is recycled.
+const TradeRenewalWindow = 3 * 24 * time.Hour
+
+// expireListings closes trading market listings whose instance reached its
+// due date while listed. The instance goes back to its owner suspended
+// (stopped, not usable) for TradeRenewalWindow: paying the renewal invoice
+// in that time restores it, otherwise the lifecycle deletes it.
+func (s *LifecycleStore) expireListings(ctx context.Context) (int, error) {
+	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		return 0, err
 	}
-	return int(command.RowsAffected()), nil
+	defer func() { _ = tx.Rollback(ctx) }()
+	rows, err := tx.Query(ctx, `
+		SELECT l.id,s.id,s.node_id,s.runtime_status,s.next_due_at FROM service_listings l JOIN services s ON s.id=l.service_id
+		WHERE l.status='listed' AND s.next_due_at<=now() AND s.status IN ('active','overdue')
+		ORDER BY s.next_due_at FOR UPDATE OF l, s SKIP LOCKED LIMIT 100`)
+	if err != nil {
+		return 0, err
+	}
+	type row struct {
+		listing, service string
+		nodeID           *string
+		runtime          string
+		due              time.Time
+	}
+	items := []row{}
+	for rows.Next() {
+		var item row
+		if err := rows.Scan(&item.listing, &item.service, &item.nodeID, &item.runtime, &item.due); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		items = append(items, item)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	for _, item := range items {
+		scheduled := time.Now().UTC().Add(TradeRenewalWindow)
+		running := item.nodeID != nil && item.runtime != "stopped"
+		if _, err = tx.Exec(ctx, `UPDATE service_listings SET status='cancelled',cancel_reason='实例已到期，已自动下架',cancelled_by='expiry',updated_at=now() WHERE id=$1`, item.listing); err != nil {
+			return 0, err
+		}
+		if _, err = tx.Exec(ctx, `UPDATE services SET status='suspended',suspended_at=now(),grace_until=NULL,termination_scheduled_at=$2,desired_runtime_status=CASE WHEN $3::boolean THEN 'stopped' ELSE NULL END,updated_at=now() WHERE id=$1`, item.service, scheduled, running); err != nil {
+			return 0, err
+		}
+		// A stop queued by the listing itself may still be pending.
+		if running {
+			if _, err = tx.Exec(ctx, `INSERT INTO provisioning_jobs(service_id,action,deduplication_key,payload) VALUES($1,'stop',$2,jsonb_build_object('source','billing_lifecycle')) ON CONFLICT DO NOTHING`, item.service, item.service+":listing-expired-stop:"+item.listing); err != nil {
+				return 0, err
+			}
+		}
+		if _, err = tx.Exec(ctx, `INSERT INTO outbox_events(aggregate_type,aggregate_id,event_type,deduplication_key,payload) VALUES('service',$1,'trade.listing_expired',$2,jsonb_build_object('listing_id',$3::text,'termination_scheduled_at',$4::timestamptz)) ON CONFLICT(deduplication_key) DO NOTHING`, item.service, "trade:"+item.listing+":expired", item.listing, scheduled); err != nil {
+			return 0, err
+		}
+	}
+	return len(items), tx.Commit(ctx)
 }
 
 // expireUnpaidOrders voids new-order invoices an hour past their due date

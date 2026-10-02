@@ -34,7 +34,10 @@ func TestRuntimeLogoPrefersUpload(t *testing.T) {
 	if got := (Runtime{LogoVersion: "abc123"}).LogoDark(); got != "" {
 		t.Errorf("dark logo without its own image = %q, want the light one to be used", got)
 	}
-	if logoColumns("dark") != "logo_dark_" || logoColumns("") != "logo_" || logoColumns("x; DROP") != "" {
+	if got := (Runtime{LogoFaviconVersion: "ico1"}).Favicon(); got != "/api/v1/site/logo?variant=favicon&v=ico1" {
+		t.Errorf("uploaded favicon = %q", got)
+	}
+	if logoColumns("favicon") != "logo_favicon_" || logoColumns("dark") != "logo_dark_" || logoColumns("") != "logo_" || logoColumns("x; DROP") != "" {
 		t.Error("logo variant columns")
 	}
 	if got := (Runtime{}).Logo(); got != "" {

@@ -297,3 +297,51 @@ func (s *MailStore) TicketMailContext(ctx context.Context, ticketID string) (Tic
 	`, ticketID).Scan(&result.Number, &result.Subject, &result.Priority, &result.CustomerName, &result.RequesterEmail, &result.HostName, &result.HostEmail)
 	return result, err
 }
+
+// ClosedListing is a trading market listing closed by staff, the system or
+// its instance's expiry, for the seller's notice.
+type ClosedListing struct {
+	ListingID     string
+	ServiceID     string
+	InstanceName  string
+	PlanName      string
+	Reason        string
+	ClosedBy      string
+	ServiceStatus string
+	// TerminationAt is when an expired instance is recycled unless renewed.
+	TerminationAt *time.Time
+	PriceMinor    int64
+	Currency      string
+	Email         string
+	CustomerName  string
+}
+
+// ClosedListings lists listings closed by anyone but the seller within the
+// last window, with the seller's sign-in address.
+func (s *MailStore) ClosedListings(ctx context.Context, window time.Duration) ([]ClosedListing, error) {
+	rows, err := s.db.Query(ctx, `
+		SELECT DISTINCT ON (l.id) l.id,s.id,s.instance_name,p.name,coalesce(l.cancel_reason,''),l.cancelled_by,s.status,s.termination_scheduled_at,
+		       l.price_minor,l.currency,u.email,u.display_name
+		FROM service_listings l
+		JOIN services s ON s.id=l.service_id
+		JOIN plans p ON p.id=s.plan_id
+		JOIN memberships m ON m.account_id=l.seller_account_id
+		JOIN users u ON u.id=m.user_id AND u.status='active'
+		WHERE l.status='cancelled' AND l.cancelled_by<>'seller' AND l.updated_at>now()-make_interval(secs=>$1)
+		ORDER BY l.id, CASE m.role WHEN 'owner' THEN 0 ELSE 1 END, m.created_at
+	`, window.Seconds())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]ClosedListing, 0)
+	for rows.Next() {
+		var row ClosedListing
+		if err := rows.Scan(&row.ListingID, &row.ServiceID, &row.InstanceName, &row.PlanName, &row.Reason, &row.ClosedBy, &row.ServiceStatus, &row.TerminationAt,
+			&row.PriceMinor, &row.Currency, &row.Email, &row.CustomerName); err != nil {
+			return nil, err
+		}
+		result = append(result, row)
+	}
+	return result, rows.Err()
+}

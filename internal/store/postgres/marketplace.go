@@ -675,6 +675,9 @@ func (m *MarketplaceStore) ClearNode(ctx context.Context, nodeID string, multipl
 		if _, err := tx.Exec(ctx, `UPDATE inventory_reservations SET status='released',released_at=now() WHERE service_id=$1 AND status='reserved'`, item.ServiceID); err != nil {
 			return ClearanceResult{}, err
 		}
+		if _, err := tx.Exec(ctx, `UPDATE service_listings SET status='cancelled',cancel_reason='母机已清退',cancelled_by='system',updated_at=now() WHERE service_id=$1 AND status='listed'`, item.ServiceID); err != nil {
+			return ClearanceResult{}, err
+		}
 		if _, err := tx.Exec(ctx, `UPDATE invoices SET status='void',updated_at=now() WHERE service_id=$1 AND status='open'`, item.ServiceID); err != nil {
 			return ClearanceResult{}, err
 		}

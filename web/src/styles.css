@@ -4955,3 +4955,34 @@ input, select, textarea { min-height: 34px; padding: 6px 10px; font-size: 13px; 
 .logo-variant .logo-preview span { font-weight: 650; font-size: 14px; }
 .logo-variant .logo-preview em { margin-left: auto; font-style: normal; font-size: 11.5px; opacity: 0.6; }
 .logo-variant .form-actions { margin: 0; }
+/* Meter readings: the full "183 MB / 512 MB" in a smaller face, one line. */
+.runtime-meter { padding: 9px 10px; }
+.runtime-meter > div { gap: 6px; }
+.runtime-meter span { gap: 4px; font-size: 11.5px; }
+.runtime-meter strong { font-size: 11px; letter-spacing: -0.2px; }
+
+/* Logos at a readable size: a word mark (logo with the brand name) fills
+   the sidebar's width instead of the 30px of a plain icon. */
+@media (min-width: 901px) {
+  .sidebar .brand-wordmark { gap: 4px; padding: 2px 4px 12px; }
+  .sidebar .brand-wordmark-logo { height: 44px; max-width: 100%; }
+  .sidebar .brand-logo { height: 34px; min-width: 34px; }
+}
+@media (max-width: 640px) {
+  .sidebar .brand-wordmark-logo { height: 36px; max-width: 200px; }
+}
+.auth-brand.brand-wordmark .brand-wordmark-logo { height: 56px; max-width: 320px; }
+.auth-brand .brand-logo { height: 44px; min-width: 44px; max-width: 200px; }
+
+/* The tab icon slot previews a browser tab. */
+.logo-variant .favicon-preview { background: #dee1e6; border-color: #cbd5e1; color: #1f2937; padding: 10px 12px 0; align-items: flex-end; }
+.favicon-tab { display: inline-flex; align-items: center; gap: 8px; max-width: 220px; padding: 8px 14px; border-radius: 8px 8px 0 0; background: #ffffff; font-size: 12.5px; }
+.favicon-tab img { width: 16px; height: 16px; object-fit: contain; flex: none; }
+.logo-variant .favicon-tab span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; font-size: 12.5px; }
+.logo-variant .favicon-preview em { align-self: center; }
+
+/* Service tiles: the card links to the detail page, actions sit below. */
+.service-tile-link { display: flex; flex-direction: column; gap: 8px; color: inherit; text-decoration: none; }
+.service-tile-actions { display: flex; justify-content: flex-end; gap: 6px; padding-top: 8px; border-top: 1px solid var(--border-subtle); }
+.service-tile-actions .secondary-button, .service-refund .secondary-button { display: inline-flex; align-items: center; gap: 5px; text-decoration: none; }
+.push-blocked { opacity: 0.6; }

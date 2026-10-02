@@ -35,6 +35,7 @@ func (n *Notifier) Scan(ctx context.Context) {
 		return
 	}
 	n.remindExpiringServices(ctx)
+	n.notifyClosedListings(ctx)
 	n.remindNodes(ctx)
 	n.warnHeldNodes(ctx)
 }

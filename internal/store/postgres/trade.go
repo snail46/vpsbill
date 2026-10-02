@@ -91,7 +91,24 @@ type TradeListing struct {
 	ServiceCreatedAt time.Time  `json:"service_created_at"`
 	CreatedAt        time.Time  `json:"created_at"`
 	SoldAt           *time.Time `json:"sold_at,omitempty"`
+	// ClosedBy says who closed a cancelled listing: seller, staff, system
+	// or expiry; UpdatedAt is when the listing last changed.
+	ClosedBy  string    `json:"cancelled_by,omitempty"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
+
+// Who sees a listing decides what of it they see.
+type listingViewer int
+
+const (
+	// marketViewer browses the market: no instance name, masked seller.
+	marketViewer listingViewer = iota
+	// sellerViewer sees everything about their own listings.
+	sellerViewer
+	// buyerViewer bought the instance: it is theirs now, but the seller
+	// stays masked and the seller's proceeds private.
+	buyerViewer
+)
 
 // maskName keeps the first character of a display name.
 func maskName(name string) string {
@@ -110,11 +127,11 @@ const listingSelect = `
 	       least(coalesce((SELECT pp.amount_minor FROM plan_prices pp WHERE pp.plan_id=p.id AND pp.currency=l.currency AND pp.billing_cycle=s.billing_cycle
 	          AND pp.active_from<=now() AND (pp.active_until IS NULL OR pp.active_until>now()) ORDER BY pp.active_from DESC LIMIT 1),s.list_price_minor),s.renewal_price_minor),
 	       s.renewal_discount_type,s.renewal_discount_value,coalesce(n.status='online',false),
-	       coalesce(l.traffic_total_bytes,0),l.traffic_rx_bytes,l.traffic_tx_bytes,l.fee_minor,l.seller_proceeds_minor
+	       coalesce(l.traffic_total_bytes,0),l.traffic_rx_bytes,l.traffic_tx_bytes,l.fee_minor,l.seller_proceeds_minor,l.cancelled_by,l.updated_at
 	FROM service_listings l JOIN services s ON s.id=l.service_id JOIN plans p ON p.id=s.plan_id JOIN regions r ON r.id=s.region_id
 	JOIN accounts sa ON sa.id=l.seller_account_id LEFT JOIN accounts h ON h.id=p.owner_account_id LEFT JOIN nodes n ON n.id=s.node_id`
 
-func scanListings(rows pgx.Rows, viewer string, owner bool) ([]TradeListing, error) {
+func scanListings(rows pgx.Rows, viewer string, as listingViewer) ([]TradeListing, error) {
 	defer rows.Close()
 	result := make([]TradeListing, 0)
 	for rows.Next() {
@@ -125,7 +142,7 @@ func scanListings(rows pgx.Rows, viewer string, owner bool) ([]TradeListing, err
 		if err := rows.Scan(&l.ID, &l.ServiceID, &l.InstanceName, &seller, &l.SellerName, &l.Status, &l.CancelReason, &l.PriceMinor, &l.Currency, &l.Note,
 			&l.PlanName, &l.Virtualization, &l.VCPU, &l.RAMMB, &l.DiskGB, &l.TrafficGB, &l.NetworkDownMbps, &l.PortMappingCount, &l.RegionName, &l.HostName,
 			&l.BillingCycle, &l.ExpiresAt, &l.ServiceCreatedAt, &l.CreatedAt, &l.SoldAt, &l.Available, &l.RenewalMinor, &discountType, &discountValue, &l.NodeOnline,
-			&l.TrafficBytes, &l.TrafficRXBytes, &l.TrafficTXBytes, &l.FeeMinor, &l.ProceedsMinor); err != nil {
+			&l.TrafficBytes, &l.TrafficRXBytes, &l.TrafficTXBytes, &l.FeeMinor, &l.ProceedsMinor, &l.ClosedBy, &l.UpdatedAt); err != nil {
 			return nil, err
 		}
 		if l.RenewalMinor != nil && discountType != nil && discountValue != nil {
@@ -133,9 +150,16 @@ func scanListings(rows pgx.Rows, viewer string, owner bool) ([]TradeListing, err
 			l.RenewalMinor = &renewal
 		}
 		l.Mine = seller == viewer
-		if !owner {
+		switch as {
+		case marketViewer:
 			l.ServiceID, l.InstanceName, l.FeeMinor, l.ProceedsMinor = "", "", nil, nil
 			l.SellerName = maskName(l.SellerName)
+		case buyerViewer:
+			l.FeeMinor, l.ProceedsMinor = nil, nil
+			l.SellerName = maskName(l.SellerName)
+		}
+		if l.Status != "cancelled" {
+			l.ClosedBy = ""
 		}
 		result = append(result, l)
 	}
@@ -150,7 +174,7 @@ func (s *TradeStore) Market(ctx context.Context, viewer string) ([]TradeListing,
 	if err != nil {
 		return nil, err
 	}
-	return scanListings(rows, viewer, false)
+	return scanListings(rows, viewer, marketViewer)
 }
 
 // SellerListings lists a seller's listings, open ones first.
@@ -160,7 +184,17 @@ func (s *TradeStore) SellerListings(ctx context.Context, seller string) ([]Trade
 	if err != nil {
 		return nil, err
 	}
-	return scanListings(rows, seller, true)
+	return scanListings(rows, seller, sellerViewer)
+}
+
+// Purchases lists the instances an account bought in the market.
+func (s *TradeStore) Purchases(ctx context.Context, buyer string) ([]TradeListing, error) {
+	rows, err := s.db.Query(ctx, listingSelect+`
+		WHERE l.buyer_account_id=$1 AND l.status='sold' ORDER BY l.sold_at DESC LIMIT 200`, buyer)
+	if err != nil {
+		return nil, err
+	}
+	return scanListings(rows, buyer, buyerViewer)
 }
 
 // AllListings is the staff view.
@@ -169,7 +203,7 @@ func (s *TradeStore) AllListings(ctx context.Context) ([]TradeListing, error) {
 	if err != nil {
 		return nil, err
 	}
-	return scanListings(rows, "", true)
+	return scanListings(rows, "", sellerViewer)
 }
 
 // CreateListing offers the seller's instance for sale.
@@ -272,7 +306,7 @@ func (s *TradeStore) CreateListing(ctx context.Context, seller, userID, serviceI
 // cancel any listing.
 func (s *TradeStore) CancelListing(ctx context.Context, seller, actorType, actorID, listingID, reason string) error {
 	command, err := s.db.Exec(ctx, `
-		UPDATE service_listings SET status='cancelled',cancel_reason=nullif($3,''),updated_at=now()
+		UPDATE service_listings SET status='cancelled',cancel_reason=nullif($3,''),cancelled_by=CASE WHEN $2='' THEN 'staff' ELSE 'seller' END,updated_at=now()
 		WHERE id=$1 AND status='listed' AND ($2='' OR seller_account_id::text=$2)
 	`, listingID, seller, strings.TrimSpace(reason))
 	if err != nil {
@@ -334,7 +368,7 @@ func (s *TradeStore) Buy(ctx context.Context, buyer, userID, listingID string, e
 	case planOwner != nil && *planOwner == buyer:
 		return TradeResult{}, &TradeError{"不能购买自己托管母机上的实例"}
 	case serviceStatus != "active" || owner != seller:
-		if _, err := tx.Exec(ctx, `UPDATE service_listings SET status='cancelled',cancel_reason='实例已不是正常运行状态',updated_at=now() WHERE id=$1`, listingID); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE service_listings SET status='cancelled',cancel_reason='实例已不是正常运行状态',cancelled_by='system',updated_at=now() WHERE id=$1`, listingID); err != nil {
 			return TradeResult{}, err
 		}
 		if err := tx.Commit(ctx); err != nil {

@@ -23,6 +23,7 @@ func siteMeta(cfg config.Config, runtime *settings.Manager, r *http.Request) map
 		"logo_url":                 current.Logo(),
 		"logo_mode":                current.LogoMode,
 		"logo_dark_url":            current.LogoDark(),
+		"favicon_url":              current.Favicon(),
 		"environment":              cfg.Environment,
 		"installed":                current.Installed,
 		"password_reset_mail":      current.SMTP.Configured(),
@@ -98,7 +99,7 @@ type logoImage struct {
 func (s *siteLogo) serve(w http.ResponseWriter, r *http.Request) {
 	requested := r.URL.Query().Get("v")
 	variant := r.URL.Query().Get("variant")
-	if variant != "" && variant != "dark" {
+	if variant != "" && variant != "dark" && variant != "favicon" {
 		writeJSON(w, http.StatusNotFound, map[string]any{"error": "not_found"})
 		return
 	}
@@ -201,6 +202,7 @@ func (a adminSettings) logoResult(w http.ResponseWriter, err error) {
 		writeJSON(w, http.StatusOK, map[string]any{"data": map[string]string{
 			"logo_url": current.Logo(), "logo_external_url": current.LogoURL, "logo_mode": current.LogoMode,
 			"logo_dark_url": current.LogoDark(), "logo_dark_external_url": current.LogoDarkURL,
+			"favicon_url": current.Favicon(), "favicon_external_url": current.LogoFaviconURL,
 		}})
 	}
 }

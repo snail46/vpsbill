@@ -5,6 +5,7 @@ import { api, TicketDetailRecord } from '../api'
 import { AttachmentGallery, AttachmentPicker } from '../TicketAttachments'
 import { formatTime, startOfDay } from './time'
 import { useSiteBrand, useSiteLogo } from './boot'
+import { toast } from './toast'
 
 export type Meta = {
   name: string
@@ -20,6 +21,8 @@ export type Meta = {
   logo_mode?: 'auto' | 'icon' | 'wordmark'
   // logo_dark_url is the dark theme's logo; empty uses logo_url.
   logo_dark_url?: string
+  // favicon_url is the browser tab icon; empty uses the logo.
+  favicon_url?: string
   trade_hold_days?: number
   ticket_attachment_max_mb?: number
   marketplace_enabled?: boolean
@@ -476,7 +479,9 @@ export function SecuritySettings({ enabled: initialEnabled, customer = false }: 
       setSetup(null)
       setCode('')
       setError('')
+      toast('success', '二步验证已启用')
     } catch (err) {
+      toast('error', '启用二步验证失败', err instanceof Error ? err.message : undefined)
       setError(err instanceof Error ? err.message : '验证码无效')
     }
   }
@@ -487,7 +492,9 @@ export function SecuritySettings({ enabled: initialEnabled, customer = false }: 
       setEnabled(false)
       setCode('')
       setError('')
+      toast('success', '二步验证已关闭')
     } catch (err) {
+      toast('error', '关闭二步验证失败', err instanceof Error ? err.message : undefined)
       setError(err instanceof Error ? err.message : '验证码无效')
     }
   }

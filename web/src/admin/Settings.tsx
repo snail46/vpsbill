@@ -1,7 +1,7 @@
 import { ChangeEvent, FormEvent, useEffect, useState } from 'react'
 import { api, cached, PaymentSettingsRecord } from '../api'
 import { ImageUp, RotateCcw } from 'lucide-react'
-import { setSiteLogo, type LogoMode } from '../shared/boot'
+import { setSiteFavicon, setSiteLogo, type LogoMode } from '../shared/boot'
 import { Brand, StatusBadge } from '../shared/ui'
 import type { ContactLink } from '../shared/contact'
 import { ContactSettings } from './ContactSettings'
@@ -258,6 +258,8 @@ export type SiteSettingsRecord = {
   logo_mode: LogoMode
   logo_dark_url?: string
   logo_dark_external_url?: string
+  favicon_url?: string
+  favicon_external_url?: string
   // contact_intro and contact_links fill the portal's "联系我们" page.
   contact_intro?: string
   contact_links?: ContactLink[]
@@ -282,6 +284,7 @@ export type MailNotificationSettings = {
   customer_expiry: boolean
   customer_traffic: boolean
   customer_ticket_reply: boolean
+  customer_trade: boolean
   admin_node_expiry: boolean
   admin_node_traffic: boolean
   admin_ticket: boolean
@@ -295,6 +298,7 @@ export const defaultMailNotifications: MailNotificationSettings = {
   customer_expiry: true,
   customer_traffic: true,
   customer_ticket_reply: true,
+  customer_trade: true,
   admin_node_expiry: true,
   admin_node_traffic: true,
   admin_ticket: true,
@@ -436,11 +440,13 @@ export function SiteSettingsView() {
       {settings?.proxy_warning && <div className="note-banner warn" role="alert">{settings.proxy_warning}</div>}
       {settings && (
         <LogoSettings
-          key={settings.logo_url + '|' + (settings.logo_dark_url ?? '')}
+          key={[settings.logo_url, settings.logo_dark_url, settings.favicon_url].join('|')}
           current={settings.logo_url}
           external={settings.logo_external_url}
           dark={settings.logo_dark_url ?? ''}
           darkExternal={settings.logo_dark_external_url ?? ''}
+          favicon={settings.favicon_url ?? ''}
+          faviconExternal={settings.favicon_external_url ?? ''}
           mode={settings.logo_mode || 'auto'}
           siteName={settings.app_name}
         />
@@ -576,6 +582,7 @@ export function SiteSettingsView() {
                 ['customer_expiry', '实例即将到期（续费账单未支付）'],
                 ['customer_traffic', '实例月流量告警'],
                 ['customer_ticket_reply', '工单收到客服回复'],
+                ['customer_trade', '交易市场：实例售出、到期或被下架、到期未续费被回收'],
               ] as const
             ).map(([key, label]) => (
               <label key={key} className="checkbox notify-option">
@@ -716,15 +723,30 @@ export function SiteSettingsView() {
 
 // LogoSettings changes the logo in the top-left corner on its own, apart
 // from the site settings form: upload an image or link one.
-type LogoResult = { logo_url: string; logo_external_url: string; logo_mode?: LogoMode; logo_dark_url?: string; logo_dark_external_url?: string }
-type LogoVariant = '' | 'dark'
+type LogoResult = {
+  logo_url: string
+  logo_external_url: string
+  logo_mode?: LogoMode
+  logo_dark_url?: string
+  logo_dark_external_url?: string
+  favicon_url?: string
+  favicon_external_url?: string
+}
+type LogoVariant = '' | 'dark' | 'favicon'
+
+const variantNames: Record<LogoVariant, string> = { '': '白天主题 Logo', dark: '夜间主题 Logo', favicon: '浏览器标签图标' }
+const removedNotices: Record<LogoVariant, string> = {
+  '': '已恢复默认 Logo。',
+  dark: '已移除夜间主题 Logo，夜间改用白天主题的 Logo。',
+  favicon: '已移除标签图标，浏览器标签改用 Logo。',
+}
 
 // LogoSettings sets the logo for the light theme and, optionally, a second
 // one for the dark theme (a white logo, say); without it the dark theme
 // shows the light one.
-function LogoSettings(props: { current: string; external: string; dark: string; darkExternal: string; mode: LogoMode; siteName: string }) {
-  const [logos, setLogos] = useState({ '': props.current, dark: props.dark })
-  const [links, setLinks] = useState({ '': props.external, dark: props.darkExternal })
+function LogoSettings(props: { current: string; external: string; dark: string; darkExternal: string; favicon: string; faviconExternal: string; mode: LogoMode; siteName: string }) {
+  const [logos, setLogos] = useState<Record<LogoVariant, string>>({ '': props.current, dark: props.dark, favicon: props.favicon })
+  const [links, setLinks] = useState<Record<LogoVariant, string>>({ '': props.external, dark: props.darkExternal, favicon: props.faviconExternal })
   const [mode, setMode] = useState<LogoMode>(props.mode)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -737,10 +759,12 @@ function LogoSettings(props: { current: string; external: string; dark: string; 
     try {
       const result = await request
       const dark = result.logo_dark_url ?? logos.dark
-      setLogos({ '': result.logo_url, dark })
-      setLinks({ '': result.logo_external_url, dark: result.logo_dark_external_url ?? links.dark })
+      const favicon = result.favicon_url ?? logos.favicon
+      setLogos({ '': result.logo_url, dark, favicon })
+      setLinks({ '': result.logo_external_url, dark: result.logo_dark_external_url ?? links.dark, favicon: result.favicon_external_url ?? links.favicon })
       if (result.logo_mode) setMode(result.logo_mode)
       setSiteLogo(result.logo_url, result.logo_mode, dark)
+      setSiteFavicon(favicon)
       setNotice(message)
     } catch (err) {
       setError(err instanceof Error ? err.message : '保存失败')
@@ -761,7 +785,7 @@ function LogoSettings(props: { current: string; external: string; dark: string; 
     }
     const body = new FormData()
     body.append('file', file)
-    void save(api(`/api/v1/admin/settings/logo${query(variant)}`, { method: 'POST', body }), `${variant ? '夜间' : '白天'}主题 Logo 已上传，前台和后台立即生效。`)
+    void save(api(`/api/v1/admin/settings/logo${query(variant)}`, { method: 'POST', body }), `${variantNames[variant]}已上传，前台和后台立即生效。`)
   }
 
   const linkLogo = (variant: LogoVariant, url: string, message: string) =>
@@ -771,8 +795,9 @@ function LogoSettings(props: { current: string; external: string; dark: string; 
     save(api('/api/v1/admin/settings/logo/mode', { method: 'PUT', body: JSON.stringify({ mode: value }) }), '显示方式已保存，前台和后台立即生效。')
 
   const slots: [LogoVariant, string, string][] = [
-    ['', '白天主题', '浅色背景下显示，也用作浏览器标签图标。'],
+    ['', '白天主题', '浅色背景下显示。'],
     ['dark', '夜间主题（可选）', '深色背景下显示，例如白色字的 Logo；不设置时夜间也用白天主题的 Logo。'],
+    ['favicon', '浏览器标签图标（可选）', '显示在浏览器标签和收藏夹里，支持 ICO、PNG、SVG，建议正方形、至少 32×32；不设置时用 Logo。'],
   ]
 
   return (
@@ -785,28 +810,38 @@ function LogoSettings(props: { current: string; external: string; dark: string; 
         {slots.map(([variant, title, help]) => {
           const current = logos[variant]
           return (
-            <div className={variant ? 'logo-variant dark-preview' : 'logo-variant light-preview'} key={variant || 'light'}>
+            <div className={variant === 'dark' ? 'logo-variant dark-preview' : 'logo-variant light-preview'} key={variant || 'light'}>
               <div className="logo-variant-head">
                 <strong>{title}</strong>
                 <small>{help}</small>
               </div>
-              <div className="logo-preview" aria-label={`${title}预览`}>
-                {current || (variant && logos['']) ? (
-                  <img className="logo-preview-image" src={current || logos['']} alt="" />
-                ) : (
-                  <div className="brand-mark">VB</div>
-                )}
-                <span>{props.siteName || 'VPSBill'}</span>
-                {variant && !current && <em>沿用白天主题</em>}
-              </div>
+              {variant === 'favicon' ? (
+                <div className="logo-preview favicon-preview" aria-label="浏览器标签预览">
+                  <span className="favicon-tab">
+                    <img src={current || logos[''] || '/favicon.svg'} alt="" />
+                    <span>{props.siteName || 'VPSBill'}</span>
+                  </span>
+                  {!current && <em>{logos[''] ? '沿用 Logo' : '默认图标'}</em>}
+                </div>
+              ) : (
+                <div className="logo-preview" aria-label={`${title}预览`}>
+                  {current || (variant && logos['']) ? (
+                    <img className="logo-preview-image" src={current || logos['']} alt="" />
+                  ) : (
+                    <div className="brand-mark">VB</div>
+                  )}
+                  <span>{props.siteName || 'VPSBill'}</span>
+                  {variant && !current && <em>沿用白天主题</em>}
+                </div>
+              )}
               <div className="form-actions">
                 <label className={busy ? 'primary-button compact disabled' : 'primary-button compact'}>
                   <ImageUp size={15} />
                   上传图片
-                  <input type="file" accept=".svg,.png,.jpg,.jpeg,.webp,.gif,.ico,image/*" hidden disabled={busy} onChange={event => upload(variant, event)} />
+                  <input type="file" accept={variant === 'favicon' ? '.ico,.png,.svg,image/x-icon,image/vnd.microsoft.icon,image/png,image/svg+xml' : '.svg,.png,.jpg,.jpeg,.webp,.gif,.ico,image/*'} hidden disabled={busy} onChange={event => upload(variant, event)} />
                 </label>
                 {current && (
-                  <button type="button" className="secondary-button compact" disabled={busy} onClick={() => void linkLogo(variant, '', variant ? '已移除夜间主题 Logo，夜间改用白天主题的 Logo。' : '已恢复默认 Logo。')}>
+                  <button type="button" className="secondary-button compact" disabled={busy} onClick={() => void linkLogo(variant, '', removedNotices[variant])}>
                     <RotateCcw size={15} />
                     {variant ? '移除' : '恢复默认'}
                   </button>

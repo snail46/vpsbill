@@ -4,6 +4,7 @@ import { api, cached, csrfToken } from '../api'
 import { formatBytes } from '../shared/ui'
 import { formatTime } from '../shared/time'
 import { confirmDialog } from '../shared/dialog'
+import { toast } from '../shared/toast'
 
 type BackupSettings = {
   schedule: 'off' | 'daily' | 'interval'
@@ -209,7 +210,9 @@ export function BackupsView() {
     try {
       await api(`${endpoint}/local/${encodeURIComponent(file.name)}`, { method: 'DELETE' })
       await load()
+      toast('success', `已删除本地备份 ${file.name}`)
     } catch (err) {
+      toast('error', '删除备份失败', err instanceof Error ? err.message : undefined)
       setError(err instanceof Error ? err.message : '删除失败')
     }
   }

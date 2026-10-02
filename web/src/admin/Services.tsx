@@ -7,6 +7,7 @@ import {
   FilterBar, NumberFilter, SearchFilter, SelectFilter, includesText, matchesAny, uniqueOptions, useCustomerOptions, useSection, useUrlFilters, type Option,
 } from './filters'
 import { confirmDialog } from '../shared/dialog'
+import { toast } from '../shared/toast'
 
 const serviceStatuses: Option[] = ['provisioning', 'active', 'overdue', 'suspended', 'terminating', 'terminated', 'error']
   .map(status => [status, statusLabel(status)] as Option)
@@ -89,7 +90,9 @@ export function ServicesView() {
     try {
       await api(`/api/v1/admin/services/${service.id}/actions/${action}`, { method: 'POST' })
       await load()
+      toast('success', action === 'terminate' ? `已提交终止实例 ${service.instance_name}` : `已提交${({ start: '开机', stop: '关机', restart: '重启' } as Record<string, string>)[action]}任务：${service.instance_name}`)
     } catch (err) {
+      toast('error', '操作失败', err instanceof Error ? err.message : undefined)
       setError(err instanceof Error ? err.message : '操作失败')
     } finally {
       setRetrying('')
@@ -103,7 +106,9 @@ export function ServicesView() {
     try {
       await api(`/api/v1/admin/jobs/${job.id}/retry`, { method: 'POST' })
       await load()
+      toast('success', `已重新提交 ${job.instance_name} 的任务`)
     } catch (err) {
+      toast('error', '重试任务失败', err instanceof Error ? err.message : undefined)
       setError(err instanceof Error ? err.message : '重试任务失败')
     } finally {
       setRetrying('')

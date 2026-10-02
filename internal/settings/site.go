@@ -43,10 +43,13 @@ type SiteView struct {
 	LogoExternalURL string `json:"logo_external_url"`
 	LogoMode        string `json:"logo_mode"`
 	// LogoDark and LogoDarkExternalURL are the dark theme's logo.
-	LogoDark            string        `json:"logo_dark_url"`
-	LogoDarkExternalURL string        `json:"logo_dark_external_url"`
-	ContactIntro        string        `json:"contact_intro"`
-	ContactLinks        []ContactLink `json:"contact_links"`
+	LogoDark            string `json:"logo_dark_url"`
+	LogoDarkExternalURL string `json:"logo_dark_external_url"`
+	// Favicon and FaviconExternalURL are the browser tab icon.
+	Favicon            string        `json:"favicon_url"`
+	FaviconExternalURL string        `json:"favicon_external_url"`
+	ContactIntro       string        `json:"contact_intro"`
+	ContactLinks       []ContactLink `json:"contact_links"`
 	// ProxyWarning describes a reverse proxy set up so that visitors' real
 	// addresses are lost; the HTTP layer fills it in.
 	ProxyWarning string `json:"proxy_warning,omitempty"`
@@ -96,6 +99,7 @@ func (m *Manager) SiteView() SiteView {
 		MailNotifications: c.MailNotifications, TicketAttachmentMaxMB: c.TicketAttachmentMaxMB, Marketplace: c.Marketplace,
 		Logo: c.Logo(), LogoExternalURL: c.LogoURL, LogoMode: c.LogoMode,
 		LogoDark: c.LogoDark(), LogoDarkExternalURL: c.LogoDarkURL,
+		Favicon: c.Favicon(), FaviconExternalURL: c.LogoFaviconURL,
 		ContactIntro: c.ContactIntro, ContactLinks: c.ContactLinks,
 	}
 }

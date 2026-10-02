@@ -6,6 +6,7 @@ import { PageActions, StatusBadge } from '../shared/ui'
 import { formatTime } from '../shared/time'
 import { AdminLink, FilterBar, SearchFilter, SelectFilter, adminHref, includesText, matchesAny, useUrlFilters, type Option } from './filters'
 import { confirmDialog } from '../shared/dialog'
+import { toast } from '../shared/toast'
 
 const customerKinds: Option[] = [['individual', '个人客户'], ['business', '企业客户']]
 const customerStatuses: Option[] = [['active', '正常'], ['suspended', '已暂停'], ['pending', '待激活'], ['closed', '已关闭']]
@@ -70,7 +71,9 @@ export function CustomersView() {
     try {
       await api(`/api/v1/admin/customers/${customer.id}`, { method: 'PATCH', body: JSON.stringify({ status }) })
       await load()
+      toast('success', status === 'suspended' ? `已暂停 ${customer.display_name} 的账户` : `已恢复 ${customer.display_name} 的账户`)
     } catch (err) {
+      toast('error', '更新账户状态失败', err instanceof Error ? err.message : undefined)
       setError(err instanceof Error ? err.message : '更新状态失败')
     } finally {
       setUpdating('')

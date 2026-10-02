@@ -24,7 +24,7 @@ import {
 } from 'lucide-react'
 import { api, cached, serviceUsable, CustomerServiceRecord, PortMappingRecord, ReinstallRecord, RefundQuoteRecord, ServiceCredentialRecord, ServiceRuntimeRecord } from './api'
 import { walletMoney } from './Wallet'
-import { ListServiceDialog, tradeEligibleAt, tradeHoldDays } from './Trade'
+import { PushButton } from './Trade'
 import { formatDate, formatTime, platformMonth } from './shared/time'
 import { navigatePortal, osLabel, osOptions, portalPathPart } from './shared/nav'
 import { cycleUnit } from './shared/cycles'
@@ -64,14 +64,15 @@ const bytes = (value = 0) => {
   return `${Math.round(value)} B`
 }
 const rate = (value = 0) => `${bytes(value)}/s`
-// usedOf writes "183 / 512 MB": both numbers in the total's unit with at
-// most three digits, short enough to stay on one line in a meter.
-const usedOf = (used = 0, total = 0) => {
+// shortBytes writes a size with at most three digits ("183 MB", "1.7 GB"),
+// and usedOf "183 MB / 512 MB", short enough for one line in a meter.
+const shortBytes = (value = 0) => {
   const units: [number, string][] = [[1024 ** 4, 'TB'], [1024 ** 3, 'GB'], [1024 ** 2, 'MB'], [1024, 'KB']]
-  const [size, unit] = units.find(([size]) => total >= size) ?? [1, 'B']
-  const short = (value: number) => (value >= 100 ? String(Math.round(value)) : String(Number(value.toFixed(1))))
-  return `${short(used / size)} / ${short(total / size)} ${unit}`
+  const [size, unit] = units.find(([size]) => value >= size) ?? [1, 'B']
+  const amount = value / size
+  return `${amount >= 100 ? Math.round(amount) : Number(amount.toFixed(1))} ${unit}`
 }
+const usedOf = (used = 0, total = 0) => `${shortBytes(used)} / ${shortBytes(total)}`
 const percent = (value = 0) => Math.max(0, Math.min(100, Number.isFinite(value) ? value : 0))
 
 const statusMap: Record<string, string> = {
@@ -378,7 +379,7 @@ function ServiceManager({ service, onReload }: { service: CustomerServiceRecord;
           pending={pending}
           Icon={Network}
           value={trafficLimit ? (trafficUsed / trafficLimit) * 100 : 0}
-          text={service.traffic_gb ? usedOf(trafficUsed, service.traffic_gb * 1024 ** 3) : `${bytes(trafficUsed)} / 不限`}
+          text={service.traffic_gb ? usedOf(trafficUsed, service.traffic_gb * 1024 ** 3) : `${shortBytes(trafficUsed)} / 不限`}
         />
       </div>
 
@@ -860,12 +861,13 @@ const serviceHref = (service: CustomerServiceRecord) => `/portal/services/${serv
 
 // ServiceTile is the compact card on the list; the detail page holds
 // everything else.
-function ServiceTile({ service }: { service: CustomerServiceRecord }) {
+function ServiceTile({ service, onChanged }: { service: CustomerServiceRecord; onChanged: () => void }) {
   const status = serviceUsable(service.status) ? service.runtime_status : service.status
   const ended = service.status === 'terminating' || service.status === 'terminated'
   return (
+    <div className={`service-tile source-${service.source}${service.status === 'terminated' ? ' ended' : ''}`}>
     <a
-      className={`service-tile source-${service.source}${service.status === 'terminated' ? ' ended' : ''}`}
+      className="service-tile-link"
       href={serviceHref(service)}
       onClick={event => {
         event.preventDefault()
@@ -896,6 +898,12 @@ function ServiceTile({ service }: { service: CustomerServiceRecord }) {
         </div>
       </dl>
     </a>
+    {!ended && (
+      <div className="service-tile-actions">
+        <PushButton service={service} onDone={onChanged} />
+      </div>
+    )}
+    </div>
   )
 }
 
@@ -1061,7 +1069,7 @@ export default function CustomerServices() {
 
       <div className="service-tiles">
         {visible.map(service => (
-          <ServiceTile key={service.id} service={service} />
+          <ServiceTile key={service.id} service={service} onChanged={() => void load()} />
         ))}
         {!services && !error && <div className="empty-card" style={{ gridColumn: '1 / -1' }}>正在加载实例…</div>}
         {services && !visible.length && (
@@ -1151,38 +1159,9 @@ function RefundPanel({ service, onDone }: { service: CustomerServiceRecord; onDo
 // TradeAction offers the instance on the trading market once it has been
 // held long enough, or shows its open listing.
 function TradeAction({ service, onDone }: { service: CustomerServiceRecord; onDone: () => void }) {
-  const [open, setOpen] = useState(false)
-  if (service.listing_id) {
-    return (
-      <div className="service-refund">
-        <span className="tag">交易市场挂售中 · {walletMoney(service.listing_price_minor || 0)}</span>
-        <a className="secondary-button compact" href="/portal/trade">管理挂售</a>
-      </div>
-    )
-  }
-  const eligibleAt = tradeEligibleAt(service)
-  if (eligibleAt.getTime() > Date.now()) {
-    return (
-      <div className="service-refund">
-        <small className="muted-text">持有满 {tradeHoldDays()} 天后可在交易市场挂售（{formatDate(eligibleAt)} 起）</small>
-      </div>
-    )
-  }
   return (
-    <>
-      <div className="service-refund">
-        <button className="secondary-button compact" onClick={() => setOpen(true)}>挂售到交易市场</button>
-      </div>
-      {open && (
-        <ListServiceDialog
-          service={service}
-          onClose={() => setOpen(false)}
-          onDone={() => {
-            setOpen(false)
-            onDone()
-          }}
-        />
-      )}
-    </>
+    <div className="service-refund">
+      <PushButton service={service} onDone={onDone} />
+    </div>
   )
 }

@@ -809,6 +809,10 @@ export type RefundQuoteRecord = {
 
 export type TradeListingRecord = {
   id: string
+  // cancelled_by says who closed a cancelled listing; updated_at when the
+  // listing last changed.
+  cancelled_by?: 'seller' | 'staff' | 'system' | 'expiry'
+  updated_at?: string
   service_id?: string
   instance_name?: string
   seller_name: string
@@ -843,7 +847,15 @@ export type TradeListingRecord = {
   sold_at?: string
 }
 
-export type TradeRecord = { listings: TradeListingRecord[]; mine: TradeListingRecord[]; hold_days: number; fee_percent: number; min_remaining_days: number }
+export type TradeRecord = {
+  listings: TradeListingRecord[]
+  mine: TradeListingRecord[]
+  // purchases are the instances this account bought in the market.
+  purchases?: TradeListingRecord[]
+  hold_days: number
+  fee_percent: number
+  min_remaining_days: number
+}
 
 export type ReportRecord = {
   id: string

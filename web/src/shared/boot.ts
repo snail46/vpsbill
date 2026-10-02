@@ -119,6 +119,7 @@ function applyMeta(value: Meta) {
   meta = value
   if (value.name) document.title = value.name
   setSiteLogo(value.logo_url ?? '', value.logo_mode, value.logo_dark_url ?? '')
+  setSiteFavicon(value.favicon_url ?? '')
 }
 
 // LogoMode is how the logo sits beside the site name: auto decides by the
@@ -137,6 +138,19 @@ let logo = ''
 let brand: { logo: string; mode: LogoMode } = { logo, mode: logoMode }
 const listeners = new Set<() => void>()
 let watchingTheme = false
+// favicon is the browser tab icon set apart from the logo ('' = the logo).
+let favicon = ''
+
+function applyFavicon() {
+  const icon = document.querySelector<HTMLLinkElement>('link[rel="icon"]')
+  if (icon) icon.href = favicon || logo || icon.dataset.default || ''
+}
+
+// setSiteFavicon sets the browser tab icon; '' shows the logo there.
+export function setSiteFavicon(url: string) {
+  favicon = url
+  applyFavicon()
+}
 
 function darkTheme() {
   return document.documentElement.dataset.theme === 'dark'
@@ -146,11 +160,9 @@ function darkTheme() {
 function refresh() {
   const next = darkTheme() && logoDark ? logoDark : lightLogo
   if (next === logo && brand.mode === logoMode) return
-  if (next !== logo) {
-    const icon = document.querySelector<HTMLLinkElement>('link[rel="icon"]')
-    if (icon) icon.href = next || icon.dataset.default || ''
-  }
+  const changed = next !== logo
   logo = next
+  if (changed) applyFavicon()
   brand = { logo: next, mode: logoMode }
   listeners.forEach(listener => listener())
 }
