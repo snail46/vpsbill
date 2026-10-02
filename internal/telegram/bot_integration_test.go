@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -16,6 +15,7 @@ import (
 	"vpsbill/internal/security"
 	"vpsbill/internal/settings"
 	"vpsbill/internal/store/postgres"
+	"vpsbill/internal/store/postgres/pgtest"
 )
 
 // fakeAPI stands in for Telegram: it keeps what the bot sent.
@@ -75,25 +75,8 @@ func (f *fakeAPI) last(t *testing.T, chat int64) string {
 const groupID = int64(-1001234567890)
 
 func TestBotIntegration(t *testing.T) {
-	databaseURL := os.Getenv("TEST_DATABASE_URL")
-	if databaseURL == "" {
-		t.Skip("TEST_DATABASE_URL is not set")
-	}
-	if !strings.Contains(databaseURL, "vpsbill_test") {
-		t.Fatal("refusing to reset database without vpsbill_test in TEST_DATABASE_URL")
-	}
 	ctx := context.Background()
-	db, err := postgres.Open(ctx, databaseURL)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	if _, err = db.Exec(ctx, `DROP SCHEMA public CASCADE;CREATE SCHEMA public`); err != nil {
-		t.Fatal(err)
-	}
-	if err = postgres.Migrate(ctx, db); err != nil {
-		t.Fatal(err)
-	}
+	db := pgtest.Open(t, "telegram")
 	box, err := security.NewSecretBox(strings.Repeat("ab", 32))
 	if err != nil {
 		t.Fatal(err)

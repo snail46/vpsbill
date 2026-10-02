@@ -4,7 +4,6 @@ import (
 	"context"
 	"io"
 	"log/slog"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -13,30 +12,14 @@ import (
 	"vpsbill/internal/security"
 	"vpsbill/internal/settings"
 	"vpsbill/internal/store/postgres"
+	"vpsbill/internal/store/postgres/pgtest"
 )
 
 // Mail is written in the language the recipient reads the site in, and
 // both languages of every message take the same arguments.
 func TestMailLanguageIntegration(t *testing.T) {
-	databaseURL := os.Getenv("TEST_DATABASE_URL")
-	if databaseURL == "" {
-		t.Skip("TEST_DATABASE_URL is not set")
-	}
-	if !strings.Contains(databaseURL, "vpsbill_test") {
-		t.Fatal("refusing to reset database without vpsbill_test in TEST_DATABASE_URL")
-	}
 	ctx := context.Background()
-	db, err := postgres.Open(ctx, databaseURL)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	if _, err = db.Exec(ctx, `DROP SCHEMA public CASCADE;CREATE SCHEMA public`); err != nil {
-		t.Fatal(err)
-	}
-	if err = postgres.Migrate(ctx, db); err != nil {
-		t.Fatal(err)
-	}
+	db := pgtest.Open(t, "notify")
 	box, err := security.NewSecretBox(strings.Repeat("cd", 32))
 	if err != nil {
 		t.Fatal(err)
