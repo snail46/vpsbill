@@ -5,6 +5,7 @@ import '@xterm/xterm/css/xterm.css'
 import RFBModule from '@novnc/novnc/lib/rfb'
 import { Maximize2, Minimize2, Minus, Monitor, RefreshCw, Send, TerminalSquare, X } from 'lucide-react'
 import { api, ConsoleTicketRecord } from './api'
+import { t } from './shared/i18n'
 
 type RFBInstance = EventTarget & {
   scaleViewport: boolean
@@ -45,7 +46,7 @@ export function ServiceConsole({
   const fit = useRef<FitAddon | null>(null)
   const socket = useRef<WebSocket | null>(null)
   const rfb = useRef<RFBInstance | null>(null)
-  const [status, setStatus] = useState('正在连接…')
+  const [status, setStatus] = useState(t('正在连接…'))
   const [error, setError] = useState('')
   const panel = useRef<HTMLElement>(null)
   // minimized docks the console in a corner with the session still open;
@@ -107,7 +108,7 @@ export function ServiceConsole({
   const connect = async () => {
     if (!target.current) return
     cleanup()
-    setStatus('正在获取控制台票据…')
+    setStatus(t('正在获取控制台票据…'))
     setError('')
 
     try {
@@ -142,7 +143,7 @@ export function ServiceConsole({
         socket.current = ws
 
         ws.onopen = () => {
-          setStatus('已连接')
+          setStatus(t('已连接'))
           addon.fit()
           ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }))
           term.focus()
@@ -155,11 +156,11 @@ export function ServiceConsole({
         }
 
         ws.onerror = () => {
-          setStatus('连接失败')
-          setError('无法建立终端连接，请确认实例正在运行且 SSH 服务正常启动。')
+          setStatus(t('连接失败'))
+          setError(t('无法建立终端连接，请确认实例正在运行且 SSH 服务正常启动。'))
         }
 
-        ws.onclose = () => setStatus(current => (current === '连接失败' ? current : '已断开'))
+        ws.onclose = () => setStatus(current => (current === t('连接失败') ? current : t('已断开')))
 
         term.onData(data => {
           if (ws.readyState === WebSocket.OPEN) ws.send(new TextEncoder().encode(data))
@@ -184,16 +185,16 @@ export function ServiceConsole({
         instance.compressionLevel = 2
         instance.background = '#040711'
 
-        instance.addEventListener('connect', () => setStatus('已连接'))
-        instance.addEventListener('disconnect', () => setStatus('已断开'))
+        instance.addEventListener('connect', () => setStatus(t('已连接')))
+        instance.addEventListener('disconnect', () => setStatus(t('已断开')))
         instance.addEventListener('securityfailure', () => {
-          setStatus('连接失败')
-          setError('VNC 安全认证协商失败')
+          setStatus(t('连接失败'))
+          setError(t('VNC 安全认证协商失败'))
         })
       }
     } catch (err) {
-      setStatus('连接失败')
-      setError(err instanceof Error ? err.message : '控制台连接失败')
+      setStatus(t('连接失败'))
+      setError(err instanceof Error ? err.message : t('控制台连接失败'))
     }
   }
 
@@ -208,8 +209,8 @@ export function ServiceConsole({
         <header onDoubleClick={() => (minimized ? restore() : undefined)}>
           <div className="console-title">
             {kind === 'ssh' ? <TerminalSquare size={18} /> : <Monitor size={18} />}
-            <strong>{kind.toUpperCase()} 控制台 · {name}</strong>
-            <span className={status === '已连接' ? 'status-badge online' : status === '连接失败' ? 'status-badge error' : 'status-badge'}>{status}</span>
+            <strong>{t('{0} 控制台 · {1}', kind.toUpperCase(), name)}</strong>
+            <span className={status === t('已连接') ? 'status-badge online' : status === t('连接失败') ? 'status-badge error' : 'status-badge'}>{status}</span>
           </div>
           <div className="console-actions">
             {kind === 'vnc' && !minimized && (
@@ -218,25 +219,25 @@ export function ServiceConsole({
               </button>
             )}
             {!minimized && (
-              <button className="icon-button" onClick={() => void connect()} title="重新连接" aria-label="重新连接">
+              <button className="icon-button" onClick={() => void connect()} title={t('重新连接')} aria-label={t('重新连接')}>
                 <RefreshCw size={15} />
               </button>
             )}
             {minimized ? (
-              <button className="icon-button" onClick={restore} title="还原" aria-label="还原控制台">
+              <button className="icon-button" onClick={restore} title={t('还原')} aria-label={t('还原控制台')}>
                 <Maximize2 size={15} />
               </button>
             ) : (
               <>
-                <button className="icon-button" onClick={minimize} title="缩小（连接保持）" aria-label="缩小控制台">
+                <button className="icon-button" onClick={minimize} title={t('缩小（连接保持）')} aria-label={t('缩小控制台')}>
                   <Minus size={16} />
                 </button>
-                <button className="icon-button" onClick={toggleFull} title={full ? '退出全屏' : '全屏'} aria-label={full ? '退出全屏' : '全屏'}>
+                <button className="icon-button" onClick={toggleFull} title={full ? t('退出全屏') : t('全屏')} aria-label={full ? t('退出全屏') : t('全屏')}>
                   {full ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
                 </button>
               </>
             )}
-            <button className="icon-button" onClick={onClose} title="关闭控制台" aria-label="关闭控制台">
+            <button className="icon-button" onClick={onClose} title={t('关闭控制台')} aria-label={t('关闭控制台')}>
               <X size={16} />
             </button>
           </div>

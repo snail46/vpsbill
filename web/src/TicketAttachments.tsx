@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ImagePlus, X } from 'lucide-react'
 import { api, type TicketAttachmentRecord } from './api'
+import { t } from './shared/i18n'
 
 // Matches the server: a message carries at most this many images.
 export const maxAttachments = 5
@@ -53,15 +54,15 @@ export function AttachmentPicker({
     const next = [...files]
     for (const file of Array.from(list)) {
       if (!imageTypes.includes(file.type)) {
-        onError(`${file.name} 不是支持的图片格式（PNG、JPEG、GIF、WebP）`)
+        onError(t('{0} 不是支持的图片格式（PNG、JPEG、GIF、WebP）', file.name))
         continue
       }
       if (file.size > maxMB * 1024 * 1024) {
-        onError(`${file.name} 超过 ${maxMB} MB`)
+        onError(t('{0} 超过 {1} MB', file.name, maxMB))
         continue
       }
       if (next.length >= maxAttachments) {
-        onError(`每条消息最多 ${maxAttachments} 张图片`)
+        onError(t('每条消息最多 {0} 张图片', maxAttachments))
         break
       }
       next.push(file)
@@ -77,7 +78,7 @@ export function AttachmentPicker({
           <figure key={`${file.name}-${index}`}>
             <img src={previews[index]} alt={file.name} />
             <figcaption>{formatSize(file.size)}</figcaption>
-            <button type="button" aria-label={`移除 ${file.name}`} onClick={() => onChange(files.filter((_, i) => i !== index))}>
+            <button type="button" aria-label={t('移除 {0}', file.name)} onClick={() => onChange(files.filter((_, i) => i !== index))}>
               <X size={12} />
             </button>
           </figure>
@@ -85,12 +86,12 @@ export function AttachmentPicker({
         {files.length < maxAttachments && (
           <button type="button" className="attachment-add" onClick={() => input.current?.click()}>
             <ImagePlus size={18} />
-            <span>添加图片</span>
+            <span>{t('添加图片')}</span>
           </button>
         )}
       </div>
       <small>
-        最多 {maxAttachments} 张，每张不超过 {maxMB} MB，支持 PNG、JPEG、GIF、WebP
+        {t('最多 {0} 张，每张不超过 {1} MB，支持 PNG、JPEG、GIF、WebP', maxAttachments, maxMB)}
       </small>
       <input
         ref={input}

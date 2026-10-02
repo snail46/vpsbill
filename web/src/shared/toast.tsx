@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { AlertTriangle, CheckCircle2, Info, X } from 'lucide-react'
+import { t } from './i18n'
 
 // Short notices that appear in a corner and leave by themselves, for the
 // outcome of something the user started ("实例已关机"). Like the dialogs,
@@ -60,7 +61,7 @@ function ToastHost() {
               <strong>{item.title}</strong>
               {item.message && <p>{item.message}</p>}
             </div>
-            <button type="button" aria-label="关闭提示" onClick={() => dismiss(item.id)}>
+            <button type="button" aria-label={t('关闭提示')} onClick={() => dismiss(item.id)}>
               <X size={14} />
             </button>
           </div>

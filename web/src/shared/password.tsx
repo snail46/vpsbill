@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Check, Copy, Eye, EyeOff, Sparkles } from 'lucide-react'
+import { t } from './i18n'
 
 // Letters and digits without look-alikes (0/O, 1/l/I): nothing a node's
 // password tooling must escape, and easy to read back from the screen.
@@ -62,16 +63,16 @@ export function PasswordInput({ name, placeholder, autoComplete = 'new-password'
         spellCheck={false}
         onChange={event => setValue(event.target.value)}
       />
-      <button type="button" className="icon-button" title={visible ? '隐藏密码' : '显示密码'} aria-label={visible ? '隐藏密码' : '显示密码'} onClick={() => setVisible(show => !show)}>
+      <button type="button" className="icon-button" title={visible ? t('隐藏密码') : t('显示密码')} aria-label={visible ? t('隐藏密码') : t('显示密码')} onClick={() => setVisible(show => !show)}>
         {visible ? <EyeOff size={15} /> : <Eye size={15} />}
       </button>
       {value && visible && (
-        <button type="button" className="icon-button" title="复制密码" aria-label="复制密码" onClick={copy}>
+        <button type="button" className="icon-button" title={t('复制密码')} aria-label={t('复制密码')} onClick={copy}>
           {copied ? <Check size={15} /> : <Copy size={15} />}
         </button>
       )}
       <button type="button" className="secondary-button compact password-generate" onClick={generate}>
-        <Sparkles size={14} />随机生成
+        <Sparkles size={14} />{t('随机生成')}
       </button>
     </div>
   )

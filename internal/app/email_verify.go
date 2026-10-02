@@ -20,7 +20,8 @@ const (
 
 // sendVerification mails a link that confirms the customer owns the
 // address. It is sent in the background.
-func (a *authenticator) sendVerification(ctx context.Context, userID, email string) error {
+// lang is the language the mail is written in (see mailLang).
+func (a *authenticator) sendVerification(ctx context.Context, userID, email, lang string) error {
 	runtime := a.settings.Current()
 	if !runtime.SMTP.Configured() {
 		return errors.New("smtp is not configured")
@@ -37,9 +38,15 @@ func (a *authenticator) sendVerification(ctx context.Context, userID, email stri
 	go func() {
 		sendCtx, cancel := context.WithTimeout(context.Background(), time.Minute)
 		defer cancel()
+		subject := site + " 邮箱验证"
 		body := "您好，\n\n感谢注册 " + site + "。请在 24 小时内打开下面的链接验证邮箱：\n\n" + link +
 			"\n\n验证后才能下单、充值和接收通知。如果不是您本人注册，请忽略这封邮件。\n"
-		if err := mail.Send(sendCtx, runtime.SMTP, email, site+" 邮箱验证", body); err != nil {
+		if lang == "en" {
+			subject = site + ": verify your email address"
+			body = "Hello,\n\nThank you for signing up at " + site + ". Open the link below within 24 hours to verify your email address:\n\n" + link +
+				"\n\nYou can order, top up and receive notifications once it is verified. If you did not sign up, please ignore this email.\n"
+		}
+		if err := mail.Send(sendCtx, runtime.SMTP, email, subject, body); err != nil {
 			slog.Default().Warn("send verification mail", "error", err)
 		}
 	}()
@@ -60,7 +67,7 @@ func (a *authenticator) customerResendVerification(w http.ResponseWriter, r *htt
 		writeJSON(w, http.StatusTooManyRequests, map[string]any{"error": "rate_limited", "message": "发送过于频繁，请稍后再试"})
 		return
 	}
-	if err := a.sendVerification(r.Context(), identity.UserID, identity.Email); err != nil {
+	if err := a.sendVerification(r.Context(), identity.UserID, identity.Email, a.mailLang(r, identity.Locale)); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "internal_error"})
 		return
 	}

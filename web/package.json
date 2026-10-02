@@ -6,7 +6,8 @@
   "packageManager": "pnpm@11.19.0",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
-    "build": "tsc -b && vite build",
+    "build": "node scripts/i18n-check.mjs && tsc -b && vite build",
+    "i18n": "node scripts/i18n-check.mjs",
     "lint": "eslint ."
   },
   "dependencies": {

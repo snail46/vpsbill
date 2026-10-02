@@ -49,6 +49,24 @@ func (n *Notifier) enqueue(ctx context.Context, to, subject, body, dedupKey stri
 	}
 }
 
+// lang is the language to write to an address in: the one its user reads
+// the site in, else the site's default.
+func (n *Notifier) lang(ctx context.Context, email string) string {
+	locale := ""
+	if n.store != nil && email != "" {
+		locale, _ = n.store.UserLocale(ctx, email)
+	}
+	return n.settings.Current().Lang(locale)
+}
+
+// say picks a text by language.
+func say(lang, zh, en string) string {
+	if lang == "en" {
+		return en
+	}
+	return zh
+}
+
 // adminRecipients returns the configured merchant addresses, or every active
 // staff member when none are configured.
 func (n *Notifier) adminRecipients(ctx context.Context) []string {

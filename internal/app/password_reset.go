@@ -67,13 +67,19 @@ func (a *authenticator) customerRequestPasswordReset(w http.ResponseWriter, r *h
 	_ = a.store.WriteSecurityAudit(r.Context(), identity.UserID, "customer", "password.reset_requested", remoteIP(r), r.UserAgent())
 	// Send in the background so the response time does not reveal whether
 	// the address is registered.
-	link, to, site := a.resetLink(token), identity.Email, runtime.AppName
+	link, to, site, lang := a.resetLink(token), identity.Email, runtime.AppName, a.mailLang(r, identity.Locale)
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 		defer cancel()
+		subject := site + " 密码重置"
 		body := "您好，\n\n我们收到了重置 " + site + " 账户密码的请求。请在 30 分钟内打开下面的链接设置新密码：\n\n" + link +
 			"\n\n如果不是您本人操作，请忽略这封邮件，原密码仍然有效。\n"
-		if err := mail.Send(ctx, runtime.SMTP, to, site+" 密码重置", body); err != nil {
+		if lang == "en" {
+			subject = site + ": reset your password"
+			body = "Hello,\n\nWe received a request to reset the password of your " + site + " account. Open the link below within 30 minutes to set a new password:\n\n" + link +
+				"\n\nIf this was not you, please ignore this email; your password stays as it is.\n"
+		}
+		if err := mail.Send(ctx, runtime.SMTP, to, subject, body); err != nil {
 			slog.Default().Warn("send password reset mail", "error", err)
 		}
 	}()

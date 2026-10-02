@@ -34,17 +34,18 @@ import { OvercommitDialog, SupplyDetails, overcommitText } from './Supply'
 import { ConnectSteps, PendingAgents } from './shared/agents'
 import { confirmDialog } from './shared/dialog'
 import { toast } from './shared/toast'
+import { t, tr } from './shared/i18n'
 
 type Tab = 'market' | 'mine' | 'coupons' | 'tickets' | 'chat'
 const tabs: [Tab, string, typeof Store][] = [
-  ['market', '托管市场', Store],
-  ['mine', '我的母机', Server],
-  ['coupons', '优惠码', TicketPercent],
-  ['tickets', '托管工单', Ticket],
-  ['chat', '聊天室', MessagesSquare],
+  ['market', t('托管市场'), Store],
+  ['mine', t('我的母机'), Server],
+  ['coupons', t('优惠码'), TicketPercent],
+  ['tickets', t('托管工单'), Ticket],
+  ['chat', t('聊天室'), MessagesSquare],
 ]
 
-const virtNames: Record<string, string> = { lxc: 'LXC 容器', podman: 'Podman 容器', kvm: 'KVM' }
+const virtNames: Record<string, string> = { lxc: t('LXC 容器'), podman: t('Podman 容器'), kvm: 'KVM' }
 
 function tabFromURL(): Tab {
   const value = new URLSearchParams(window.location.search).get('tab') as Tab
@@ -62,8 +63,8 @@ export default function HostingCenter({ customer }: { customer: CustomerIdentity
       <div className="page-actions">
         <div>
           <p className="eyebrow">HOSTING CENTER</p>
-          <h2>托管中心</h2>
-          <p>把闲置服务器通过 Hatch Agent 接入平台，自定套餐和价格出售给其他用户；平台作为中间方托管资金并按日结算。</p>
+          <h2>{t('托管中心')}</h2>
+          <p>{t('把闲置服务器通过 Hatch Agent 接入平台，自定套餐和价格出售给其他用户；平台作为中间方托管资金并按日结算。')}</p>
         </div>
       </div>
       <div className="segmented" role="tablist">
@@ -84,15 +85,15 @@ export default function HostingCenter({ customer }: { customer: CustomerIdentity
 }
 
 function lastSeen(node: HostedNodeRecord) {
-  if (node.status === 'online') return '在线'
-  return node.last_seen_at ? `离线（最后在线 ${formatTime(node.last_seen_at)}）` : '离线'
+  if (node.status === 'online') return t('在线')
+  return node.last_seen_at ? t('离线（最后在线 {0}）', formatTime(node.last_seen_at)) : t('离线')
 }
 
 function planPrice(plan: PlanRecord) {
   const sorted = [...plan.prices].sort((a, b) => cycleOrder(a.billing_cycle) - cycleOrder(b.billing_cycle))
   const first = sorted.find(price => price.billing_cycle === 'monthly') ?? sorted[0]
-  if (!first) return '暂无报价'
-  const more = plan.prices.length > 1 ? ` 等 ${plan.prices.length} 种周期` : ''
+  if (!first) return t('暂无报价')
+  const more = plan.prices.length > 1 ? t(' 等 {0} 种周期', plan.prices.length) : ''
   return `${walletMoney(first.amount_minor, first.currency)} / ${cycleName(first.billing_cycle)}${more}`
 }
 
@@ -100,9 +101,9 @@ function PlanSpecs({ plan }: { plan: PlanRecord }) {
   return (
     <div className="shop-specs">
       <span>{plan.vcpu} vCPU</span>
-      <span>{plan.ram_mb} MB 内存</span>
-      <span>{plan.disk_gb} GB 磁盘</span>
-      <span>{plan.traffic_gb ? `${plan.traffic_gb} GB 流量` : '不限流量'}</span>
+      <span>{t('{0} MB 内存', plan.ram_mb)}</span>
+      <span>{t('{0} GB 磁盘', plan.disk_gb)}</span>
+      <span>{plan.traffic_gb ? t('{0} GB 流量', plan.traffic_gb) : t('不限流量')}</span>
       <span>{bandwidthLabel(plan.network_down_mbps)}</span>
       {diskIOText(plan) && <span>{diskIOText(plan)}</span>}
       <span>NAT × {plan.port_mapping_count}</span>
@@ -114,9 +115,9 @@ function PlanTerms({ plan }: { plan: PlanRecord }) {
   return (
     <div className="plan-terms">
       <span className={plan.early_refund ? 'tag success' : 'tag'}>
-        {plan.early_refund ? '1 小时内且流量未超 1GB 可全额退款' : '按剩余天数比例退款'}
+        {plan.early_refund ? t('1 小时内且流量未超 1GB 可全额退款') : t('按剩余天数比例退款')}
       </span>
-      {!!plan.purchase_limit && <span className="tag">每人限购 {plan.purchase_limit} 台</span>}
+      {!!plan.purchase_limit && <span className="tag">{t('每人限购 {0} 台', plan.purchase_limit)}</span>}
     </div>
   )
 }
@@ -132,7 +133,7 @@ function Market({ customer }: { customer: CustomerIdentity }) {
   const load = () =>
     api<MarketRecord>('/api/v1/customer/market')
       .then(setMarket)
-      .catch(err => setError(err instanceof Error ? err.message : '加载失败'))
+      .catch(err => setError(err instanceof Error ? err.message : t('加载失败')))
   useEffect(() => {
     void load()
   }, [])
@@ -142,7 +143,7 @@ function Market({ customer }: { customer: CustomerIdentity }) {
       <CurrencyNote />
       {error && <div className="form-error">{error}</div>}
       <div className="note-banner">
-        托管母机由其他用户提供，机主拥有服务器的 root 权限。付款由平台托管、按天结算给机主；母机离线满 24 小时或机主下架时实例会被清退：剩余价值退还到您的余额，另由机主按剩余价值额外赔付一份（以机主当时的余额为限）。
+        {t('托管母机由其他用户提供，机主拥有服务器的 root 权限。付款由平台托管、按天结算给机主；母机离线满 24 小时或机主下架时实例会被清退：剩余价值退还到您的余额，另由机主按剩余价值额外赔付一份（以机主当时的余额为限）。')}
       </div>
       <div className="market-grid">
         {market?.nodes.map(node => (
@@ -151,42 +152,41 @@ function Market({ customer }: { customer: CustomerIdentity }) {
               <div>
                 <h3>{node.name}</h3>
                 <small>
-                  机主 {node.owner_name}
-                  {node.mine ? '（我自己）' : ''}
+                  {t('机主 {0}{1}', node.owner_name, node.mine ? t('（我自己）') : '')}
                 </small>
               </div>
-              <span className={node.status === 'online' ? 'tag success' : 'tag danger'}>{node.status === 'online' ? '在线' : '离线'}</span>
+              <span className={node.status === 'online' ? 'tag success' : 'tag danger'}>{node.status === 'online' ? t('在线') : t('离线')}</span>
             </div>
             <dl className="market-facts">
               <div>
-                <dt><MapPin size={13} /> 位置</dt>
+                <dt><MapPin size={13} /> {t('位置')}</dt>
                 <dd>{node.region_name} · {node.location}</dd>
               </div>
               <div>
-                <dt>线路</dt>
+                <dt>{t('线路')}</dt>
                 <dd>{node.line_description}</dd>
               </div>
               <div>
-                <dt>母机到期</dt>
+                <dt>{t('母机到期')}</dt>
                 <dd>{node.expires_at || '—'}</dd>
               </div>
               <div>
-                <dt>月流量限额</dt>
-                <dd>{node.traffic_quota_gb ? `${node.traffic_quota_gb} GB（整机）` : '不限'}</dd>
+                <dt>{t('月流量限额')}</dt>
+                <dd>{node.traffic_quota_gb ? t('{0} GB（整机）', node.traffic_quota_gb) : t('不限')}</dd>
               </div>
               <div>
-                <dt>剩余可售</dt>
-                <dd>{node.free_vcpu} 核 · {node.free_ram_mb} MB · {node.free_disk_gb} GB</dd>
+                <dt>{t('剩余可售')}</dt>
+                <dd>{t('{0} 核 · {1} MB · {2} GB', node.free_vcpu, node.free_ram_mb, node.free_disk_gb)}</dd>
               </div>
               <div>
-                <dt>超售</dt>
+                <dt>{t('超售')}</dt>
                 <dd>{overcommitText(node.overcommit)}</dd>
               </div>
             </dl>
             <SupplyDetails node={node} sellable={{ vcpu: node.capacity_vcpu, ram_mb: node.capacity_ram_mb, disk_gb: node.capacity_disk_gb }} />
             {!node.mine && (
               <button className="text-button report-link" onClick={() => setReporting(node)}>
-                举报资源不符或超售
+                {t('举报资源不符或超售')}
               </button>
             )}
             <div className="market-plans">
@@ -207,7 +207,7 @@ function Market({ customer }: { customer: CustomerIdentity }) {
                       disabled={node.mine || node.status !== 'online' || !!node.health_hold_reason || stockLeft(plan) === 0}
                       onClick={() => setBuying({ node, plan })}
                     >
-                      {stockLeft(plan) === 0 ? '已售罄' : '购买'}
+                      {stockLeft(plan) === 0 ? t('已售罄') : t('购买')}
                     </button>
                   </div>
                 </div>
@@ -215,7 +215,7 @@ function Market({ customer }: { customer: CustomerIdentity }) {
             </div>
           </article>
         ))}
-        {market && !market.nodes.length && <div className="empty-card">托管市场暂时没有在售母机。</div>}
+        {market && !market.nodes.length && <div className="empty-card">{t('托管市场暂时没有在售母机。')}</div>}
       </div>
       {reporting && <ReportDialog nodeID={reporting.id} nodeName={reporting.name} onClose={() => setReporting(null)} />}
       {buying && <BuyDialog customer={customer} node={buying.node} plan={buying.plan} onClose={() => setBuying(null)} onDone={() => void load()} />}
@@ -268,7 +268,7 @@ function BuyDialog({
       })
       setOrder(created)
     } catch (err) {
-      setError(err instanceof Error ? err.message : '下单失败')
+      setError(err instanceof Error ? err.message : t('下单失败'))
     } finally {
       setBusy(false)
     }
@@ -283,7 +283,7 @@ function BuyDialog({
       setDone(true)
       onDone()
     } catch (err) {
-      setError(err instanceof Error ? err.message : '支付失败')
+      setError(err instanceof Error ? err.message : t('支付失败'))
     } finally {
       setBusy(false)
     }
@@ -296,7 +296,7 @@ function BuyDialog({
       const intent = await api<PaymentIntentRecord>(`/api/v1/customer/invoices/${order.invoice_id}/checkout`, { method: 'POST' })
       window.location.assign(intent.checkout_url)
     } catch (err) {
-      setError(err instanceof Error ? err.message : '在线支付暂不可用')
+      setError(err instanceof Error ? err.message : t('在线支付暂不可用'))
       setBusy(false)
     }
   }
@@ -307,10 +307,10 @@ function BuyDialog({
       <div className="modal panel">
         <div className="panel-heading">
           <div>
-            <p className="eyebrow">{node.name} · 机主 {node.owner_name}</p>
-            <h3>购买 {plan.name}</h3>
+            <p className="eyebrow">{t('{0} · 机主 {1}', node.name, node.owner_name)}</p>
+            <h3>{t('购买 {0}', plan.name)}</h3>
           </div>
-          <button className="icon-button" aria-label="关闭" onClick={onClose}>
+          <button className="icon-button" aria-label={t('关闭')} onClick={onClose}>
             <X size={16} />
           </button>
         </div>
@@ -321,32 +321,32 @@ function BuyDialog({
         {done ? (
           <div className="checkout-success">
             <div>
-              <strong>支付成功，实例正在开通</strong>
-              <span>可在「我的 VPS」查看进度；遇到问题可以提交工单，或在「聊天室」联系机主。</span>
+              <strong>{t('支付成功，实例正在开通')}</strong>
+              <span>{t('可在「我的 VPS」查看进度；遇到问题可以提交工单，或在「聊天室」联系机主。')}</span>
             </div>
-            <a className="primary-button compact" href="/portal/services">查看我的 VPS</a>
+            <a className="primary-button compact" href="/portal/services">{t('查看我的 VPS')}</a>
           </div>
         ) : !order ? (
           <form className="form-grid" onSubmit={create}>
             <label>
-              <span>计费周期</span>
+              <span>{t('计费周期')}</span>
               <select value={cycle} onChange={event => setCycle(event.target.value)}>
                 {prices.map(item => (
                   <option key={item.billing_cycle} value={item.billing_cycle} disabled={priceLeft(item) === 0}>
                     {cycleName(item.billing_cycle)} · {walletMoney(item.charge_minor ?? item.amount_minor, item.currency)}
-                    {item.charge_minor != null ? '（按母机到期折算）' : ''}
-                    {priceLeft(item) === 0 ? '（已达限购次数）' : priceLeft(item) !== null ? `（限购剩 ${priceLeft(item)} 次）` : ''}
+                    {item.charge_minor != null ? t('（按母机到期折算）') : ''}
+                    {priceLeft(item) === 0 ? t('（已达限购次数）') : priceLeft(item) !== null ? t('（限购剩 {0} 次）', priceLeft(item)) : ''}
                   </option>
                 ))}
               </select>
             </label>
             {price?.charge_minor != null && price.period_end && (
               <p className="notice-text wide">
-                母机 {node.expires_at} 到期，早于{cycleName(price.billing_cycle)}周期结束：按剩余时间折算，实付 {walletMoney(price.charge_minor, price.currency)}（原价 {walletMoney(price.amount_minor, price.currency)}），实例随母机在 {node.expires_at} 当天结束时到期。续费按原价计费，同样不超过母机到期日。
+                {t('母机 {0} 到期，早于{1}周期结束：按剩余时间折算，实付 {2}（原价 {3}），实例随母机在 {4} 当天结束时到期。续费按原价计费，同样不超过母机到期日。', node.expires_at, cycleName(price.billing_cycle), walletMoney(price.charge_minor, price.currency), walletMoney(price.amount_minor, price.currency), node.expires_at)}
               </p>
             )}
             <label>
-              <span>系统镜像</span>
+              <span>{t('系统镜像')}</span>
               <select value={template} onChange={event => setTemplate(event.target.value)}>
                 {osOptions(plan.allowed_template_ids).map(item => (
                   <option key={item.id} value={item.id}>{item.label}</option>
@@ -355,29 +355,28 @@ function BuyDialog({
             </label>
             <CouponField planId={plan.id} cycle={cycle} onApplied={(code, discount) => { setCoupon(code); setDiscount(discount) }} />
             <p className="muted-text wide">
-              该实例由第三方机主提供，机主拥有服务器 root 权限，请勿存放敏感数据。母机到期日 {node.expires_at || '未填写'}。
-              可在「我的 VPS」申请退款：{plan.early_refund ? '购买 1 小时内且流量未超 1GB 全额退款，否则' : ''}按剩余天数比例退到余额。
+              {t('该实例由第三方机主提供，机主拥有服务器 root 权限，请勿存放敏感数据。母机到期日 {0}。 可在「我的 VPS」申请退款：{1}按剩余天数比例退到余额。', node.expires_at || t('未填写'), plan.early_refund ? t('购买 1 小时内且流量未超 1GB 全额退款，否则') : '')}
             </p>
             <div className="form-actions wide">
-              <button type="button" className="secondary-button" onClick={onClose}>取消</button>
+              <button type="button" className="secondary-button" onClick={onClose}>{t('取消')}</button>
               <button className="primary-button compact" disabled={busy || !price}>
-                {busy ? '正在下单…' : `下单 ${price ? walletMoney((price.charge_minor ?? price.amount_minor) + price.setup_fee_minor - discount, price.currency) : ''}`}
+                {busy ? t('正在下单…') : t('下单 {0}', price ? walletMoney((price.charge_minor ?? price.amount_minor) + price.setup_fee_minor - discount, price.currency) : '')}
               </button>
             </div>
           </form>
         ) : (
           <div className="pay-choices">
             <p>
-              订单 {order.number} 已生成，应付 <strong>{walletMoney(order.total_minor, order.currency)}</strong>
-              {!!order.discount_minor && `（已优惠 ${walletMoney(order.discount_minor, order.currency)}）`}。当前余额{' '}
-              <strong>{walletMoney(wallet?.balance_minor || 0, wallet?.currency)}</strong>。
+              {t('订单 {0} 已生成，应付', order.number)} <strong>{walletMoney(order.total_minor, order.currency)}</strong>
+              {t('{0}。当前余额', !!order.discount_minor && t('（已优惠 {0}）', walletMoney(order.discount_minor, order.currency)))}
+              <strong>{walletMoney(wallet?.balance_minor || 0, wallet?.currency)}</strong>{t('。')}
             </p>
             <div className="form-actions">
               <button className="primary-button compact" disabled={busy || !enough} onClick={payBalance}>
-                {enough ? '用余额支付' : '余额不足'}
+                {enough ? t('用余额支付') : t('余额不足')}
               </button>
-              <button className="secondary-button" disabled={busy} onClick={payOnline}>在线支付</button>
-              {!enough && <a className="secondary-button" href="/portal/wallet">去充值</a>}
+              <button className="secondary-button" disabled={busy} onClick={payOnline}>{t('在线支付')}</button>
+              {!enough && <a className="secondary-button" href="/portal/wallet">{t('去充值')}</a>}
             </div>
           </div>
         )}
@@ -399,7 +398,7 @@ function MyNodes() {
   const load = () =>
     api<HostingRecord>('/api/v1/customer/hosting')
       .then(setData)
-      .catch(err => setError(err instanceof Error ? err.message : '加载失败'))
+      .catch(err => setError(err instanceof Error ? err.message : t('加载失败')))
   useEffect(() => {
     void load()
   }, [])
@@ -412,14 +411,14 @@ function MyNodes() {
   }, [])
 
   async function dismiss(agent: PendingAgentRecord) {
-    if (!(await confirmDialog({ title: `从待接入列表移除 ${agent.hostname || '这台母机'}？`, message: '它重新连接后会再次出现。', confirmText: '移除' }))) return
+    if (!(await confirmDialog({ title: t('从待接入列表移除 {0}？', agent.hostname || t('这台母机')), message: t('它重新连接后会再次出现。'), confirmText: t('移除') }))) return
     try {
       await api(`/api/v1/customer/hosting/agents/${agent.id}`, { method: 'DELETE' })
       void load()
-      toast('success', '已从待接入列表移除')
+      toast('success', t('已从待接入列表移除'))
     } catch (err) {
-      toast('error', '移除失败', err instanceof Error ? err.message : undefined)
-      setError(err instanceof Error ? err.message : '移除失败')
+      toast('error', t('移除失败'), err instanceof Error ? err.message : undefined)
+      setError(err instanceof Error ? err.message : t('移除失败'))
     }
   }
 
@@ -432,44 +431,44 @@ function MyNodes() {
       {notice && <div className="form-success">{notice}</div>}
       <section className="metrics">
         <article>
-          <span>账户余额</span>
+          <span>{t('账户余额')}</span>
           <strong className={data.balance_minor < 0 ? 'amount-negative' : ''}>{walletMoney(data.balance_minor, data.currency)}</strong>
         </article>
         <article>
-          <span>待结算（托管中）</span>
+          <span>{t('待结算（托管中）')}</span>
           <strong>{walletMoney(active.reduce((sum, node) => sum + node.host_pending_minor, 0), data.currency)}</strong>
         </article>
         <article>
-          <span>已到账收益</span>
+          <span>{t('已到账收益')}</span>
           <strong>{walletMoney(data.nodes.reduce((sum, node) => sum + node.host_released_minor, 0), data.currency)}</strong>
         </article>
         <article>
-          <span>平台手续费</span>
+          <span>{t('平台手续费')}</span>
           <strong>{data.fee_percent}%</strong>
         </article>
       </section>
 
       <div className="page-actions">
         <div>
-          <h3>我的托管母机</h3>
-          <p className="muted-text">收益按天从托管资金释放到余额，只能用于本平台消费，不可提现。</p>
+          <h3>{t('我的托管母机')}</h3>
+          <p className="muted-text">{t('收益按天从托管资金释放到余额，只能用于本平台消费，不可提现。')}</p>
         </div>
         <div className="form-actions">
           <button className="secondary-button" onClick={() => void load()}>
-            <RefreshCw size={15} />刷新
+            <RefreshCw size={15} />{t('刷新')}
           </button>
         </div>
       </div>
-      {!data.enabled && <div className="note-banner warn">托管中心暂未开放发布。</div>}
+      {!data.enabled && <div className="note-banner warn">{t('托管中心暂未开放发布。')}</div>}
       {data.enabled && !publishing && (
         <section className="panel connect-panel">
           <div className="panel-heading">
-            <h3>接入新母机</h3>
-            <button type="button" className="text-button" onClick={() => setPublishing('token')}>已有 Agent 令牌？手动发布</button>
+            <h3>{t('接入新母机')}</h3>
+            <button type="button" className="text-button" onClick={() => setPublishing('token')}>{t('已有 Agent 令牌？手动发布')}</button>
           </div>
-          <ConnectSteps command={data.install_command} where="下方" actionLabel="发布" />
-          <h4 className="subheading">待接入的母机</h4>
-          <PendingAgents agents={data.pending_agents ?? []} actionLabel="发布" onAdd={setPublishing} onDismiss={agent => void dismiss(agent)} />
+          <ConnectSteps command={data.install_command} where={t('下方')} actionLabel={t('发布')} />
+          <h4 className="subheading">{t('待接入的母机')}</h4>
+          <PendingAgents agents={data.pending_agents ?? []} actionLabel={t('发布')} onAdd={setPublishing} onDismiss={agent => void dismiss(agent)} />
         </section>
       )}
       {publishing && (
@@ -479,7 +478,7 @@ function MyNodes() {
           onClose={() => setPublishing(null)}
           onPublished={() => {
             setPublishing(null)
-            setNotice('母机已发布，接下来为它创建套餐。')
+            setNotice(t('母机已发布，接下来为它创建套餐。'))
             void load()
           }}
         />
@@ -487,20 +486,20 @@ function MyNodes() {
       {active.map(node => (
         <HostedNodeCard key={node.id} node={node} data={data} onChanged={() => void load()} onNotice={setNotice} onError={setError} />
       ))}
-      {!active.length && !publishing && <div className="empty-card">还没有托管母机。按上面的步骤安装 Agent 后即可发布。</div>}
+      {!active.length && !publishing && <div className="empty-card">{t('还没有托管母机。按上面的步骤安装 Agent 后即可发布。')}</div>}
       {retired.length > 0 && (
         <div className="panel">
           <div className="panel-heading">
-            <h3>已清退的母机</h3>
+            <h3>{t('已清退的母机')}</h3>
           </div>
           <div className="table-wrap">
             <table>
               <thead>
                 <tr>
-                  <th>母机</th>
-                  <th>清退时间</th>
-                  <th>原因</th>
-                  <th>已到账收益</th>
+                  <th>{t('母机')}</th>
+                  <th>{t('清退时间')}</th>
+                  <th>{t('原因')}</th>
+                  <th>{t('已到账收益')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -508,7 +507,7 @@ function MyNodes() {
                   <tr key={node.id}>
                     <td>{node.name}</td>
                     <td>{node.retired_at ? formatTime(node.retired_at) : ''}</td>
-                    <td>{node.retired_reason}</td>
+                    <td>{tr(node.retired_reason)}</td>
                     <td>{walletMoney(node.host_released_minor, data.currency)}</td>
                   </tr>
                 ))}
@@ -535,36 +534,36 @@ function NodeInfoFields({
   return (
     <>
       <label>
-        <span>母机名称</span>
-        <input name="name" required minLength={2} maxLength={40} defaultValue={node?.name ?? defaultName} placeholder="例如 HK-CN2-01" />
+        <span>{t('母机名称')}</span>
+        <input name="name" required minLength={2} maxLength={40} defaultValue={node?.name ?? defaultName} placeholder={t('例如 HK-CN2-01')} />
       </label>
       {!editing && (
         <label>
-          <span>地域</span>
-          <input name="region_name" required maxLength={40} list="hosting-regions" placeholder="选择或输入，例如 香港" autoComplete="off" />
+          <span>{t('地域')}</span>
+          <input name="region_name" required maxLength={40} list="hosting-regions" placeholder={t('选择或输入，例如 香港')} autoComplete="off" />
           <datalist id="hosting-regions">
             {regions.map(region => (
               <option key={region.id} value={region.name} />
             ))}
           </datalist>
-          <small>可以直接输入新地域，保存时自动创建</small>
+          <small>{t('可以直接输入新地域，保存时自动创建')}</small>
         </label>
       )}
       <label>
-        <span>地理位置（真实填写）</span>
-        <input name="location" required minLength={2} maxLength={80} defaultValue={node?.location} placeholder="例如 香港 葵涌 / 美国 洛杉矶" />
+        <span>{t('地理位置（真实填写）')}</span>
+        <input name="location" required minLength={2} maxLength={80} defaultValue={node?.location} placeholder={t('例如 香港 葵涌 / 美国 洛杉矶')} />
       </label>
       <label>
-        <span>母机租约到期日</span>
+        <span>{t('母机租约到期日')}</span>
         <input name="expires_at" type="date" required defaultValue={node?.expires_at} />
       </label>
       <label>
-        <span>整机月流量限额 GB（0 = 不限）</span>
+        <span>{t('整机月流量限额 GB（0 = 不限）')}</span>
         <input name="traffic_quota_gb" type="number" min="0" required defaultValue={node?.traffic_quota_gb ?? 0} />
       </label>
       <label className="wide">
-        <span>线路描述（真实填写）</span>
-        <textarea name="line_description" required minLength={2} maxLength={500} rows={2} defaultValue={node?.line_description} placeholder="例如 三网 CN2 GIA 回程，去程 163，带宽 1Gbps 共享" />
+        <span>{t('线路描述（真实填写）')}</span>
+        <textarea name="line_description" required minLength={2} maxLength={500} rows={2} defaultValue={node?.line_description} placeholder={t('例如 三网 CN2 GIA 回程，去程 163，带宽 1Gbps 共享')} />
       </label>
     </>
   )
@@ -606,7 +605,7 @@ function PublishForm({ data, agent, onClose, onPublished }: { data: HostingRecor
       })
       onPublished()
     } catch (err) {
-      setError(err instanceof Error ? err.message : '发布失败')
+      setError(err instanceof Error ? err.message : t('发布失败'))
     } finally {
       setBusy(false)
     }
@@ -615,8 +614,8 @@ function PublishForm({ data, agent, onClose, onPublished }: { data: HostingRecor
   return (
     <form className="panel" onSubmit={submit} ref={panel}>
       <div className="panel-heading">
-        <h3>{agent ? `发布母机 ${agent.hostname}` : "手动发布托管母机"}</h3>
-        <button type="button" className="icon-button" aria-label="关闭" onClick={onClose}>
+        <h3>{agent ? t('发布母机 {0}', agent.hostname) : t('手动发布托管母机')}</h3>
+        <button type="button" className="icon-button" aria-label={t('关闭')} onClick={onClose}>
           <X size={16} />
         </button>
       </div>
@@ -625,31 +624,31 @@ function PublishForm({ data, agent, onClose, onPublished }: { data: HostingRecor
           <li key={index}>
             <label className="checkbox">
               <input type="checkbox" checked={agreed[index]} onChange={event => setAgreed(current => current.map((value, i) => (i === index ? event.target.checked : value)))} />
-              <span>{rule}</span>
+              <span>{tr(rule)}</span>
             </label>
           </li>
         ))}
       </ol>
       {agent ? (
         <p className="muted-text">
-          发布 <strong>{agent.hostname || '新母机'}</strong>（{agent.public_ipv4 || agent.remote_ip}）。勾选同意全部准则并填写下面的信息，平台确认 Agent 在线后立即上架。
+          {t('发布')} <strong>{agent.hostname || t('新母机')}</strong>{t('（{0}）。勾选同意全部准则并填写下面的信息，平台确认 Agent 在线后立即上架。', agent.public_ipv4 || agent.remote_ip)}
         </p>
       ) : (
-        <p className="muted-text">手动发布：填写母机信息和安装脚本最后打印的 64 位 Agent 令牌（可在母机上运行 <code>hatch-agent token</code> 查看）。</p>
+        <p className="muted-text">{t('手动发布：填写母机信息和安装脚本最后打印的 64 位 Agent 令牌（可在母机上运行')} <code>hatch-agent token</code> {t('查看）。')}</p>
       )}
       {error && <div className="form-error">{error}</div>}
       <div className="form-grid">
         <NodeInfoFields regions={data.regions} defaultName={agent?.hostname} />
         {!agent && (
           <label className="wide">
-            <span>Agent 令牌</span>
-            <input name="token" required pattern="[0-9a-fA-F]{64}" placeholder="安装脚本最后打印的 64 位令牌" autoComplete="off" />
+            <span>{t('Agent 令牌')}</span>
+            <input name="token" required pattern="[0-9a-fA-F]{64}" placeholder={t('安装脚本最后打印的 64 位令牌')} autoComplete="off" />
           </label>
         )}
         <div className="form-actions wide">
-          <button type="button" className="secondary-button" onClick={onClose}>取消</button>
+          <button type="button" className="secondary-button" onClick={onClose}>{t('取消')}</button>
           <button className="primary-button compact" disabled={busy || !all}>
-            {busy ? '正在验证母机…' : all ? '验证并发布' : '请先勾选同意全部准则'}
+            {busy ? t('正在验证母机…') : all ? t('验证并发布') : t('请先勾选同意全部准则')}
           </button>
         </div>
       </div>
@@ -682,7 +681,7 @@ function HostedNodeCard({
       onNotice(message)
       onChanged()
     } catch (err) {
-      onError(err instanceof Error ? err.message : '操作失败')
+      onError(err instanceof Error ? err.message : t('操作失败'))
     }
   }
 
@@ -691,10 +690,10 @@ function HostedNodeCard({
     try {
       await api(`/api/v1/customer/hosting/nodes/${node.id}`, { method: 'PUT', body: JSON.stringify({ ...nodeInfo(new FormData(event.currentTarget)), region_id: node.region_id }) })
       setEditing(false)
-      onNotice('母机信息已更新')
+      onNotice(t('母机信息已更新'))
       onChanged()
     } catch (err) {
-      onError(err instanceof Error ? err.message : '保存失败')
+      onError(err instanceof Error ? err.message : t('保存失败'))
     }
   }
 
@@ -705,38 +704,37 @@ function HostedNodeCard({
         <div>
           <h3>{node.name}</h3>
           <small>
-            {node.region_name} · {node.location} · 到期 {node.expires_at}
+            {t('{0} · {1} · 到期 {2}', node.region_name, node.location, node.expires_at)}
           </small>
         </div>
         <div className="form-actions">
           <span className={node.status === 'online' ? 'tag success' : 'tag danger'}>{lastSeen(node)}</span>
-          <span className={node.listing_status === 'listed' ? 'tag success' : 'tag'}>{node.listing_status === 'listed' ? '在售' : '已暂停销售'}</span>
+          <span className={node.listing_status === 'listed' ? 'tag success' : 'tag'}>{node.listing_status === 'listed' ? t('在售') : t('已暂停销售')}</span>
         </div>
       </div>
       {node.status !== 'online' && (
         <div className="note-banner warn">
-          母机离线。离线满 {data.offline_hours} 小时将被自动清退：剩余价值退还买家，并从您的余额按剩余价值额外赔付一份（余额不足时扣到 0 为止）。有特殊原因请尽快提交工单联系管理员。
-          {node.clearance_hold_until && ` 管理员已暂缓清退至 ${formatTime(node.clearance_hold_until)}。`}
+          {t('母机离线。离线满 {0} 小时将被自动清退：剩余价值退还买家，并从您的余额按剩余价值额外赔付一份（余额不足时扣到 0 为止）。有特殊原因请尽快提交工单联系管理员。{1}', data.offline_hours, node.clearance_hold_until && t(' 管理员已暂缓清退至 {0}。', formatTime(node.clearance_hold_until)))}
         </div>
       )}
       <dl className="market-facts">
-        <div><dt>线路</dt><dd>{node.line_description}</dd></div>
-        <div><dt>可售资源</dt><dd>{node.capacity_vcpu} 核 / {node.capacity_ram_mb} MB / {node.capacity_disk_gb} GB，剩余 {node.free_vcpu} 核 / {node.free_ram_mb} MB / {node.free_disk_gb} GB</dd></div>
-        <div><dt>运行实例</dt><dd>{node.active_services}</dd></div>
-        <div><dt>托管中 / 待结算</dt><dd>{walletMoney(node.escrow_holding_minor, data.currency)} / {walletMoney(node.host_pending_minor, data.currency)}</dd></div>
-        <div><dt>已到账</dt><dd>{walletMoney(node.host_released_minor, data.currency)}</dd></div>
+        <div><dt>{t('线路')}</dt><dd>{node.line_description}</dd></div>
+        <div><dt>{t('可售资源')}</dt><dd>{t('{0} 核 / {1} MB / {2} GB，剩余 {3} 核 / {4} MB / {5} GB', node.capacity_vcpu, node.capacity_ram_mb, node.capacity_disk_gb, node.free_vcpu, node.free_ram_mb, node.free_disk_gb)}</dd></div>
+        <div><dt>{t('运行实例')}</dt><dd>{node.active_services}</dd></div>
+        <div><dt>{t('托管中 / 待结算')}</dt><dd>{walletMoney(node.escrow_holding_minor, data.currency)} / {walletMoney(node.host_pending_minor, data.currency)}</dd></div>
+        <div><dt>{t('已到账')}</dt><dd>{walletMoney(node.host_released_minor, data.currency)}</dd></div>
       </dl>
       <SupplyDetails node={node} sellable={{ vcpu: node.capacity_vcpu, ram_mb: node.capacity_ram_mb, disk_gb: node.capacity_disk_gb }} />
       <div className="form-actions">
-        <button className="secondary-button" onClick={() => setEditing(value => !value)}>编辑信息</button>
-        <button className="secondary-button" onClick={() => setOverselling(true)}>超售设置</button>
-        <button className="secondary-button" onClick={() => void call(`/api/v1/customer/hosting/nodes/${node.id}/listing`, { listed: node.listing_status !== 'listed' }, node.listing_status === 'listed' ? '已暂停销售，现有实例不受影响' : '已恢复销售')}>
-          {node.listing_status === 'listed' ? '暂停销售' : '恢复销售'}
+        <button className="secondary-button" onClick={() => setEditing(value => !value)}>{t('编辑信息')}</button>
+        <button className="secondary-button" onClick={() => setOverselling(true)}>{t('超售设置')}</button>
+        <button className="secondary-button" onClick={() => void call(`/api/v1/customer/hosting/nodes/${node.id}/listing`, { listed: node.listing_status !== 'listed' }, node.listing_status === 'listed' ? t('已暂停销售，现有实例不受影响') : t('已恢复销售'))}>
+          {node.listing_status === 'listed' ? t('暂停销售') : t('恢复销售')}
         </button>
         <button className="primary-button compact" onClick={() => setPlanForm('new')}>
-          <Plus size={14} />新建套餐
+          <Plus size={14} />{t('新建套餐')}
         </button>
-        <button className="danger-button" onClick={() => setRetiring(true)}>下架母机</button>
+        <button className="danger-button" onClick={() => setRetiring(true)}>{t('下架母机')}</button>
       </div>
       {overselling && (
         <OvercommitDialog
@@ -747,7 +745,7 @@ function HostedNodeCard({
           onClose={() => setOverselling(false)}
           onSaved={() => {
             setOverselling(false)
-            onNotice('超售设置已保存')
+            onNotice(t('超售设置已保存'))
             onChanged()
           }}
         />
@@ -756,21 +754,20 @@ function HostedNodeCard({
         <form className="form-grid" onSubmit={saveInfo}>
           <NodeInfoFields node={node} regions={data.regions} editing />
           <div className="form-actions wide">
-            <button type="button" className="secondary-button" onClick={() => setEditing(false)}>取消</button>
-            <button className="primary-button compact">保存</button>
+            <button type="button" className="secondary-button" onClick={() => setEditing(false)}>{t('取消')}</button>
+            <button className="primary-button compact">{t('保存')}</button>
           </div>
         </form>
       )}
       {retiring && (
         <div className="note-banner danger">
           <p>
-            下架后母机立即退出市场，现有 {node.active_services} 个实例全部清退：剩余价值（当前约 {walletMoney(remaining, data.currency)}）退还买家，
-            并从您的余额额外赔付最多 {walletMoney(remaining, data.currency)}（余额不足时扣到 0 为止）。此操作不可撤销。
+            {t('下架后母机立即退出市场，现有 {0} 个实例全部清退：剩余价值（当前约 {1}）退还买家， 并从您的余额额外赔付最多 {2}（余额不足时扣到 0 为止）。此操作不可撤销。', node.active_services, walletMoney(remaining, data.currency), walletMoney(remaining, data.currency))}
           </p>
           <div className="form-actions">
-            <button className="secondary-button" onClick={() => setRetiring(false)}>取消</button>
-            <button className="danger-button" onClick={() => void call(`/api/v1/customer/hosting/nodes/${node.id}/retire`, { confirm: true }, '母机已下架并完成清退')}>
-              确认下架并清退
+            <button className="secondary-button" onClick={() => setRetiring(false)}>{t('取消')}</button>
+            <button className="danger-button" onClick={() => void call(`/api/v1/customer/hosting/nodes/${node.id}/retire`, { confirm: true }, t('母机已下架并完成清退'))}>
+              {t('确认下架并清退')}
             </button>
           </div>
         </div>
@@ -782,21 +779,21 @@ function HostedNodeCard({
           onClose={() => setPlanForm(null)}
           onSaved={() => {
             setPlanForm(null)
-            onNotice('套餐已保存')
+            onNotice(t('套餐已保存'))
             onChanged()
           }}
         />
       )}
-      <h4>套餐</h4>
+      <h4>{t('套餐')}</h4>
       <div className="table-wrap">
         <table>
           <thead>
             <tr>
-              <th>套餐</th>
-              <th>配置</th>
-              <th>价格</th>
-              <th>状态</th>
-              <th>操作</th>
+              <th>{t('套餐')}</th>
+              <th>{t('配置')}</th>
+              <th>{t('价格')}</th>
+              <th>{t('状态')}</th>
+              <th>{t('操作')}</th>
             </tr>
           </thead>
           <tbody>
@@ -804,47 +801,47 @@ function HostedNodeCard({
               <tr key={plan.id}>
                 <td>
                   <strong>{plan.name}</strong>
-                  <small className="block">{virtNames[plan.virtualization]} · {osOptions(plan.allowed_template_ids).map(item => item.label).join('、')}</small>
+                  <small className="block">{virtNames[plan.virtualization]} · {osOptions(plan.allowed_template_ids).map(item => item.label).join(t('、'))}</small>
                   <small className="block">
-                    {plan.purchase_limit ? `每人限购 ${plan.purchase_limit} 台` : '不限购'} · {plan.early_refund ? '允许早期全额退款' : '按比例退款'}
+                    {plan.purchase_limit ? t('每人限购 {0} 台', plan.purchase_limit) : t('不限购')} · {plan.early_refund ? t('允许早期全额退款') : t('按比例退款')}
                   </small>
                 </td>
                 <td>
-                  {plan.vcpu} 核 / {plan.ram_mb} MB / {plan.disk_gb} GB / {plan.traffic_gb || '不限'} GB / NAT×{plan.port_mapping_count}
+                  {t('{0} 核 / {1} MB / {2} GB / {3} GB / NAT×{4}', plan.vcpu, plan.ram_mb, plan.disk_gb, plan.traffic_gb || t('不限'), plan.port_mapping_count)}
                   {diskIOText(plan) && <small className="block">{diskIOText(plan)}</small>}
                 </td>
                 <td>
-                  {plan.prices.map(price => `${cycleName(price.billing_cycle)} ${walletMoney(price.amount_minor, price.currency)}${price.purchase_limit ? `（限购 ${price.purchase_limit}，已售 ${price.sold ?? 0}）` : ''}`).join('，')}
-                  <small className="block">{plan.stock_limit == null ? '库存不限（受资源限制）' : `库存 ${plan.stock_limit}，已售及待支付 ${plan.stock_held ?? 0}`}</small>
+                  {plan.prices.map(price => `${cycleName(price.billing_cycle)} ${walletMoney(price.amount_minor, price.currency)}${price.purchase_limit ? t('（限购 {0}，已售 {1}）', price.purchase_limit, price.sold ?? 0) : ''}`).join(t('，'))}
+                  <small className="block">{plan.stock_limit == null ? t('库存不限（受资源限制）') : t('库存 {0}，已售及待支付 {1}', plan.stock_limit, plan.stock_held ?? 0)}</small>
                 </td>
-                <td><span className={plan.enabled ? 'tag success' : 'tag'}>{plan.enabled ? '在售' : '已停售'}</span></td>
+                <td><span className={plan.enabled ? 'tag success' : 'tag'}>{plan.enabled ? t('在售') : t('已停售')}</span></td>
                 <td className="row-actions">
-                  <button className="secondary-button compact" onClick={() => setPlanForm(plan)}>编辑</button>
-                  <button className="secondary-button compact" onClick={() => void call(`/api/v1/customer/hosting/plans/${plan.id}/enabled`, { enabled: !plan.enabled }, plan.enabled ? '套餐已停售' : '套餐已上架')}>
-                    {plan.enabled ? '停售' : '上架'}
+                  <button className="secondary-button compact" onClick={() => setPlanForm(plan)}>{t('编辑')}</button>
+                  <button className="secondary-button compact" onClick={() => void call(`/api/v1/customer/hosting/plans/${plan.id}/enabled`, { enabled: !plan.enabled }, plan.enabled ? t('套餐已停售') : t('套餐已上架'))}>
+                    {plan.enabled ? t('停售') : t('上架')}
                   </button>
                 </td>
               </tr>
             ))}
             {!node.plans.length && (
               <tr>
-                <td colSpan={5} className="empty-state">还没有套餐，买家看不到这台母机。</td>
+                <td colSpan={5} className="empty-state">{t('还没有套餐，买家看不到这台母机。')}</td>
               </tr>
             )}
           </tbody>
         </table>
       </div>
-      <h4>母机上的实例</h4>
+      <h4>{t('母机上的实例')}</h4>
       <div className="table-wrap">
         <table>
           <thead>
             <tr>
-              <th>实例</th>
-              <th>套餐</th>
-              <th>买家</th>
-              <th>状态</th>
-              <th>到期</th>
-              <th>剩余价值</th>
+              <th>{t('实例')}</th>
+              <th>{t('套餐')}</th>
+              <th>{t('买家')}</th>
+              <th>{t('状态')}</th>
+              <th>{t('到期')}</th>
+              <th>{t('剩余价值')}</th>
             </tr>
           </thead>
           <tbody>
@@ -860,7 +857,7 @@ function HostedNodeCard({
             ))}
             {!node.services?.length && (
               <tr>
-                <td colSpan={6} className="empty-state">暂无实例</td>
+                <td colSpan={6} className="empty-state">{t('暂无实例')}</td>
               </tr>
             )}
           </tbody>
@@ -883,7 +880,7 @@ function HostedPlanForm({ node, plan, onClose, onSaved }: { node: HostedNodeReco
   useEffect(() => {
     api<NodeImageRecord[]>(`/api/v1/customer/hosting/nodes/${node.id}/templates`)
       .then(setImages)
-      .catch(err => setError(err instanceof Error ? err.message : '无法读取母机镜像'))
+      .catch(err => setError(err instanceof Error ? err.message : t('无法读取母机镜像')))
   }, [node.id])
 
   const visible = images.filter(image => (image.type || 'lxc') === virtualization)
@@ -926,7 +923,7 @@ function HostedPlanForm({ node, plan, onClose, onSaved }: { node: HostedNodeReco
       })
       onSaved()
     } catch (err) {
-      setError(err instanceof Error ? err.message : '保存失败')
+      setError(err instanceof Error ? err.message : t('保存失败'))
     } finally {
       setBusy(false)
     }
@@ -935,22 +932,22 @@ function HostedPlanForm({ node, plan, onClose, onSaved }: { node: HostedNodeReco
   return (
     <form className="panel nested-panel" onSubmit={submit}>
       <div className="panel-heading">
-        <h3>{plan ? `编辑套餐 ${plan.name}` : '新建套餐'}</h3>
-        <button type="button" className="icon-button" aria-label="关闭" onClick={onClose}>
+        <h3>{plan ? t('编辑套餐 {0}', plan.name) : t('新建套餐')}</h3>
+        <button type="button" className="icon-button" aria-label={t('关闭')} onClick={onClose}>
           <X size={16} />
         </button>
       </div>
       {error && <div className="form-error">{error}</div>}
       <p className="muted-text">
-        单个实例配置不能超过母机真实资源（{node.reported_vcpu} 核 / {node.reported_ram_mb} MB / {node.reported_disk_gb} GB）；可售总量为真实资源乘以「超售设置」里的倍数。
+        {t('单个实例配置不能超过母机真实资源（{0} 核 / {1} MB / {2} GB）；可售总量为真实资源乘以「超售设置」里的倍数。', node.reported_vcpu, node.reported_ram_mb, node.reported_disk_gb)}
       </p>
       <div className="form-grid">
         <label>
-          <span>套餐名称</span>
+          <span>{t('套餐名称')}</span>
           <input name="name" required minLength={2} maxLength={40} defaultValue={plan?.name} />
         </label>
         <label>
-          <span>虚拟化</span>
+          <span>{t('虚拟化')}</span>
           <select name="virtualization" value={virtualization} onChange={event => { setVirtualization(event.target.value); setAllowed([]) }}>
             {node.virtualization_types.map(item => (
               <option key={item} value={item}>{virtNames[item] || item}</option>
@@ -958,12 +955,12 @@ function HostedPlanForm({ node, plan, onClose, onSaved }: { node: HostedNodeReco
           </select>
         </label>
         <label><span>vCPU</span><input name="vcpu" type="number" min="1" required defaultValue={plan?.vcpu ?? 1} /></label>
-        <label><span>内存 MB</span><input name="ram_mb" type="number" min="64" required defaultValue={plan?.ram_mb ?? 512} /></label>
-        <label><span>磁盘 GB</span><input name="disk_gb" type="number" min="1" required defaultValue={plan?.disk_gb ?? 5} /></label>
-        <label><span>月流量 GB（0 = 不限）</span><input name="traffic_gb" type="number" min="0" required defaultValue={plan?.traffic_gb ?? 100} /></label>
-        <label><span>下行 Mbps（0 = 不限）</span><input name="network_down_mbps" type="number" min="0" required defaultValue={plan?.network_down_mbps ?? 50} /></label>
-        <label><span>上行 Mbps（0 = 不限）</span><input name="network_up_mbps" type="number" min="0" required defaultValue={plan?.network_up_mbps ?? 20} /></label>
-        <label><span>NAT 端口数</span><input name="port_mapping_count" type="number" min="1" max="100" required defaultValue={plan?.port_mapping_count ?? 5} /></label>
+        <label><span>{t('内存 MB')}</span><input name="ram_mb" type="number" min="64" required defaultValue={plan?.ram_mb ?? 512} /></label>
+        <label><span>{t('磁盘 GB')}</span><input name="disk_gb" type="number" min="1" required defaultValue={plan?.disk_gb ?? 5} /></label>
+        <label><span>{t('月流量 GB（0 = 不限）')}</span><input name="traffic_gb" type="number" min="0" required defaultValue={plan?.traffic_gb ?? 100} /></label>
+        <label><span>{t('下行 Mbps（0 = 不限）')}</span><input name="network_down_mbps" type="number" min="0" required defaultValue={plan?.network_down_mbps ?? 50} /></label>
+        <label><span>{t('上行 Mbps（0 = 不限）')}</span><input name="network_up_mbps" type="number" min="0" required defaultValue={plan?.network_up_mbps ?? 20} /></label>
+        <label><span>{t('NAT 端口数')}</span><input name="port_mapping_count" type="number" min="1" max="100" required defaultValue={plan?.port_mapping_count ?? 5} /></label>
         <StockField
           plan={plan ?? undefined}
           preview={formElement => {
@@ -985,10 +982,10 @@ function HostedPlanForm({ node, plan, onClose, onSaved }: { node: HostedNodeReco
         <DiskIOFields plan={plan} capacity={capacity} />
         <CyclePriceFields
           prices={plan?.prices ?? []}
-          hint="留空表示不支持该计费周期，至少填写一个。母机到期日早于周期结束时，买家按剩余时间折算付款（例如季付 ¥30、母机只剩 2 个月，买家付 ¥20），实例到期日与母机到期日相同。"
+          hint={t('留空表示不支持该计费周期，至少填写一个。母机到期日早于周期结束时，买家按剩余时间折算付款（例如季付 ¥30、母机只剩 2 个月，买家付 ¥20），实例到期日与母机到期日相同。')}
         />
         <fieldset className="wide template-picker">
-          <legend>可选系统镜像（读取自母机）</legend>
+          <legend>{t('可选系统镜像（读取自母机）')}</legend>
           {visible.map(image => (
             <label key={image.id} className="checkbox">
               <input
@@ -999,10 +996,10 @@ function HostedPlanForm({ node, plan, onClose, onSaved }: { node: HostedNodeReco
               <span>{image.id}{image.description ? ` · ${image.description}` : ''}</span>
             </label>
           ))}
-          {!visible.length && <span className="muted-text">母机上没有这种虚拟化的镜像。</span>}
+          {!visible.length && <span className="muted-text">{t('母机上没有这种虚拟化的镜像。')}</span>}
         </fieldset>
         <label>
-          <span>默认镜像</span>
+          <span>{t('默认镜像')}</span>
           <select value={allowed.includes(fallback) ? fallback : allowed[0] || ''} onChange={event => setFallback(event.target.value)}>
             {allowed.map(item => (
               <option key={item} value={item}>{item}</option>
@@ -1010,33 +1007,33 @@ function HostedPlanForm({ node, plan, onClose, onSaved }: { node: HostedNodeReco
           </select>
         </label>
         <label className="wide">
-          <span>套餐描述（可选，展示在托管市场）</span>
-          <textarea name="description" maxLength={1000} rows={3} defaultValue={plan?.description} placeholder="例如适用场景、线路特点、是否支持某些用途" />
+          <span>{t('套餐描述（可选，展示在托管市场）')}</span>
+          <textarea name="description" maxLength={1000} rows={3} defaultValue={plan?.description} placeholder={t('例如适用场景、线路特点、是否支持某些用途')} />
         </label>
         <div className="wide">
           <label className="checkbox">
             <input type="checkbox" checked={limited} onChange={event => setLimited(event.target.checked)} />
-            <span>限购</span>
+            <span>{t('限购')}</span>
           </label>
           {limited && (
             <label className="inline-field">
-              <span>每人最多</span>
+              <span>{t('每人最多')}</span>
               <input name="purchase_limit" type="number" min="1" max="100" required defaultValue={plan?.purchase_limit || 1} />
-              <span>台（按有效实例计算）</span>
+              <span>{t('台（按有效实例计算）')}</span>
             </label>
           )}
         </div>
         <label className="checkbox wide">
           <input name="early_refund" type="checkbox" defaultChecked={plan?.early_refund ?? false} />
-          <span>允许早期全额退款：买家在购买 1 小时内且流量未超 1GB 时可申请全额退款；关闭则一律按剩余天数比例退款</span>
+          <span>{t('允许早期全额退款：买家在购买 1 小时内且流量未超 1GB 时可申请全额退款；关闭则一律按剩余天数比例退款')}</span>
         </label>
         <label className="checkbox">
           <input name="enabled" type="checkbox" defaultChecked={plan?.enabled ?? true} />
-          <span>立即上架</span>
+          <span>{t('立即上架')}</span>
         </label>
         <div className="form-actions wide">
-          <button type="button" className="secondary-button" onClick={onClose}>取消</button>
-          <button className="primary-button compact" disabled={busy || !allowed.length}>{busy ? '正在保存…' : '保存套餐'}</button>
+          <button type="button" className="secondary-button" onClick={onClose}>{t('取消')}</button>
+          <button className="primary-button compact" disabled={busy || !allowed.length}>{busy ? t('正在保存…') : t('保存套餐')}</button>
         </div>
       </div>
     </form>
@@ -1051,7 +1048,7 @@ function HostCoupons() {
   useEffect(() => {
     api<HostingRecord>('/api/v1/customer/hosting')
       .then(setData)
-      .catch(err => setError(err instanceof Error ? err.message : '加载失败'))
+      .catch(err => setError(err instanceof Error ? err.message : t('加载失败')))
   }, [])
   if (!data) return error ? <div className="form-error">{error}</div> : null
   const plans = data.nodes
@@ -1062,7 +1059,7 @@ function HostCoupons() {
       endpoint="/api/v1/customer/hosting/coupons"
       plans={plans}
       canCreate={data.enabled}
-      intro="优惠码只对你自己母机上的套餐有效，优惠从实付金额中扣除，平台按实付金额收取手续费。"
+      intro={t('优惠码只对你自己母机上的套餐有效，优惠从实付金额中扣除，平台按实付金额收取手续费。')}
     />
   )
 }
@@ -1078,11 +1075,11 @@ function HostTickets() {
   const load = () =>
     api<TicketRecord[]>('/api/v1/customer/hosting/tickets')
       .then(setTickets)
-      .catch(err => setError(err instanceof Error ? err.message : '加载失败'))
+      .catch(err => setError(err instanceof Error ? err.message : t('加载失败')))
   const open = (id: string) =>
     api<TicketDetailRecord>(`/api/v1/customer/hosting/tickets/${id}`)
       .then(setDetail)
-      .catch(err => setError(err instanceof Error ? err.message : '加载失败'))
+      .catch(err => setError(err instanceof Error ? err.message : t('加载失败')))
   useEffect(() => {
     void load()
   }, [])
@@ -1090,7 +1087,7 @@ function HostTickets() {
   return (
     <>
       {error && <div className="form-error">{error}</div>}
-      <p className="muted-text">购买您母机实例的用户提交的工单会出现在这里，您是第一处理人；平台管理员也能看到并介入。</p>
+      <p className="muted-text">{t('购买您母机实例的用户提交的工单会出现在这里，您是第一处理人；平台管理员也能看到并介入。')}</p>
       <div className="support-layout">
         <div className="ticket-list">
           {tickets.map(ticket => (
@@ -1102,7 +1099,7 @@ function HostTickets() {
               <span className={`ticket-state ${ticket.status}`}>{ticketStatusLabel(ticket.status)}</span>
             </button>
           ))}
-          {!tickets.length && <div className="empty-state">暂无托管工单</div>}
+          {!tickets.length && <div className="empty-state">{t('暂无托管工单')}</div>}
         </div>
         {detail ? (
           <TicketConversation
@@ -1117,13 +1114,13 @@ function HostTickets() {
                 void load()
                 return true
               } catch (err) {
-                setError(err instanceof Error ? err.message : '回复失败')
+                setError(err instanceof Error ? err.message : t('回复失败'))
                 return false
               }
             }}
           />
         ) : (
-          <div className="panel support-placeholder">选择左侧工单查看详情</div>
+          <div className="panel support-placeholder">{t('选择左侧工单查看详情')}</div>
         )}
       </div>
     </>
@@ -1143,14 +1140,14 @@ function ChatRooms() {
         setRooms(value)
         if (value.length) setSelected(current => current || value[0].node_id)
       })
-      .catch(err => setError(err instanceof Error ? err.message : '加载失败'))
+      .catch(err => setError(err instanceof Error ? err.message : t('加载失败')))
   }, [])
 
   const room = rooms.find(item => item.node_id === selected)
   return (
     <>
       {error && <div className="form-error">{error}</div>}
-      <p className="muted-text">每台托管母机一个聊天室，成员是机主和在这台母机上有实例的用户，平台管理员可以查看全部记录。</p>
+      <p className="muted-text">{t('每台托管母机一个聊天室，成员是机主和在这台母机上有实例的用户，平台管理员可以查看全部记录。')}</p>
       <div className="support-layout">
         <div className="ticket-list">
           {rooms.map(item => (
@@ -1158,18 +1155,18 @@ function ChatRooms() {
               <div>
                 <strong>{item.node_name}</strong>
                 <small>
-                  {item.role === 'host' ? '我是机主' : `机主 ${item.host_name}`} · {item.members} 人{item.retired ? ' · 已清退' : ''}
+                  {t('{0} · {1} 人{2}', item.role === 'host' ? t('我是机主') : t('机主 {0}', item.host_name), item.members, item.retired ? t(' · 已清退') : '')}
                 </small>
-                {item.last_message && <small className="block">{item.last_message.author_name}：{item.last_message.body.slice(0, 40)}</small>}
+                {item.last_message && <small className="block">{t('{0}：{1}', item.last_message.author_name, item.last_message.body.slice(0, 40))}</small>}
               </div>
             </button>
           ))}
-          {!rooms.length && <div className="empty-state">购买托管实例或发布母机后会自动加入对应聊天室。</div>}
+          {!rooms.length && <div className="empty-state">{t('购买托管实例或发布母机后会自动加入对应聊天室。')}</div>}
         </div>
         {room ? (
-          <ChatRoom base="/api/v1/customer/chat/rooms" nodeID={room.node_id} title={`${room.node_name} 聊天室`} />
+          <ChatRoom base="/api/v1/customer/chat/rooms" nodeID={room.node_id} title={t('{0} 聊天室', room.node_name)} />
         ) : (
-          <div className="panel support-placeholder">暂无聊天室</div>
+          <div className="panel support-placeholder">{t('暂无聊天室')}</div>
         )}
       </div>
     </>

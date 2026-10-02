@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Moon, Sun } from 'lucide-react'
+import { t } from './shared/i18n'
 
 export type Theme = 'light' | 'dark'
 
@@ -57,7 +58,7 @@ export function ThemeToggle() {
     setTheme(next)
   }
 
-  const label = theme === 'light' ? '切换到夜间主题' : '切换到白天主题'
+  const label = theme === 'light' ? t('切换到夜间主题') : t('切换到白天主题')
   return (
     <button type="button" className="theme-toggle" onClick={toggle} aria-label={label} title={label}>
       {theme === 'light' ? <Moon size={16} /> : <Sun size={16} />}

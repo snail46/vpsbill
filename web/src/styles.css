@@ -5089,3 +5089,6 @@ input, select, textarea { min-height: 34px; padding: 6px 10px; font-size: 13px; 
 .telegram-rules li > svg { position: absolute; left: 0; top: 3px; }
 .telegram-rules li.muted-text { padding-left: 22px; }
 .operator .locale-toggle span { display: inline; }
+/* A long notice beside the buy button wraps instead of pushing it out. */
+.market-plan-buy .tag { white-space: normal; min-width: 0; line-height: 1.4; }
+.market-plan-buy button { flex: none; }

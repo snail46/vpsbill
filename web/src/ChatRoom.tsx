@@ -5,8 +5,9 @@ import { ReportDialog } from './Reports'
 import { formatTime } from './shared/time'
 import { promptDialog } from './shared/dialog'
 import { toast } from './shared/toast'
+import { t } from './shared/i18n'
 
-const roleLabels: Record<string, string> = { host: '机主', buyer: '用户', staff: '平台', system: '系统' }
+const roleLabels: Record<string, string> = { host: t('机主'), buyer: t('用户'), staff: t('平台'), system: t('系统') }
 
 function websocketURL(path: string) {
   const scheme = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -27,33 +28,33 @@ export default function ChatRoom({ base, nodeID, title, staff = false }: { base:
   async function mute(message: ChatMessageRecord) {
     if (!message.author_account_id) return
     const answer = await promptDialog({
-      title: `禁言 ${message.author_name}`,
-      label: '禁言小时数（1-8760）',
+      title: t('禁言 {0}', message.author_name),
+      label: t('禁言小时数（1-8760）'),
       inputType: 'number',
       defaultValue: '24',
-      confirmText: '禁言',
+      confirmText: t('禁言'),
       danger: true,
-      validate: value => (/^\d+$/.test(value.trim()) && Number(value) >= 1 && Number(value) <= 8760 ? '' : '请输入 1 到 8760 之间的整数小时'),
+      validate: value => (/^\d+$/.test(value.trim()) && Number(value) >= 1 && Number(value) <= 8760 ? '' : t('请输入 1 到 8760 之间的整数小时')),
     })
     if (answer === null) return
     const hours = Number(answer)
     try {
-      await api(`${base}/${nodeID}/mutes`, { method: 'POST', body: JSON.stringify({ account_id: message.author_account_id, hours, reason: '聊天室违规' }) })
+      await api(`${base}/${nodeID}/mutes`, { method: 'POST', body: JSON.stringify({ account_id: message.author_account_id, hours, reason: t('聊天室违规') }) })
       loadMutes()
-      toast('success', `已禁言 ${message.author_name}`)
+      toast('success', t('已禁言 {0}', message.author_name))
     } catch (err) {
-      toast('error', '禁言失败', err instanceof Error ? err.message : undefined)
-      setError(err instanceof Error ? err.message : '禁言失败')
+      toast('error', t('禁言失败'), err instanceof Error ? err.message : undefined)
+      setError(err instanceof Error ? err.message : t('禁言失败'))
     }
   }
   async function unmute(accountID: string) {
     try {
       await api(`${base}/${nodeID}/mutes/${accountID}`, { method: 'DELETE' })
       loadMutes()
-      toast('success', '已解除禁言')
+      toast('success', t('已解除禁言'))
     } catch (err) {
-      toast('error', '解除禁言失败', err instanceof Error ? err.message : undefined)
-      setError(err instanceof Error ? err.message : '操作失败')
+      toast('error', t('解除禁言失败'), err instanceof Error ? err.message : undefined)
+      setError(err instanceof Error ? err.message : t('操作失败'))
     }
   }
   const [messages, setMessages] = useState<ChatMessageRecord[]>([])
@@ -90,7 +91,7 @@ export default function ChatRoom({ base, nodeID, title, staff = false }: { base:
           setCanPost(history.can_post)
           merge(history.messages)
         })
-        .catch(err => setError(err instanceof Error ? err.message : '加载聊天记录失败'))
+        .catch(err => setError(err instanceof Error ? err.message : t('加载聊天记录失败')))
 
     const connect = () => {
       if (closed) return
@@ -139,7 +140,7 @@ export default function ChatRoom({ base, nodeID, title, staff = false }: { base:
       merge([message])
       setBody('')
     } catch (err) {
-      setError(err instanceof Error ? err.message : '发送失败')
+      setError(err instanceof Error ? err.message : t('发送失败'))
     } finally {
       setSending(false)
     }
@@ -149,7 +150,7 @@ export default function ChatRoom({ base, nodeID, title, staff = false }: { base:
     <div className="panel chat-room">
       <div className="panel-heading">
         <h3>{title}</h3>
-        <span className={live ? 'tag success' : 'tag'}>{live ? '实时连接' : '连接中…'}</span>
+        <span className={live ? 'tag success' : 'tag'}>{live ? t('实时连接') : t('连接中…')}</span>
       </div>
       <div className="chat-messages" ref={list}>
         {messages.map(message => (
@@ -159,28 +160,28 @@ export default function ChatRoom({ base, nodeID, title, staff = false }: { base:
               <span className={`chat-role ${message.author_type}`}>{roleLabels[message.author_type] || message.author_type}</span>
               <time>{formatTime(message.created_at)}</time>
               {staff && message.author_account_id && (
-                <button type="button" className="text-button chat-action" onClick={() => void mute(message)} title="禁言">
-                  <VolumeX size={13} />禁言
+                <button type="button" className="text-button chat-action" onClick={() => void mute(message)} title={t('禁言')}>
+                  <VolumeX size={13} />{t('禁言')}
                 </button>
               )}
               {!staff && !message.mine && message.author_type !== 'staff' && (
-                <button type="button" className="text-button chat-action" onClick={() => setReporting(message)} title="举报">
-                  <Flag size={13} />举报
+                <button type="button" className="text-button chat-action" onClick={() => setReporting(message)} title={t('举报')}>
+                  <Flag size={13} />{t('举报')}
                 </button>
               )}
             </div>
             <p>{message.body}</p>
           </div>
         ))}
-        {!messages.length && <div className="empty-state">还没有消息，打个招呼吧。</div>}
+        {!messages.length && <div className="empty-state">{t('还没有消息，打个招呼吧。')}</div>}
       </div>
       {staff && mutes.length > 0 && (
         <div className="chat-mutes">
-          禁言中：
+          {t('禁言中：')}
           {mutes.map(item => (
             <span key={item.account_id} className="tag">
-              {item.account_name} 至 {formatTime(item.until)}
-              <button type="button" className="text-button" onClick={() => void unmute(item.account_id)}>解除</button>
+              {t('{0} 至 {1}', item.account_name, formatTime(item.until))}
+              <button type="button" className="text-button" onClick={() => void unmute(item.account_id)}>{t('解除')}</button>
             </span>
           ))}
         </div>
@@ -193,7 +194,7 @@ export default function ChatRoom({ base, nodeID, title, staff = false }: { base:
             rows={2}
             maxLength={2000}
             value={body}
-            placeholder="输入消息，Enter 发送，Shift+Enter 换行"
+            placeholder={t('输入消息，Enter 发送，Shift+Enter 换行')}
             onChange={event => setBody(event.target.value)}
             onKeyDown={event => {
               if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
@@ -204,11 +205,11 @@ export default function ChatRoom({ base, nodeID, title, staff = false }: { base:
           />
           <button className="primary-button compact" disabled={sending || !body.trim()}>
             <Send size={14} />
-            发送
+            {t('发送')}
           </button>
         </form>
       ) : (
-        <p className="muted-text">母机已清退，聊天室只读。</p>
+        <p className="muted-text">{t('母机已清退，聊天室只读。')}</p>
       )}
     </div>
   )

@@ -187,7 +187,7 @@ func (a *authenticator) customerRegister(w http.ResponseWriter, r *http.Request)
 		}
 	}
 	if mailReady {
-		if err := a.sendVerification(r.Context(), identity.UserID, identity.Email); err != nil {
+		if err := a.sendVerification(r.Context(), identity.UserID, identity.Email, a.mailLang(r, identity.Locale)); err != nil {
 			slog.Default().Warn("queue verification mail", "error", err)
 		}
 	}

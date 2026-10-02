@@ -1,3 +1,4 @@
+import { t } from './i18n'
 // Form checks without the browser's own validation bubbles: when a submit
 // finds an invalid field, the field is outlined and a short message appears
 // under it until it is edited. Forms keep their required/min/max/pattern
@@ -9,23 +10,23 @@ function message(field: Field): string {
   const validity = field.validity
   const input = field instanceof HTMLInputElement ? field : null
   if (validity.valueMissing) {
-    if (input?.type === 'checkbox') return '请勾选此项'
-    if (input?.type === 'file') return '请选择文件'
-    return field instanceof HTMLSelectElement ? '请选择一项' : '请填写此项'
+    if (input?.type === 'checkbox') return t('请勾选此项')
+    if (input?.type === 'file') return t('请选择文件')
+    return field instanceof HTMLSelectElement ? t('请选择一项') : t('请填写此项')
   }
-  if (validity.badInput) return '请输入有效的数字'
+  if (validity.badInput) return t('请输入有效的数字')
   if (validity.typeMismatch) {
-    if (input?.type === 'email') return '请输入有效的邮箱地址'
-    if (input?.type === 'url') return '请输入有效的网址，例如 https://example.com'
-    return '格式不正确'
+    if (input?.type === 'email') return t('请输入有效的邮箱地址')
+    if (input?.type === 'url') return t('请输入有效的网址，例如 https://example.com')
+    return t('格式不正确')
   }
-  if (validity.rangeUnderflow && input) return `不能小于 ${input.min}`
-  if (validity.rangeOverflow && input) return `不能大于 ${input.max}`
-  if (validity.stepMismatch && input) return input.step === '1' || input.step === '' ? '请输入整数' : `请按 ${input.step} 的间隔填写`
-  if (validity.tooShort && input) return `至少 ${input.minLength} 个字符`
-  if (validity.tooLong && input) return `最多 ${input.maxLength} 个字符`
-  if (validity.patternMismatch) return field.title || '格式不正确'
-  return field.validationMessage || '内容无效'
+  if (validity.rangeUnderflow && input) return t('不能小于 {0}', input.min)
+  if (validity.rangeOverflow && input) return t('不能大于 {0}', input.max)
+  if (validity.stepMismatch && input) return input.step === '1' || input.step === '' ? t('请输入整数') : t('请按 {0} 的间隔填写', input.step)
+  if (validity.tooShort && input) return t('至少 {0} 个字符', input.minLength)
+  if (validity.tooLong && input) return t('最多 {0} 个字符', input.maxLength)
+  if (validity.patternMismatch) return field.title || t('格式不正确')
+  return field.validationMessage || t('内容无效')
 }
 
 function hintFor(field: Field): HTMLElement {

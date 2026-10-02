@@ -33,21 +33,22 @@ import { confirmDialog } from './shared/dialog'
 import { PasswordInput } from './shared/password'
 import { bandwidthLabel, statusLabel } from './shared/ui'
 import { toast } from './shared/toast'
+import { t, tr } from './shared/i18n'
 
 // The console (xterm.js and noVNC) is loaded on demand; the detail page
 // fetches it in the background so the first click opens it at once.
 // powerActions describe the start, stop and restart buttons: what the
 // confirmation says and which state means the action is done.
 const powerActions: Record<string, { title: string; message: string; danger?: boolean; done: string; expect: string }> = {
-  start: { title: '开机', message: '实例将启动，通常十几秒后可以登录。', done: '实例已开机', expect: 'running' },
+  start: { title: t('开机'), message: t('实例将启动，通常十几秒后可以登录。'), done: t('实例已开机'), expect: 'running' },
   stop: {
-    title: '关机',
-    message: '实例将关机，正在运行的程序和连接会中断。关机期间服务照常计费，到期时间不变。',
+    title: t('关机'),
+    message: t('实例将关机，正在运行的程序和连接会中断。关机期间服务照常计费，到期时间不变。'),
     danger: true,
-    done: '实例已关机',
+    done: t('实例已关机'),
     expect: 'stopped',
   },
-  restart: { title: '重启', message: '实例将重启，正在运行的程序和连接会中断，通常一分钟内恢复。', danger: true, done: '实例已重启', expect: 'running' },
+  restart: { title: t('重启'), message: t('实例将重启，正在运行的程序和连接会中断，通常一分钟内恢复。'), danger: true, done: t('实例已重启'), expect: 'running' },
 }
 
 // A power action that has not finished after this long is reported as
@@ -76,17 +77,17 @@ const usedOf = (used = 0, total = 0) => `${shortBytes(used)} / ${shortBytes(tota
 const percent = (value = 0) => Math.max(0, Math.min(100, Number.isFinite(value) ? value : 0))
 
 const statusMap: Record<string, string> = {
-  running: '运行中',
-  stopped: '已关机',
-  active: '正常',
-  creating: '创建中',
-  provisioning: '开通中',
-  reconciling: '同步中',
-  error: '异常',
-  suspended: '已暂停',
-  overdue: '已逾期',
-  terminating: '删除中',
-  terminated: '已删除',
+  running: t('运行中'),
+  stopped: t('已关机'),
+  active: t('正常'),
+  creating: t('创建中'),
+  provisioning: t('开通中'),
+  reconciling: t('同步中'),
+  error: t('异常'),
+  suspended: t('已暂停'),
+  overdue: t('已逾期'),
+  terminating: t('删除中'),
+  terminated: t('已删除'),
 }
 
 function StatusBadge({ status }: { status: string }) {
@@ -100,7 +101,7 @@ function Meter({ label, value, text, Icon, pending }: { label: string; value: nu
     <div className={pending ? 'runtime-meter pending' : 'runtime-meter'}>
       <div>
         <span><Icon size={14} />{label}</span>
-        <strong>{pending ? '读取中…' : text}</strong>
+        <strong>{pending ? t('读取中…') : text}</strong>
       </div>
       <i><b style={{ width: pending ? undefined : `${percent(value)}%` }} /></i>
     </div>
@@ -237,7 +238,7 @@ function ServiceManager({ service, onReload }: { service: CustomerServiceRecord;
     try {
       copyToClipboard((await loadPassword())?.password, 'pwd')
     } catch (err) {
-      toast('error', '读取密码失败', err instanceof Error ? err.message : undefined)
+      toast('error', t('读取密码失败'), err instanceof Error ? err.message : undefined)
     }
   }
 
@@ -245,9 +246,9 @@ function ServiceManager({ service, onReload }: { service: CustomerServiceRecord;
     const spec = powerActions[value]
     if (spec) {
       const confirmed = await confirmDialog({
-        title: `确认${spec.title}「${service.instance_name}」？`,
+        title: t('确认{0}「{1}」？', spec.title, service.instance_name),
         message: spec.message,
-        confirmText: `确认${spec.title}`,
+        confirmText: t('确认{0}', spec.title),
         danger: spec.danger,
       })
       if (!confirmed) return
@@ -260,9 +261,9 @@ function ServiceManager({ service, onReload }: { service: CustomerServiceRecord;
       if (spec) setWatching({ action: value, since: Date.now(), sawBusy: value === 'restart' })
       onReload()
     } catch (err) {
-      const message = err instanceof Error ? err.message : '操作失败'
+      const message = err instanceof Error ? err.message : t('操作失败')
       setError(message)
-      if (spec) toast('error', `${spec.title}失败`, message)
+      if (spec) toast('error', t('{0}失败', spec.title), message)
     } finally {
       setActing('')
     }
@@ -296,7 +297,7 @@ function ServiceManager({ service, onReload }: { service: CustomerServiceRecord;
       if (!watching.sawBusy) setWatching({ ...watching, sawBusy: true })
       if (age > powerWatchLimit) {
         setWatching(null)
-        toast('info', `${spec.title}仍在进行`, '节点还在处理，请稍后刷新查看实例状态。')
+        toast('info', t('{0}仍在进行', spec.title), t('节点还在处理，请稍后刷新查看实例状态。'))
       }
       return
     }
@@ -304,7 +305,7 @@ function ServiceManager({ service, onReload }: { service: CustomerServiceRecord;
     if (!watching.sawBusy && age < 15000) return
     setWatching(null)
     if (liveStatus === spec.expect) toast('success', spec.done, service.instance_name)
-    else toast('error', `${spec.title}未完成`, service.last_reconcile_error || `实例当前状态：${statusLabel(liveStatus)}`)
+    else toast('error', t('{0}未完成', spec.title), tr(service.last_reconcile_error) || t('实例当前状态：{0}', statusLabel(liveStatus)))
     // runtime is a dependency so each poll re-checks the state.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [busy, liveStatus, runtime, watching])
@@ -315,39 +316,39 @@ function ServiceManager({ service, onReload }: { service: CustomerServiceRecord;
       {service.termination_reason && (
         <div className="note-banner warn">
           {service.termination_reason === '买家申请退款'
-            ? '已按你的申请取消实例并退款，退款已存入账户余额。'
-            : `${service.termination_reason}。实例已停止服务，按托管准则计算的补偿已存入账户余额。`}
+            ? t('已按你的申请取消实例并退款，退款已存入账户余额。')
+            : t('{0}。实例已停止服务，按托管准则计算的补偿已存入账户余额。', tr(service.termination_reason))}
         </div>
       )}
       {service.status === 'active' && <TradeAction service={service} onDone={onReload} />}
       {listed && (
-        <div className="service-notice warning">该实例正在交易市场挂售，已停机，挂售期间不能开机、登录或修改；到期时间照常计算。下架后可以重新开机。</div>
+        <div className="service-notice warning">{t('该实例正在交易市场挂售，已停机，挂售期间不能开机、登录或修改；到期时间照常计算。下架后可以重新开机。')}</div>
       )}
       {trafficLocked && (
-        <div className="service-notice danger">本月流量（上行加下行双向合计）已用尽，实例已停机，下月 1 日（UTC+8）自动恢复并开机。</div>
+        <div className="service-notice danger">{t('本月流量（上行加下行双向合计）已用尽，实例已停机，下月 1 日（UTC+8）自动恢复并开机。')}</div>
       )}
       {((service.host_name && ['active', 'overdue', 'suspended'].includes(service.status)) || service.status === 'error') && !listed && <RefundPanel service={service} onDone={onReload} />}
 
       {service.status === 'overdue' && (
         <div className="service-notice warning">
-          续费账单已逾期，请在 {formatWhen(service.grace_until)} 前完成支付，否则实例将被暂停。
-          <a href="/portal/billing">前往支付</a>
+          {t('续费账单已逾期，请在 {0} 前完成支付，否则实例将被暂停。', formatWhen(service.grace_until))}
+          <a href="/portal/billing">{t('前往支付')}</a>
         </div>
       )}
       {service.status === 'suspended' && (
         <div className="service-notice danger">
-          服务已因欠费暂停，支付续费账单后将自动恢复运行；未续费的实例将于 {formatWhen(service.termination_scheduled_at)} 删除。
-          <a href="/portal/billing">前往支付</a>
+          {t('服务已因欠费暂停，支付续费账单后将自动恢复运行；未续费的实例将于 {0} 删除。', formatWhen(service.termination_scheduled_at))}
+          <a href="/portal/billing">{t('前往支付')}</a>
         </div>
       )}
       {(service.status === 'terminating' || service.status === 'terminated') && !service.termination_reason && (
         <div className="service-notice danger">
-          {service.status === 'terminating' ? '服务正在终止，实例与数据即将删除。' : '服务已终止，实例与数据已删除。'}
+          {service.status === 'terminating' ? t('服务正在终止，实例与数据即将删除。') : t('服务已终止，实例与数据已删除。')}
         </div>
       )}
       {(service.status === 'provisioning' || service.status === 'pending_payment') && (
         <div className="service-notice">
-          {service.status === 'provisioning' ? '实例正在开通，通常需要 1–2 分钟。' : '订单待支付，支付完成后自动开通。'}
+          {service.status === 'provisioning' ? t('实例正在开通，通常需要 1–2 分钟。') : t('订单待支付，支付完成后自动开通。')}
         </div>
       )}
 
@@ -361,98 +362,98 @@ function ServiceManager({ service, onReload }: { service: CustomerServiceRecord;
           text={`${(Number(usage.cpu_usage_pct) || 0).toFixed(1)}%`}
         />
         <Meter
-          label="内存"
+          label={t('内存')}
           pending={pending}
           Icon={Gauge}
           value={(memoryUsed / memoryTotal) * 100}
           text={usedOf(memoryUsed, memoryTotal)}
         />
         <Meter
-          label="磁盘"
+          label={t('磁盘')}
           pending={pending}
           Icon={HardDrive}
           value={(diskUsed / diskTotal) * 100}
           text={usedOf(diskUsed, service.disk_gb * 1024 ** 3)}
         />
         <Meter
-          label="流量"
+          label={t('流量')}
           pending={pending}
           Icon={Network}
           value={trafficLimit ? (trafficUsed / trafficLimit) * 100 : 0}
-          text={service.traffic_gb ? usedOf(trafficUsed, service.traffic_gb * 1024 ** 3) : `${shortBytes(trafficUsed)} / 不限`}
+          text={service.traffic_gb ? usedOf(trafficUsed, service.traffic_gb * 1024 ** 3) : t('{0} / 不限', shortBytes(trafficUsed))}
         />
       </div>
 
       {rxBytes != null && txBytes != null && (
         <div className="traffic-split">
-          本月流量按双向合计：下行 {bytes(rxBytes)} + 上行 {bytes(txBytes)} = {bytes(trafficUsed)}
+          {t('本月流量按双向合计：下行 {0} + 上行 {1} = {2}', bytes(rxBytes), bytes(txBytes), bytes(trafficUsed))}
         </div>
       )}
       <div className={pending ? "live-io pending" : "live-io"}>
-        <span title="网络接收速率">↓ {rate(Number(usage.network_rx_bps) || 0)}</span>
-        <span title="网络发送速率">↑ {rate(Number(usage.network_tx_bps) || 0)}</span>
-        <span title="磁盘读取速率">读 {rate(Number(usage.disk_read_bps) || 0)}</span>
-        <span title="磁盘写入速率">写 {rate(Number(usage.disk_write_bps) || 0)}</span>
+        <span title={t('网络接收速率')}>↓ {rate(Number(usage.network_rx_bps) || 0)}</span>
+        <span title={t('网络发送速率')}>↑ {rate(Number(usage.network_tx_bps) || 0)}</span>
+        <span title={t('磁盘读取速率')}>{t('读 {0}', rate(Number(usage.disk_read_bps) || 0))}</span>
+        <span title={t('磁盘写入速率')}>{t('写 {0}', rate(Number(usage.disk_write_bps) || 0))}</span>
       </div>
 
       <div className="network-box">
         <div>
-          <span>公网 / 映射 IPv4</span>
-          <strong>{service.primary_ipv4 || '等待分配'}</strong>
+          <span>{t('公网 / 映射 IPv4')}</span>
+          <strong>{service.primary_ipv4 || t('等待分配')}</strong>
           {service.primary_ipv4 && (
             <button
               type="button"
               className="button-link"
               onClick={() => copyToClipboard(service.primary_ipv4, 'ipv4')}
-              title="复制 IPv4"
+              title={t('复制 IPv4')}
             >
               {copiedKey === 'ipv4' ? <Check size={13} /> : <Copy size={13} />}
-              {copiedKey === 'ipv4' ? '已复制' : '复制'}
+              {copiedKey === 'ipv4' ? t('已复制') : t('复制')}
             </button>
           )}
         </div>
         {service.primary_ipv4 && Number(runtime?.container.ssh_port) > 0 && (
           <div>
-            <span>SSH 登录</span>
+            <span>{t('SSH 登录')}</span>
             <strong>{service.primary_ipv4}:{runtime?.container.ssh_port}</strong>
             <button
               type="button"
               className="button-link"
               onClick={() => copyToClipboard(`ssh root@${service.primary_ipv4} -p ${runtime?.container.ssh_port}`, 'ssh')}
-              title="复制 SSH 命令"
+              title={t('复制 SSH 命令')}
             >
               {copiedKey === 'ssh' ? <Check size={13} /> : <Copy size={13} />}
-              {copiedKey === 'ssh' ? '已复制' : '复制命令'}
+              {copiedKey === 'ssh' ? t('已复制') : t('复制命令')}
             </button>
           </div>
         )}
         <div>
-          <span>IPv6 地址</span>
-          <strong>{service.primary_ipv6 || '未分配'}</strong>
+          <span>{t('IPv6 地址')}</span>
+          <strong>{service.primary_ipv6 || t('未分配')}</strong>
           {service.primary_ipv6 && (
             <button
               type="button"
               className="button-link"
               onClick={() => copyToClipboard(service.primary_ipv6, 'ipv6')}
-              title="复制 IPv6"
+              title={t('复制 IPv6')}
             >
               {copiedKey === 'ipv6' ? <Check size={13} /> : <Copy size={13} />}
-              {copiedKey === 'ipv6' ? '已复制' : '复制'}
+              {copiedKey === 'ipv6' ? t('已复制') : t('复制')}
             </button>
           )}
         </div>
       </div>
 
       <div className="credential-row">
-        <span><KeyRound size={14} />root 密码</span>
+        <span><KeyRound size={14} />{t('root 密码')}</span>
         <code>
           {passwordStored === undefined
-            ? '读取中…'
+            ? t('读取中…')
             : !passwordStored
-              ? '未留存，请重置后查看'
+              ? t('未留存，请重置后查看')
               : !showPassword
                 ? '••••••••••••'
-                : (credential?.password ?? '读取中…')}
+                : (credential?.password ?? t('读取中…'))}
         </code>
         {passwordStored && (
           <>
@@ -462,14 +463,14 @@ function ServiceManager({ service, onReload }: { service: CustomerServiceRecord;
                 setShowPassword(v => !v)
                 if (!credential) void loadPassword().catch(() => {})
               }}
-              title={showPassword ? '隐藏密码' : '显示密码'}
+              title={showPassword ? t('隐藏密码') : t('显示密码')}
             >
               {showPassword ? <EyeOff size={14} /> : <Eye size={14} />}
             </button>
             <button
               className="icon-button"
               onClick={() => void copyPassword()}
-              title="复制密码"
+              title={t('复制密码')}
             >
               {copiedKey === 'pwd' ? <Check size={14} /> : <Copy size={14} />}
             </button>
@@ -481,11 +482,11 @@ function ServiceManager({ service, onReload }: { service: CustomerServiceRecord;
       {busy && !reinstalling && (
         <div className="pending-action">
           <RefreshCw size={14} />
-          {restart ? '正在重启…' : `正在切换至 ${service.desired_runtime_status === 'running' ? '运行' : '关机'} 状态…`}
+          {restart ? t('正在重启…') : t('正在切换至 {0} 状态…', service.desired_runtime_status === 'running' ? t('运行') : t('关机'))}
         </div>
       )}
       {(error || runtimeError || (usable && service.last_reconcile_error)) && (
-        <div className="service-warning">{error || runtimeError || '节点状态同步暂时异常，系统会自动重试。'}</div>
+        <div className="service-warning">{error || runtimeError || t('节点状态同步暂时异常，系统会自动重试。')}</div>
       )}
 
       <div className="service-actions primary-row">
@@ -495,7 +496,7 @@ function ServiceManager({ service, onReload }: { service: CustomerServiceRecord;
             disabled={!available || !!acting}
             onClick={() => void action('start')}
           >
-            <Power size={14} />开机
+            <Power size={14} />{t('开机')}
           </button>
         ) : (
           <button
@@ -503,7 +504,7 @@ function ServiceManager({ service, onReload }: { service: CustomerServiceRecord;
             disabled={!available || !!acting}
             onClick={() => void action('stop')}
           >
-            <Square size={13} />关机
+            <Square size={13} />{t('关机')}
           </button>
         )}
         <button
@@ -511,7 +512,7 @@ function ServiceManager({ service, onReload }: { service: CustomerServiceRecord;
           disabled={!available || liveStatus === 'stopped' || !!acting}
           onClick={() => void action('restart')}
         >
-          <RotateCw size={13} />重启
+          <RotateCw size={13} />{t('重启')}
         </button>
         {hasConsole('ssh') && (
           <button
@@ -528,7 +529,7 @@ function ServiceManager({ service, onReload }: { service: CustomerServiceRecord;
             disabled={!available || liveStatus === 'stopped'}
             onClick={() => setConsoleKind('vnc')}
           >
-            <Monitor size={14} />VNC 控制台
+            <Monitor size={14} />{t('VNC 控制台')}
           </button>
         )}
       </div>
@@ -536,24 +537,24 @@ function ServiceManager({ service, onReload }: { service: CustomerServiceRecord;
       <div className="service-actions manage-row">
         {(!capabilities || capabilities.reset_password) && (
           <button className="button-link" disabled={!available} onClick={() => setDialog('password')}>
-            <KeyRound size={13} />重置密码
+            <KeyRound size={13} />{t('重置密码')}
           </button>
         )}
         {(!capabilities || capabilities.reinstall) && (
           <button className="button-link danger" disabled={!available} onClick={() => { void load(false); setDialog('reinstall') }}>
-            <Server size={13} />重装系统
+            <Server size={13} />{t('重装系统')}
           </button>
         )}
         {(!capabilities || capabilities.port_mapping) && (
           <button className="button-link" disabled={!available} onClick={() => setDialog('ports')}>
-            <Globe size={13} />IPv4 端口映射 ({runtime?.container.port_mappings?.length || 0}/{runtime?.container.port_mapping_limit || 0})
+            <Globe size={13} />{t('IPv4 端口映射 ({0}/{1})', runtime?.container.port_mappings?.length || 0, runtime?.container.port_mapping_limit || 0)}
           </button>
         )}
       </div>
       </>)}
 
       {consoleKind && (
-        <Suspense fallback={<div className="modal-backdrop"><div className="console-loading"><div className="spinner" />正在打开控制台…</div></div>}>
+        <Suspense fallback={<div className="modal-backdrop"><div className="console-loading"><div className="spinner" />{t('正在打开控制台…')}</div></div>}>
           <ServiceConsole serviceID={service.id} name={service.instance_name} kind={consoleKind} onClose={() => setConsoleKind(null)} />
         </Suspense>
       )}
@@ -580,10 +581,10 @@ function ServiceManager({ service, onReload }: { service: CustomerServiceRecord;
 const reinstallSeconds: Record<string, number> = { podman: 40, lxc: 90, kvm: 300 }
 
 const reinstallSteps: [number, string][] = [
-  [0, '正在删除旧系统'],
-  [0.2, '正在创建新系统'],
-  [0.6, '正在设置 root 密码和网络'],
-  [0.85, '正在启动并完成收尾'],
+  [0, t('正在删除旧系统')],
+  [0.2, t('正在创建新系统')],
+  [0.6, t('正在设置 root 密码和网络')],
+  [0.85, t('正在启动并完成收尾')],
 ]
 
 // ReinstallProgress follows a background reinstall: an estimated progress
@@ -602,20 +603,20 @@ function ReinstallProgress({ state, virtualization, onDismiss }: { state: Reinst
   const share = running ? 0.95 * (1 - Math.exp(-elapsed / (expected * 0.6))) : 1
   const step = [...reinstallSteps].reverse().find(([from]) => share >= from)?.[1] ?? reinstallSteps[0][1]
   const minutes = Math.floor(elapsed / 60)
-  const clock = minutes ? `${minutes} 分 ${Math.floor(elapsed % 60)} 秒` : `${Math.floor(elapsed)} 秒`
+  const clock = minutes ? t('{0} 分 {1} 秒', minutes, Math.floor(elapsed % 60)) : t('{0} 秒', Math.floor(elapsed))
   if (state.status === 'failed') {
     return (
       <div className="reinstall-progress failed" role="alert">
-        <div><strong>重装失败</strong><button type="button" className="icon-button" onClick={onDismiss} title="关闭"><X size={14} /></button></div>
-        <p>{state.error || '节点未能完成重装，请稍后重试或联系客服。'}</p>
+        <div><strong>{t('重装失败')}</strong><button type="button" className="icon-button" onClick={onDismiss} title={t('关闭')}><X size={14} /></button></div>
+        <p>{tr(state.error) || t('节点未能完成重装，请稍后重试或联系客服。')}</p>
       </div>
     )
   }
   if (state.status === 'succeeded') {
     return (
       <div className="reinstall-progress done" role="status">
-        <div><strong>重装完成</strong><button type="button" className="icon-button" onClick={onDismiss} title="关闭"><X size={14} /></button></div>
-        <p>新系统 {osLabel(state.template_id)} 已就绪，可以用 root 密码登录。</p>
+        <div><strong>{t('重装完成')}</strong><button type="button" className="icon-button" onClick={onDismiss} title={t('关闭')}><X size={14} /></button></div>
+        <p>{t('新系统 {0} 已就绪，可以用 root 密码登录。', osLabel(state.template_id))}</p>
         <i><b style={{ width: '100%' }} /></i>
       </div>
     )
@@ -623,11 +624,11 @@ function ReinstallProgress({ state, virtualization, onDismiss }: { state: Reinst
   return (
     <div className="reinstall-progress" role="status" aria-live="polite">
       <div>
-        <strong><RefreshCw size={14} />重装已发起：{osLabel(state.template_id)}</strong>
-        <span>{Math.round(share * 100)}% · 已用 {clock}</span>
+        <strong><RefreshCw size={14} />{t('重装已发起：{0}', osLabel(state.template_id))}</strong>
+        <span>{t('{0}% · 已用 {1}', Math.round(share * 100), clock)}</span>
       </div>
       <i><b style={{ width: `${share * 100}%` }} /></i>
-      <p>{step}…通常需要 {expected < 60 ? `${expected} 秒` : `${Math.round(expected / 60)} 分钟`}左右，可以离开此页面，重装会在后台继续。</p>
+      <p>{t('{0}…通常需要 {1}左右，可以离开此页面，重装会在后台继续。', step, expected < 60 ? t('{0} 秒', expected) : t('{0} 分钟', Math.round(expected / 60)))}</p>
     </div>
   )
 }
@@ -668,7 +669,7 @@ function ServiceDialog({
           body: JSON.stringify({ password: data.get('password') }),
         })
       } else if (kind === 'reinstall') {
-        if (!confirmed) throw new Error('请先勾选确认：重装会清除所有数据')
+        if (!confirmed) throw new Error(t('请先勾选确认：重装会清除所有数据'))
         // The reinstall runs in the background; the card shows its progress.
         const state = await api<ReinstallRecord>(`/api/v1/customer/services/${service.id}/reinstall`, {
           method: 'POST',
@@ -693,14 +694,14 @@ function ServiceDialog({
       if (kind !== 'ports') onClose()
       else form.reset()
     } catch (err) {
-      setError(err instanceof Error ? err.message : '操作失败')
+      setError(err instanceof Error ? err.message : t('操作失败'))
     } finally {
       setSaving(false)
     }
   }
 
   const remove = async (index: number) => {
-    if (!(await confirmDialog({ title: '删除这条端口映射？', message: '删除后外部将无法通过该端口访问实例。', confirmText: '删除', danger: true }))) return
+    if (!(await confirmDialog({ title: t('删除这条端口映射？'), message: t('删除后外部将无法通过该端口访问实例。'), confirmText: t('删除'), danger: true }))) return
     try {
       const next = await api<PortMappingRecord[]>(`/api/v1/customer/services/${service.id}/port-mappings/${index}`, {
         method: 'DELETE',
@@ -708,14 +709,14 @@ function ServiceDialog({
       setMappings(next)
       await onChanged()
     } catch (err) {
-      setError(err instanceof Error ? err.message : '删除失败')
+      setError(err instanceof Error ? err.message : t('删除失败'))
     }
   }
 
   const titles = {
-    password: '重置 root 密码',
-    reinstall: '重装操作系统',
-    ports: 'IPv4 端口映射管理',
+    password: t('重置 root 密码'),
+    reinstall: t('重装操作系统'),
+    ports: t('IPv4 端口映射管理'),
   }
 
   return (
@@ -735,19 +736,19 @@ function ServiceDialog({
           <div className="mapping-list">
             {mappings.map((m, index) => (
               <div key={`${m.host_port}-${m.protocol}`}>
-                <code>{m.host_ip || service.primary_ipv4 || '宿主 IP'}:{m.host_port}</code>
-                <span>→ {m.container_port}/{m.protocol === 'both' ? 'TCP+UDP' : m.protocol.toUpperCase()} · {m.description || '未命名'}</span>
+                <code>{m.host_ip || service.primary_ipv4 || t('宿主 IP')}:{m.host_port}</code>
+                <span>→ {m.container_port}/{m.protocol === 'both' ? 'TCP+UDP' : m.protocol.toUpperCase()} · {m.description || t('未命名')}</span>
                 <button
                   className="icon-button danger"
                   disabled={m.description.toLowerCase() === 'ssh'}
                   onClick={() => void remove(index)}
-                  title={m.description.toLowerCase() === 'ssh' ? '默认 SSH 端口无法删除' : '删除映射'}
+                  title={m.description.toLowerCase() === 'ssh' ? t('默认 SSH 端口无法删除') : t('删除映射')}
                 >
                   <Trash2 size={14} />
                 </button>
               </div>
             ))}
-            {!mappings.length && <p className="empty-state">暂无外部端口映射</p>}
+            {!mappings.length && <p className="empty-state">{t('暂无外部端口映射')}</p>}
           </div>
         )}
 
@@ -755,11 +756,11 @@ function ServiceDialog({
           {kind === 'password' && (
             <>
               <label>
-                <span>新 root 密码（留空自动随机生成）</span>
-                <PasswordInput name="password" placeholder="8-64 位，包含字母与数字" />
+                <span>{t('新 root 密码（留空自动随机生成）')}</span>
+                <PasswordInput name="password" placeholder={t('8-64 位，包含字母与数字')} />
               </label>
               <p style={{ color: 'var(--text-muted)', fontSize: '12.5px' }}>
-                重置成功后新密码将加密留存，可直接在 VPS 卡片中查看与一键复制。
+                {t('重置成功后新密码将加密留存，可直接在 VPS 卡片中查看与一键复制。')}
               </p>
             </>
           )}
@@ -767,24 +768,24 @@ function ServiceDialog({
           {kind === 'reinstall' && (
             <>
               <div className="danger-note">
-                警告：重装系统将彻底抹除该实例磁盘上的全部数据且无法恢复，请先备份重要文件。
+                {t('警告：重装系统将彻底抹除该实例磁盘上的全部数据且无法恢复，请先备份重要文件。')}
               </div>
               <label>
-                <span>目标操作系统镜像</span>
+                <span>{t('目标操作系统镜像')}</span>
                 <select name="template_id" required defaultValue="">
-                  <option value="" disabled>请选择系统镜像</option>
+                  <option value="" disabled>{t('请选择系统镜像')}</option>
                   {osOptions(runtime?.templates.map(t => t.id) ?? []).map(t => (
                     <option value={t.id} key={t.id}>{t.label}</option>
                   ))}
                 </select>
               </label>
               <label>
-                <span>新 root 密码（留空沿用当前密码）</span>
-                <PasswordInput name="password" placeholder="8-64 位，包含字母与数字" />
+                <span>{t('新 root 密码（留空沿用当前密码）')}</span>
+                <PasswordInput name="password" placeholder={t('8-64 位，包含字母与数字')} />
               </label>
               <label className="confirm-check">
                 <input type="checkbox" checked={confirmed} onChange={event => setConfirmed(event.target.checked)} />
-                <span>重装系统会清除所有数据。我已完成备份，确认重装</span>
+                <span>{t('重装系统会清除所有数据。我已完成备份，确认重装')}</span>
               </label>
             </>
           )}
@@ -792,15 +793,15 @@ function ServiceDialog({
           {kind === 'ports' && (
             <div className="mapping-form">
               <label>
-                <span>内部端口</span>
+                <span>{t('内部端口')}</span>
                 <input name="container_port" type="number" min="1" max="65535" placeholder="80" required />
               </label>
               <label>
-                <span>公网端口</span>
-                <input name="public_port" type="number" min="1" max="65535" placeholder="留空自动分配" />
+                <span>{t('公网端口')}</span>
+                <input name="public_port" type="number" min="1" max="65535" placeholder={t('留空自动分配')} />
               </label>
               <label>
-                <span>协议</span>
+                <span>{t('协议')}</span>
                 <select name="protocol" defaultValue="tcp">
                   <option value="tcp">TCP</option>
                   <option value="udp">UDP</option>
@@ -808,19 +809,19 @@ function ServiceDialog({
                 </select>
               </label>
               <label>
-                <span>用途备注</span>
-                <input name="description" maxLength={80} placeholder="例如 Web 服务" />
+                <span>{t('用途备注')}</span>
+                <input name="description" maxLength={80} placeholder={t('例如 Web 服务')} />
               </label>
             </div>
           )}
 
           <div className="form-actions">
-            <button type="button" className="secondary-button" onClick={onClose}>取消</button>
+            <button type="button" className="secondary-button" onClick={onClose}>{t('取消')}</button>
             <button
               className={kind === 'reinstall' ? 'danger-button' : 'primary-button'}
               disabled={saving || (kind === 'reinstall' && !confirmed)}
             >
-              {saving ? '处理中…' : kind === 'ports' ? '添加映射' : '确认执行'}
+              {saving ? t('处理中…') : kind === 'ports' ? t('添加映射') : t('确认执行')}
             </button>
           </div>
         </form>
@@ -832,10 +833,10 @@ function ServiceDialog({
 type SourceFilter = 'all' | 'platform' | 'hosted' | 'trade'
 
 const sourceFilters: [SourceFilter, string][] = [
-  ['all', '全部'],
-  ['platform', '平台自营'],
-  ['hosted', '托管市场'],
-  ['trade', '交易市场'],
+  ['all', t('全部')],
+  ['platform', t('平台自营')],
+  ['hosted', t('托管市场')],
+  ['trade', t('交易市场')],
 ]
 
 const matchesSource = (service: CustomerServiceRecord, filter: SourceFilter) =>
@@ -846,8 +847,8 @@ const matchesSource = (service: CustomerServiceRecord, filter: SourceFilter) =>
 function SourceTags({ service }: { service: CustomerServiceRecord }) {
   return (
     <>
-      {service.source === 'hosted' ? <span className="tag source-hosted">托管市场</span> : <span className="tag source-platform">平台自营</span>}
-      {service.via_trade && <span className="tag source-trade">交易市场购入</span>}
+      {service.source === 'hosted' ? <span className="tag source-hosted">{t('托管市场')}</span> : <span className="tag source-platform">{t('平台自营')}</span>}
+      {service.via_trade && <span className="tag source-trade">{t('交易市场购入')}</span>}
     </>
   )
 }
@@ -886,15 +887,15 @@ function ServiceTile({ service, onChanged }: { service: CustomerServiceRecord; o
         <span className="tag">{service.virtualization.toUpperCase()}</span>
       </div>
       <dl className="service-tile-facts">
-        <div><dt>配置</dt><dd>{service.vcpu} 核 · {service.ram_mb >= 1024 ? `${+(service.ram_mb / 1024).toFixed(1)} GB` : `${service.ram_mb} MB`} · {service.disk_gb} GB</dd></div>
-        <div><dt>带宽</dt><dd>{bandwidthLabel(service.network_down_mbps)}</dd></div>
-        <div><dt>系统</dt><dd>{osLabel(service.template_id)}</dd></div>
-        <div><dt>地域</dt><dd>{service.region_name}</dd></div>
+        <div><dt>{t('配置')}</dt><dd>{t('{0} 核 · {1} · {2} GB', service.vcpu, service.ram_mb >= 1024 ? `${+(service.ram_mb / 1024).toFixed(1)} GB` : `${service.ram_mb} MB`, service.disk_gb)}</dd></div>
+        <div><dt>{t('带宽')}</dt><dd>{bandwidthLabel(service.network_down_mbps)}</dd></div>
+        <div><dt>{t('系统')}</dt><dd>{osLabel(service.template_id)}</dd></div>
+        <div><dt>{t('地域')}</dt><dd>{service.region_name}</dd></div>
         <div><dt>IP</dt><dd>{service.primary_ipv4 || service.primary_ipv6 || '—'}</dd></div>
-        <div><dt>到期</dt><dd>{service.next_due_at && !ended ? formatDate(service.next_due_at) : '—'}</dd></div>
+        <div><dt>{t('到期')}</dt><dd>{service.next_due_at && !ended ? formatDate(service.next_due_at) : '—'}</dd></div>
         <div className="wide">
-          <dt>续费</dt>
-          <dd>{ended ? '—' : renewalText(service)}{!ended && <small>{service.auto_renew ? ' · 自动' : ' · 手动'}</small>}</dd>
+          <dt>{t('续费')}</dt>
+          <dd>{ended ? '—' : renewalText(service)}{!ended && <small>{service.auto_renew ? t(' · 自动') : t(' · 手动')}</small>}</dd>
         </div>
       </dl>
     </a>
@@ -918,7 +919,7 @@ function AutoRenewSwitch({ service, onChanged }: { service: CustomerServiceRecor
       await api(`/api/v1/customer/services/${service.id}/auto-renew`, { method: 'PUT', body: JSON.stringify({ enabled: !service.auto_renew }) })
       onChanged()
     } catch (err) {
-      setError(err instanceof Error ? err.message : '保存失败')
+      setError(err instanceof Error ? err.message : t('保存失败'))
     } finally {
       setBusy(false)
     }
@@ -928,10 +929,10 @@ function AutoRenewSwitch({ service, onChanged }: { service: CustomerServiceRecor
       <label className="switch">
         <input type="checkbox" checked={service.auto_renew} disabled={busy} onChange={() => void toggle()} />
         <span />
-        自动余额续费
+        {t('自动余额续费')}
       </label>
       <small className="muted-text">
-        {service.auto_renew ? '到期前 24 小时从账户余额扣款续费；余额不足时请手动支付续费账单。' : '已关闭，到期前需要手动支付续费账单。'}
+        {service.auto_renew ? t('到期前 24 小时从账户余额扣款续费；余额不足时请手动支付续费账单。') : t('已关闭，到期前需要手动支付续费账单。')}
       </small>
       {error && <small className="danger-text">{error}</small>}
     </div>
@@ -946,7 +947,7 @@ function ServiceDetail({ service, onReload }: { service: CustomerServiceRecord; 
   return (
     <>
       <button className="text-button back-link" onClick={() => navigatePortal('/portal/services')}>
-        <ArrowLeft size={14} />返回我的 VPS
+        <ArrowLeft size={14} />{t('返回我的 VPS')}
       </button>
       <div className="service-detail-layout">
         <div className="service-detail-side">
@@ -963,26 +964,26 @@ function ServiceDetail({ service, onReload }: { service: CustomerServiceRecord; 
               <StatusBadge status={serviceUsable(service.status) ? service.runtime_status : service.status} />
             </div>
             <dl className="detail-facts">
-              <div><dt>实例名</dt><dd>{service.instance_name}</dd></div>
-              <div><dt>地域</dt><dd>{service.region_name}</dd></div>
-              <div><dt>配置</dt><dd>{service.vcpu} 核 · {service.ram_mb} MB · {service.disk_gb} GB · 月流量 {service.traffic_gb || '不限'}{service.traffic_gb ? ' GB' : ''}</dd></div>
-              <div><dt>带宽</dt><dd>{bandwidthLabel(service.network_down_mbps)}</dd></div>
-              <div><dt>系统</dt><dd>{osLabel(service.template_id)}</dd></div>
-              <div><dt>来源</dt><dd>{service.source === 'hosted' ? `托管市场 · 机主 ${service.host_name || '—'}` : '平台自营'}{service.via_trade ? ' · 交易市场购入' : ''}</dd></div>
-              <div><dt>业务状态</dt><dd><StatusBadge status={service.status} /></dd></div>
-              <div><dt>到期时间</dt><dd>{service.next_due_at ? formatTime(service.next_due_at) : '—'}</dd></div>
-              <div><dt>续费价格</dt><dd>{renewalText(service)}</dd></div>
+              <div><dt>{t('实例名')}</dt><dd>{service.instance_name}</dd></div>
+              <div><dt>{t('地域')}</dt><dd>{service.region_name}</dd></div>
+              <div><dt>{t('配置')}</dt><dd>{t('{0} 核 · {1} MB · {2} GB · 月流量 {3}{4}', service.vcpu, service.ram_mb, service.disk_gb, service.traffic_gb || t('不限'), service.traffic_gb ? ' GB' : '')}</dd></div>
+              <div><dt>{t('带宽')}</dt><dd>{bandwidthLabel(service.network_down_mbps)}</dd></div>
+              <div><dt>{t('系统')}</dt><dd>{osLabel(service.template_id)}</dd></div>
+              <div><dt>{t('来源')}</dt><dd>{service.source === 'hosted' ? t('托管市场 · 机主 {0}', service.host_name || '—') : t('平台自营')}{service.via_trade ? t(' · 交易市场购入') : ''}</dd></div>
+              <div><dt>{t('业务状态')}</dt><dd><StatusBadge status={service.status} /></dd></div>
+              <div><dt>{t('到期时间')}</dt><dd>{service.next_due_at ? formatTime(service.next_due_at) : '—'}</dd></div>
+              <div><dt>{t('续费价格')}</dt><dd>{renewalText(service)}</dd></div>
             </dl>
             {!ended && <AutoRenewSwitch service={service} onChanged={onReload} />}
             {service.source === 'hosted' && service.node_id && !ended && (
               <div className="form-actions">
                 <button className="secondary-button" onClick={() => setChat(value => !value)}>
-                  <MessagesSquare size={14} />{chat ? '收起母机聊天室' : '母机聊天室'}
+                  <MessagesSquare size={14} />{chat ? t('收起母机聊天室') : t('母机聊天室')}
                 </button>
               </div>
             )}
           </section>
-          {chat && service.node_id && <ChatRoom base="/api/v1/customer/chat/rooms" nodeID={service.node_id} title={`${service.host_name || ''} 的母机聊天室`} />}
+          {chat && service.node_id && <ChatRoom base="/api/v1/customer/chat/rooms" nodeID={service.node_id} title={t('{0} 的母机聊天室', service.host_name || '')} />}
         </div>
         <ServiceManager service={service} onReload={onReload} />
       </div>
@@ -1027,7 +1028,7 @@ export default function CustomerServices() {
         ) : (
           services && (
             <div className="empty-card">
-              找不到这台实例。<button className="text-button" onClick={() => navigatePortal('/portal/services')}>返回我的 VPS</button>
+              {t('找不到这台实例。')}<button className="text-button" onClick={() => navigatePortal('/portal/services')}>{t('返回我的 VPS')}</button>
             </div>
           )
         )}
@@ -1042,17 +1043,17 @@ export default function CustomerServices() {
       <div className="page-actions">
         <div>
           <p className="eyebrow">COMPUTE</p>
-          <h2>我的 VPS</h2>
-          <p>点击实例进入详情页，查看监控、登录信息并执行开关机、重装等操作。</p>
+          <h2>{t('我的 VPS')}</h2>
+          <p>{t('点击实例进入详情页，查看监控、登录信息并执行开关机、重装等操作。')}</p>
         </div>
         <button className="secondary-button" onClick={() => void load()}>
-          <RefreshCw size={15} />刷新
+          <RefreshCw size={15} />{t('刷新')}
         </button>
       </div>
 
       {error && <div className="form-error">{error}</div>}
 
-      <div className="filter-chips" role="tablist" aria-label="按来源筛选">
+      <div className="filter-chips" role="tablist" aria-label={t('按来源筛选')}>
         {sourceFilters.map(([id, label]) => (
           <button key={id} role="tab" aria-selected={filter === id} className={filter === id ? 'chip-button active' : 'chip-button'} onClick={() => setFilter(id)}>
             {label}
@@ -1062,7 +1063,7 @@ export default function CustomerServices() {
         {ended.length > 0 && (
           <label className="notify-option filter-ended">
             <input type="checkbox" checked={showEnded} onChange={event => setShowEnded(event.target.checked)} />
-            显示已删除（{ended.length}）
+            {t('显示已删除（{0}）', ended.length)}
           </label>
         )}
       </div>
@@ -1071,10 +1072,10 @@ export default function CustomerServices() {
         {visible.map(service => (
           <ServiceTile key={service.id} service={service} onChanged={() => void load()} />
         ))}
-        {!services && !error && <div className="empty-card" style={{ gridColumn: '1 / -1' }}>正在加载实例…</div>}
+        {!services && !error && <div className="empty-card" style={{ gridColumn: '1 / -1' }}>{t('正在加载实例…')}</div>}
         {services && !visible.length && (
           <div className="empty-card" style={{ gridColumn: '1 / -1' }}>
-            {filter === 'all' ? '当前账户暂无 VPS 实例，可前往“选购 VPS”挑选配置。' : '没有这一来源的实例。'}
+            {filter === 'all' ? t('当前账户暂无 VPS 实例，可前往“选购 VPS”挑选配置。') : t('没有这一来源的实例。')}
           </div>
         )}
       </div>
@@ -1095,7 +1096,7 @@ function RefundPanel({ service, onDone }: { service: CustomerServiceRecord; onDo
     try {
       setQuote(await api<RefundQuoteRecord>(`/api/v1/customer/services/${service.id}/refund`))
     } catch (err) {
-      setError(err instanceof Error ? err.message : '无法计算退款')
+      setError(err instanceof Error ? err.message : t('无法计算退款'))
     } finally {
       setBusy(false)
     }
@@ -1110,7 +1111,7 @@ function RefundPanel({ service, onDone }: { service: CustomerServiceRecord; onDo
       setQuote(null)
       onDone()
     } catch (err) {
-      setError(err instanceof Error ? err.message : '退款失败')
+      setError(err instanceof Error ? err.message : t('退款失败'))
       void load()
     } finally {
       setBusy(false)
@@ -1122,7 +1123,7 @@ function RefundPanel({ service, onDone }: { service: CustomerServiceRecord; onDo
       <div className="service-refund">
         {error && <div className="form-error">{error}</div>}
         <button className="secondary-button compact" disabled={busy} onClick={() => void load()}>
-          {busy ? '正在计算…' : '申请退款'}
+          {busy ? t('正在计算…') : t('申请退款')}
         </button>
       </div>
     )
@@ -1130,26 +1131,24 @@ function RefundPanel({ service, onDone }: { service: CustomerServiceRecord; onDo
   return (
     <div className="panel nested-panel">
       <div className="panel-heading">
-        <h3>申请退款：{quote.instance_name}</h3>
-        <button className="icon-button" aria-label="关闭" onClick={() => setQuote(null)}>
+        <h3>{t('申请退款：{0}', quote.instance_name)}</h3>
+        <button className="icon-button" aria-label={t('关闭')} onClick={() => setQuote(null)}>
           <X size={16} />
         </button>
       </div>
       {error && <div className="form-error">{error}</div>}
       <div className="refund-summary">
-        <span>{quote.full ? (service.status === 'error' ? '开通失败，全额退款' : '早期全额退款') : '按剩余天数比例退款'}</span>
+        <span>{quote.full ? (service.status === 'error' ? t('开通失败，全额退款') : t('早期全额退款')) : t('按剩余天数比例退款')}</span>
         <strong>{walletMoney(quote.refund_minor, quote.currency)}</strong>
         <small className="muted-text">
-          已付 {walletMoney(quote.paid_minor, quote.currency)}
-          {quote.traffic_bytes !== null ? ` · 已用流量 ${bytes(quote.traffic_bytes)}` : ''}
-          {quote.message ? ` · ${quote.message}` : ''}
+          {t('已付 {0}{1}{2}', walletMoney(quote.paid_minor, quote.currency), quote.traffic_bytes !== null ? t(' · 已用流量 {0}', bytes(quote.traffic_bytes)) : '', quote.message ? ` · ${tr(quote.message)}` : '')}
         </small>
       </div>
-      <p className="muted-text">退款存入账户余额（不可提现），实例会立即停止并从母机上删除，数据无法恢复。{quote.full ? '' : '按比例退款时，当天按已使用计算。'}</p>
+      <p className="muted-text">{t('退款存入账户余额（不可提现），实例会立即停止并从母机上删除，数据无法恢复。{0}', quote.full ? '' : t('按比例退款时，当天按已使用计算。'))}</p>
       <div className="form-actions">
-        <button className="secondary-button" onClick={() => setQuote(null)}>取消</button>
+        <button className="secondary-button" onClick={() => setQuote(null)}>{t('取消')}</button>
         <button className="danger-button compact" disabled={busy || !quote.available} onClick={() => void confirm()}>
-          {busy ? '正在处理…' : `确认退款 ${walletMoney(quote.refund_minor, quote.currency)}`}
+          {busy ? t('正在处理…') : t('确认退款 {0}', walletMoney(quote.refund_minor, quote.currency))}
         </button>
       </div>
     </div>

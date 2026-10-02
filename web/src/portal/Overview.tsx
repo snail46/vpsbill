@@ -4,6 +4,7 @@ import { api, cached, AnnouncementRecord, CustomerIdentity, CustomerInvoiceRecor
 import { money } from '../shared/ui'
 import { navigatePortal } from '../shared/nav'
 import { formatDate, formatTime } from '../shared/time'
+import { t } from '../shared/i18n'
 
 const soon = 7 * 24 * 3600 * 1000
 
@@ -58,31 +59,31 @@ export function CustomerOverview({ customer }: { customer: CustomerIdentity }) {
       <section className="hero-card customer-hero metric-link" role="link" tabIndex={0} onClick={() => navigatePortal('/portal/services')}>
         <div>
           <p className="eyebrow">WELCOME BACK</p>
-          <h2>{customer.display_name}，欢迎回到云服务中心。</h2>
-          <p>集中查看所有实例运行状态、快速执行电源和管理操作，并实时跟踪账单结算。</p>
+          <h2>{t('{0}，欢迎回到云服务中心。', customer.display_name)}</h2>
+          <p>{t('集中查看所有实例运行状态、快速执行电源和管理操作，并实时跟踪账单结算。')}</p>
         </div>
         <div className="hero-signal">
           <span>{online}/{services.length}</span>
-          <small>在线实例</small>
+          <small>{t('在线实例')}</small>
         </div>
       </section>
 
       <section className="metrics overview-metrics">
-        <MetricCard to="/portal/services" icon={<Boxes size={20} />} label="VPS 总数" value={services.length} note={`${online} 台运行中`} />
+        <MetricCard to="/portal/services" icon={<Boxes size={20} />} label={t('VPS 总数')} value={services.length} note={t('{0} 台运行中', online)} />
         <MetricCard
           to="/portal/services"
           icon={<CalendarClock size={20} />}
-          label="7 天内到期"
+          label={t('7 天内到期')}
           value={expiring.length}
-          note={expiring.length ? `${expiring.filter(item => item.auto_renew).length} 台已开自动续费` : '暂无'}
+          note={expiring.length ? t('{0} 台已开自动续费', expiring.filter(item => item.auto_renew).length) : t('暂无')}
         />
-        <MetricCard to="/portal/billing" icon={<ReceiptText size={20} />} label="待支付账单" value={open.length} note={open.length ? `共 ${money(due, currency)}` : '全部已结清'} />
+        <MetricCard to="/portal/billing" icon={<ReceiptText size={20} />} label={t('待支付账单')} value={open.length} note={open.length ? t('共 {0}', money(due, currency)) : t('全部已结清')} />
         <MetricCard
           to="/portal/wallet"
           icon={<Coins size={20} />}
-          label="可用余额"
+          label={t('可用余额')}
           value={overview ? money(overview.balance_minor, currency) : '—'}
-          note="可用于购买和自动续费"
+          note={t('可用于购买和自动续费')}
           action={
             <button
               className="primary-button compact"
@@ -91,25 +92,25 @@ export function CustomerOverview({ customer }: { customer: CustomerIdentity }) {
                 navigatePortal('/portal/wallet#topup')
               }}
             >
-              充值
+              {t('充值')}
             </button>
           }
         />
         <MetricCard
           to="/portal/hosting"
           icon={<Store size={20} />}
-          label="托管收益"
+          label={t('托管收益')}
           value={hosting ? money(hosting.released_minor, currency) : '—'}
-          note={hosting?.nodes ? `待结算 ${money(hosting.pending_minor, currency)} · ${hosting.nodes} 台母机` : '发布母机后开始计算'}
+          note={hosting?.nodes ? t('待结算 {0} · {1} 台母机', money(hosting.pending_minor, currency), hosting.nodes) : t('发布母机后开始计算')}
         />
-        <MetricCard to="/portal/billing" icon={<CircleDollarSign size={20} />} label="待付总金额" value={money(due, currency)} note="含续费和新购账单" />
-        <MetricCard to="/portal/services" icon={<Activity size={20} />} label="正在运行" value={online} note={`${services.length - online} 台未运行`} />
+        <MetricCard to="/portal/billing" icon={<CircleDollarSign size={20} />} label={t('待付总金额')} value={money(due, currency)} note={t('含续费和新购账单')} />
+        <MetricCard to="/portal/services" icon={<Activity size={20} />} label={t('正在运行')} value={online} note={t('{0} 台未运行', services.length - online)} />
       </section>
 
       <section className="panel announcements-panel">
         <div className="panel-heading">
-          <h3><Megaphone size={16} /> 平台公告</h3>
-          <button className="text-button" onClick={() => navigatePortal('/portal/announcements')}>查看全部</button>
+          <h3><Megaphone size={16} /> {t('平台公告')}</h3>
+          <button className="text-button" onClick={() => navigatePortal('/portal/announcements')}>{t('查看全部')}</button>
         </div>
         {overview?.announcements.map(item => (
           <button key={item.id} className="announcement-row" onClick={() => navigatePortal(`/portal/announcements#${item.id}`)}>
@@ -118,7 +119,7 @@ export function CustomerOverview({ customer }: { customer: CustomerIdentity }) {
             <small>{formatDate(item.created_at)}</small>
           </button>
         ))}
-        {overview && !overview.announcements.length && <div className="empty-state">暂无公告</div>}
+        {overview && !overview.announcements.length && <div className="empty-state">{t('暂无公告')}</div>}
       </section>
     </section>
   )
@@ -135,7 +136,7 @@ export function CustomerAnnouncements() {
         const anchor = window.location.hash.slice(1)
         if (anchor) window.setTimeout(() => document.getElementById(`announcement-${anchor}`)?.scrollIntoView({ block: 'start' }), 0)
       })
-      .catch(err => setError(err instanceof Error ? err.message : '加载失败'))
+      .catch(err => setError(err instanceof Error ? err.message : t('加载失败')))
   }, [])
   return (
     <section className="workspace-panel">
@@ -149,7 +150,7 @@ export function CustomerAnnouncements() {
           {item.body && <p className="announcement-body">{item.body}</p>}
         </article>
       ))}
-      {items && !items.length && <div className="empty-card">暂无公告</div>}
+      {items && !items.length && <div className="empty-card">{t('暂无公告')}</div>}
     </section>
   )
 }

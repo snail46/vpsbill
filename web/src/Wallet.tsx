@@ -6,18 +6,19 @@ import { confirmDialog } from './shared/dialog'
 import { toast } from './shared/toast'
 import { chargedMoney, converted, money } from './shared/currency'
 import { Charged, CurrencyNote } from './shared/LocaleMenu'
+import { t, tr } from './shared/i18n'
 
 export const walletKindLabels: Record<WalletEntryRecord['kind'], string> = {
-  topup: '充值',
-  earning: '托管收益',
-  payment: '余额支付',
-  clearance_refund: '清退补偿',
-  clearance_penalty: '清退赔付',
-  adjustment: '管理员调整',
-  refund: '退款',
-  trade_purchase: '交易市场购买',
-  trade_sale: '交易市场售出',
-  reward: '活动奖励',
+  topup: t('充值'),
+  earning: t('托管收益'),
+  payment: t('余额支付'),
+  clearance_refund: t('清退补偿'),
+  clearance_penalty: t('清退赔付'),
+  adjustment: t('管理员调整'),
+  refund: t('退款'),
+  trade_purchase: t('交易市场购买'),
+  trade_sale: t('交易市场售出'),
+  reward: t('活动奖励'),
 }
 
 // walletMoney shows an amount in the visitor's display currency.
@@ -29,11 +30,11 @@ export function WalletLedger({ entries }: { entries: WalletEntryRecord[] }) {
       <table>
         <thead>
           <tr>
-            <th>时间</th>
-            <th>类型</th>
-            <th>说明</th>
-            <th>金额</th>
-            <th>变动后余额</th>
+            <th>{t('时间')}</th>
+            <th>{t('类型')}</th>
+            <th>{t('说明')}</th>
+            <th>{t('金额')}</th>
+            <th>{t('变动后余额')}</th>
           </tr>
         </thead>
         <tbody>
@@ -43,7 +44,7 @@ export function WalletLedger({ entries }: { entries: WalletEntryRecord[] }) {
               <td>
                 <span className={`tag wallet-${entry.kind}`}>{walletKindLabels[entry.kind] || entry.kind}</span>
               </td>
-              <td>{entry.description}</td>
+              <td>{tr(entry.description)}</td>
               <td className={entry.amount_minor < 0 ? 'amount-negative' : 'amount-positive'}>
                 <strong>
                   {entry.amount_minor > 0 ? '+' : ''}
@@ -55,7 +56,7 @@ export function WalletLedger({ entries }: { entries: WalletEntryRecord[] }) {
           ))}
           {!entries.length && (
             <tr>
-              <td colSpan={5} className="empty-state">暂无余额变动</td>
+              <td colSpan={5} className="empty-state">{t('暂无余额变动')}</td>
             </tr>
           )}
         </tbody>
@@ -95,7 +96,7 @@ export default function CustomerWallet() {
         }, 0)
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : '加载失败')
+      setError(err instanceof Error ? err.message : t('加载失败'))
     }
   }
 
@@ -118,11 +119,11 @@ export default function CustomerWallet() {
       // The button stays clickable so the reason can be said where it
       // applies: the terms light up and their checkbox gets focus.
       setNudge(value => value + 1)
-      toast('info', '请先同意充值须知', '阅读下方充值须知并勾选「我已阅读并同意」后，才能生成充值账单。')
+      toast('info', t('请先同意充值须知'), t('阅读下方充值须知并勾选「我已阅读并同意」后，才能生成充值账单。'))
       return
     }
     if (!Number.isFinite(yuan) || yuan < 1 || yuan > 100000) {
-      setError('充值金额需在 ¥1 到 ¥100000 之间')
+      setError(t('充值金额需在 ¥1 到 ¥100000 之间'))
       return
     }
     setBusy(true)
@@ -139,7 +140,7 @@ export default function CustomerWallet() {
         return
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : '创建充值账单失败')
+      setError(err instanceof Error ? err.message : t('创建充值账单失败'))
     } finally {
       setBusy(false)
     }
@@ -154,11 +155,11 @@ export default function CustomerWallet() {
       <div className="page-actions">
         <div>
           <p className="eyebrow">ACCOUNT BALANCE</p>
-          <h2>账户余额</h2>
-          <p>充值余额和托管收益只能用于本平台消费（购买、续费），不支持提现。</p>
+          <h2>{t('账户余额')}</h2>
+          <p>{t('充值余额和托管收益只能用于本平台消费（购买、续费），不支持提现。')}</p>
         </div>
         <button className="secondary-button" onClick={() => void load()}>
-          <RefreshCw size={15} />刷新
+          <RefreshCw size={15} />{t('刷新')}
         </button>
       </div>
 
@@ -168,22 +169,22 @@ export default function CustomerWallet() {
       <section className="metrics">
         <article>
           <WalletCards size={20} />
-          <span>当前余额</span>
+          <span>{t('当前余额')}</span>
           <strong className={(wallet?.balance_minor || 0) < 0 ? 'amount-negative' : ''}>{walletMoney(wallet?.balance_minor || 0, currency)}</strong>
         </article>
         <article>
-          <span>近期托管收益</span>
+          <span>{t('近期托管收益')}</span>
           <strong>{walletMoney(earned, currency)}</strong>
         </article>
       </section>
       {(wallet?.balance_minor || 0) < 0 && (
-        <div className="note-banner warn">余额为负，是以前的托管母机清退赔付尚未结清（现行规则下赔付不会再扣成负数）。结清前不能发布新母机，之后的托管收益会先用于抵扣。</div>
+        <div className="note-banner warn">{t('余额为负，是以前的托管母机清退赔付尚未结清（现行规则下赔付不会再扣成负数）。结清前不能发布新母机，之后的托管收益会先用于抵扣。')}</div>
       )}
 
       <form className="panel" id="topup" onSubmit={topup}>
         <div className="panel-heading">
-          <h3>充值</h3>
-          <span className="tag">不可提现</span>
+          <h3>{t('充值')}</h3>
+          <span className="tag">{t('不可提现')}</span>
         </div>
         <div className="topup-row">
           {quickAmounts.map(value => (
@@ -193,36 +194,36 @@ export default function CustomerWallet() {
             </button>
           ))}
           <label className="topup-amount">
-            <span>金额（人民币 元）{converted() && Number(amount) > 0 && <small> ≈ {money(Math.round(Number(amount) * 100))}</small>}</span>
+            <span>{t('金额（人民币 元）')}{converted() && Number(amount) > 0 && <small> ≈ {money(Math.round(Number(amount) * 100))}</small>}</span>
             <input type="number" min="1" max="100000" step="0.01" value={amount} onChange={event => setAmount(event.target.value)} />
           </label>
           <button className={agreed ? 'primary-button compact' : 'primary-button compact needs-agree'} disabled={busy}>
-            {busy ? '正在处理…' : checkoutEnabled ? '前往支付' : '生成充值账单'}
+            {busy ? t('正在处理…') : checkoutEnabled ? t('前往支付') : t('生成充值账单')}
           </button>
         </div>
         <div key={nudge} className={nudge && !agreed ? 'topup-terms attention' : 'topup-terms'}>
-          <strong>充值须知</strong>
+          <strong>{t('充值须知')}</strong>
           <ul>
-            <li>请根据您的实际消费需求进行充值。我们建议「用多少充多少」，避免账户余额积压。</li>
-            <li>充值到账后，余额仅限用于平台服务消费，不支持提现或退款到原支付渠道，请知悉。</li>
+            <li>{t('请根据您的实际消费需求进行充值。我们建议「用多少充多少」，避免账户余额积压。')}</li>
+            <li>{t('充值到账后，余额仅限用于平台服务消费，不支持提现或退款到原支付渠道，请知悉。')}</li>
           </ul>
           <label className="check-row">
             <input ref={agreeRef} type="checkbox" checked={agreed} onChange={event => setAgreed(event.target.checked)} />
-            我已阅读并同意以上充值须知
+            {t('我已阅读并同意以上充值须知')}
           </label>
-          {nudge > 0 && !agreed && <small className="danger-text">请先勾选同意充值须知，再生成充值账单。</small>}
+          {nudge > 0 && !agreed && <small className="danger-text">{t('请先勾选同意充值须知，再生成充值账单。')}</small>}
         </div>
         {created && !checkoutEnabled && (
           <p className="muted-text">
-            已生成充值账单 {created.number}（{chargedMoney(created.total_minor, created.currency)}）。当前未配置在线支付，请联系商家线下付款，商家确认到账后余额自动增加。
+            {t('已生成充值账单 {0}（{1}）。当前未配置在线支付，请联系商家线下付款，商家确认到账后余额自动增加。', created.number, chargedMoney(created.total_minor, created.currency))}
           </p>
         )}
       </form>
 
       <div className="panel">
         <div className="panel-heading">
-          <h3>余额明细</h3>
-          <span className="tag">{entries.length} 条</span>
+          <h3>{t('余额明细')}</h3>
+          <span className="tag">{t('{0} 条', entries.length)}</span>
         </div>
         <WalletLedger entries={entries} />
       </div>
@@ -242,17 +243,17 @@ export function AdminWalletPanel({ accountID, name, onClose, onChanged }: { acco
   useEffect(() => {
     api<WalletRecord>(`/api/v1/admin/customers/${accountID}/wallet`)
       .then(setWallet)
-      .catch(err => setError(err instanceof Error ? err.message : '加载失败'))
+      .catch(err => setError(err instanceof Error ? err.message : t('加载失败')))
   }, [accountID])
 
   async function adjust(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const yuan = Number(amount)
     if (!Number.isFinite(yuan) || yuan === 0) {
-      setError('请输入非零金额，负数表示扣减')
+      setError(t('请输入非零金额，负数表示扣减'))
       return
     }
-    if (!(await confirmDialog({ title: `为「${name}」${yuan > 0 ? '增加' : '扣减'}余额 ¥${Math.abs(yuan).toFixed(2)}？`, message: '调整会记入账户流水。', confirmText: yuan > 0 ? '增加余额' : '扣减余额', danger: yuan < 0 }))) return
+    if (!(await confirmDialog({ title: t('为「{0}」{1}余额 ¥{2}？', name, yuan > 0 ? t('增加') : t('扣减'), Math.abs(yuan).toFixed(2)), message: t('调整会记入账户流水。'), confirmText: yuan > 0 ? t('增加余额') : t('扣减余额'), danger: yuan < 0 }))) return
     setBusy(true)
     setError('')
     try {
@@ -264,7 +265,7 @@ export function AdminWalletPanel({ accountID, name, onClose, onChanged }: { acco
       setReason('')
       onChanged()
     } catch (err) {
-      setError(err instanceof Error ? err.message : '调整失败')
+      setError(err instanceof Error ? err.message : t('调整失败'))
     } finally {
       setBusy(false)
     }
@@ -274,24 +275,24 @@ export function AdminWalletPanel({ accountID, name, onClose, onChanged }: { acco
     <div className="inline-form">
       <div className="inline-form-heading">
         <div>
-          <h3>{name} 的账户余额：{walletMoney(wallet?.balance_minor || 0, wallet?.currency)}</h3>
-          <p>余额只能用于本平台消费，不可提现。调整会记录原因和操作人。</p>
+          <h3>{t('{0} 的账户余额：{1}', name, walletMoney(wallet?.balance_minor || 0, wallet?.currency))}</h3>
+          <p>{t('余额只能用于本平台消费，不可提现。调整会记录原因和操作人。')}</p>
         </div>
-        <button className="icon-button" onClick={onClose} aria-label="关闭">
+        <button className="icon-button" onClick={onClose} aria-label={t('关闭')}>
           <X size={16} />
         </button>
       </div>
       {error && <div className="form-error">{error}</div>}
       <form className="topup-row" onSubmit={adjust}>
         <label className="topup-amount">
-          <span>调整金额（元，负数为扣减）</span>
+          <span>{t('调整金额（元，负数为扣减）')}</span>
           <input type="number" step="0.01" value={amount} onChange={event => setAmount(event.target.value)} />
         </label>
         <label className="topup-reason">
-          <span>原因</span>
-          <input value={reason} maxLength={200} required onChange={event => setReason(event.target.value)} placeholder="例如 线下转账补录" />
+          <span>{t('原因')}</span>
+          <input value={reason} maxLength={200} required onChange={event => setReason(event.target.value)} placeholder={t('例如 线下转账补录')} />
         </label>
-        <button className="primary-button compact" disabled={busy}>调整余额</button>
+        <button className="primary-button compact" disabled={busy}>{t('调整余额')}</button>
       </form>
       <WalletLedger entries={wallet?.entries || []} />
     </div>

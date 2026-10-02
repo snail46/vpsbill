@@ -13,6 +13,7 @@ import {
   RefreshCw,
 } from 'lucide-react'
 import { api, cached, HostProbeDetailRecord } from './api'
+import { t, tr } from './shared/i18n'
 
 type Dict = Record<string, unknown>
 const asObject = (value: unknown): Dict => (value && typeof value === 'object' && !Array.isArray(value) ? (value as Dict) : {})
@@ -26,76 +27,76 @@ const bytes = (value: number) => {
 const bps = (value: number) => `${bytes(value)}/s`
 
 const labels: Record<string, string> = {
-  generated_at: '报告生成时间',
-  hostname: '主机名',
-  kernel: '内核版本',
-  os: '操作系统',
-  cpu: '处理器',
-  ram: '实时内存',
-  memory: '物理内存',
-  disk: '实时磁盘',
-  disks: '磁盘设备',
-  disk_io: '磁盘 I/O',
-  network: '实时网络',
-  network_interfaces: '网络接口',
-  runtime: '虚拟化运行时',
-  system: '系统与主板',
-  environment: '环境检查',
-  gpus: 'GPU 设备',
-  public_ipv4: '公网 IPv4',
-  ipv4_addresses: 'IPv4 地址',
-  ipv4_prefixes: 'IPv4 网段',
-  ipv6_addresses: 'IPv6 地址',
-  ipv6_prefixes: 'IPv6 网段',
-  gateways: '网关',
-  model: '型号',
-  cores: '核心数',
-  threads: '线程数',
-  architecture: '架构',
-  flags: 'CPU 指令集',
-  total_mb: '总计 MB',
-  used_mb: '已用 MB',
-  free_mb: '空闲 MB',
-  modules: '内存插条',
-  name: '名称',
-  path: '路径',
-  serial: '序列号',
-  size_bytes: '容量',
-  type: '类型',
-  virtual: '虚拟设备',
-  rotational: '机械盘',
-  mountpoints: '挂载点',
-  health: '健康状态',
-  health_detail: '健康详情',
+  generated_at: t('报告生成时间'),
+  hostname: t('主机名'),
+  kernel: t('内核版本'),
+  os: t('操作系统'),
+  cpu: t('处理器'),
+  ram: t('实时内存'),
+  memory: t('物理内存'),
+  disk: t('实时磁盘'),
+  disks: t('磁盘设备'),
+  disk_io: t('磁盘 I/O'),
+  network: t('实时网络'),
+  network_interfaces: t('网络接口'),
+  runtime: t('虚拟化运行时'),
+  system: t('系统与主板'),
+  environment: t('环境检查'),
+  gpus: t('GPU 设备'),
+  public_ipv4: t('公网 IPv4'),
+  ipv4_addresses: t('IPv4 地址'),
+  ipv4_prefixes: t('IPv4 网段'),
+  ipv6_addresses: t('IPv6 地址'),
+  ipv6_prefixes: t('IPv6 网段'),
+  gateways: t('网关'),
+  model: t('型号'),
+  cores: t('核心数'),
+  threads: t('线程数'),
+  architecture: t('架构'),
+  flags: t('CPU 指令集'),
+  total_mb: t('总计 MB'),
+  used_mb: t('已用 MB'),
+  free_mb: t('空闲 MB'),
+  modules: t('内存插条'),
+  name: t('名称'),
+  path: t('路径'),
+  serial: t('序列号'),
+  size_bytes: t('容量'),
+  type: t('类型'),
+  virtual: t('虚拟设备'),
+  rotational: t('机械盘'),
+  mountpoints: t('挂载点'),
+  health: t('健康状态'),
+  health_detail: t('健康详情'),
   smart: 'S.M.A.R.T.',
-  addresses: 'IP 地址',
-  mac: 'MAC 地址',
-  speed_mbps: '速率 Mbps',
-  driver: '驱动',
-  vendor: '厂商',
-  device: '设备',
-  load: '系统负载',
-  load1: '1 分钟负载',
-  load5: '5 分钟负载',
-  load15: '15 分钟负载',
-  public_ipv4_interface: 'IPv4 出口网卡',
-  public_ipv6: '公网 IPv6',
-  public_ipv6_interface: 'IPv6 出口网卡',
-  rx_bytes: '累计接收',
-  tx_bytes: '累计发送',
-  rx_bps: '实时下行速率',
-  tx_bps: '实时上行速率',
-  read_bytes: '累计读取',
-  write_bytes: '累计写入',
-  read_bps: '实时读取速率',
-  write_bps: '实时写入速率',
+  addresses: t('IP 地址'),
+  mac: t('MAC 地址'),
+  speed_mbps: t('速率 Mbps'),
+  driver: t('驱动'),
+  vendor: t('厂商'),
+  device: t('设备'),
+  load: t('系统负载'),
+  load1: t('1 分钟负载'),
+  load5: t('5 分钟负载'),
+  load15: t('15 分钟负载'),
+  public_ipv4_interface: t('IPv4 出口网卡'),
+  public_ipv6: t('公网 IPv6'),
+  public_ipv6_interface: t('IPv6 出口网卡'),
+  rx_bytes: t('累计接收'),
+  tx_bytes: t('累计发送'),
+  rx_bps: t('实时下行速率'),
+  tx_bps: t('实时上行速率'),
+  read_bytes: t('累计读取'),
+  write_bytes: t('累计写入'),
+  read_bps: t('实时读取速率'),
+  write_bps: t('实时写入速率'),
 }
 
 const title = (key: string) => labels[key] || key.replaceAll('_', ' ').replace(/\b\w/g, c => c.toUpperCase())
 
 function display(value: unknown, key = ''): string {
   if (value === null || value === undefined || value === '') return '—'
-  if (typeof value === 'boolean') return value ? '是' : '否'
+  if (typeof value === 'boolean') return value ? t('是') : t('否')
   if (typeof value === 'number') {
     if (key.endsWith('_bytes')) return bytes(value)
     if (key.endsWith('_bps')) return bps(value)
@@ -112,7 +113,7 @@ function StructuredValue({ value, name, depth = 0 }: { value: unknown; name?: st
   if (isPrimitive(value)) return <span className="probe-value">{display(value, name)}</span>
 
   if (Array.isArray(value)) {
-    if (!value.length) return <span className="probe-empty">无数据</span>
+    if (!value.length) return <span className="probe-empty">{t('无数据')}</span>
     if (value.every(isPrimitive)) {
       return (
         <div className="probe-chips">
@@ -174,7 +175,7 @@ function StructuredValue({ value, name, depth = 0 }: { value: unknown; name?: st
         <section className="probe-group" key={key}>
           <h4>
             {title(key)}
-            <small>{Array.isArray(item) ? `${item.length} 项记录` : ''}</small>
+            <small>{Array.isArray(item) ? t('{0} 项记录', item.length) : ''}</small>
           </h4>
           <StructuredValue value={item} name={key} depth={depth + 1} />
         </section>
@@ -244,11 +245,11 @@ function LineChart({
           <path d={path} fill="none" stroke={color} strokeWidth="2" vectorEffect="non-scaling-stroke" />
         </svg>
       ) : (
-        <div className="chart-empty">暂无历史采样数据</div>
+        <div className="chart-empty">{t('暂无历史采样数据')}</div>
       )}
       <footer>
-        <span>{points.length} 次连续采样</span>
-        <span>周期峰值 {format(max)}</span>
+        <span>{t('{0} 次连续采样', points.length)}</span>
+        <span>{t('周期峰值 {0}', format(max))}</span>
       </footer>
     </article>
   )
@@ -284,10 +285,10 @@ export default function HostDetailPanel({ id, onBack }: { id: string; onBack: ()
   const history = Array.isArray(detail?.sources.host_history) ? detail?.sources.host_history.map(asObject) : []
 
   const sections: [keyof HostProbeDetailRecord['sources'], string][] = [
-    ['dashboard', '容器与实例统计'],
-    ['host_info', '实时硬件与系统资源明细'],
-    ['host_history', '历史采样时间序列'],
-    ['host_report', '宿主机完整硬件、网络与主板报告'],
+    ['dashboard', t('容器与实例统计')],
+    ['host_info', t('实时硬件与系统资源明细')],
+    ['host_history', t('历史采样时间序列')],
+    ['host_report', t('宿主机完整硬件、网络与主板报告')],
   ]
 
   return (
@@ -295,18 +296,18 @@ export default function HostDetailPanel({ id, onBack }: { id: string; onBack: ()
       <div className="page-actions">
         <div>
           <button className="button-link detail-back" onClick={onBack}>
-            <ArrowLeft size={15} />返回宿主机探针列表
+            <ArrowLeft size={15} />{t('返回宿主机探针列表')}
           </button>
           <p className="eyebrow">CLICD HOST TELEMETRY</p>
-          <h2>{detail?.node.name || '宿主机详情'}</h2>
+          <h2>{detail?.node.name || t('宿主机详情')}</h2>
           <p>
             {detail
-              ? `${detail.node.region_name} · ${detail.node.base_url} · 探针更新于 ${formatTime(detail.fetched_at)}`
-              : '正在拉取宿主机硬件探针数据…'}
+              ? t('{0} · {1} · 探针更新于 {2}', detail.node.region_name, detail.node.base_url, formatTime(detail.fetched_at))
+              : t('正在拉取宿主机硬件探针数据…')}
           </p>
         </div>
         <button className="secondary-button" disabled={loading} onClick={load}>
-          <RefreshCw size={15} />{loading ? '获取中…' : '重新读取'}
+          <RefreshCw size={15} />{loading ? t('获取中…') : t('重新读取')}
         </button>
       </div>
 
@@ -317,59 +318,59 @@ export default function HostDetailPanel({ id, onBack }: { id: string; onBack: ()
           <div className="host-resource-grid">
             <Stat
               Icon={Boxes}
-              label="运行实例"
+              label={t('运行实例')}
               value={num(dashboard, 'total_containers')}
-              sub={`${num(dashboard, 'running')} 运行 / ${num(dashboard, 'stopped')} 关机`}
+              sub={t('{0} 运行 / {1} 关机', num(dashboard, 'running'), num(dashboard, 'stopped'))}
             />
             <Stat
               Icon={Cpu}
-              label="CPU 使用率"
+              label={t('CPU 使用率')}
               value={`${num(cpu, 'usage_pct').toFixed(1)}%`}
-              sub={`${num(cpu, 'cores')} 物理核心`}
+              sub={t('{0} 物理核心', num(cpu, 'cores'))}
             />
             <Stat
               Icon={MemoryStick}
-              label="物理内存占用"
+              label={t('物理内存占用')}
               value={`${num(ram, 'used_mb').toLocaleString()} MB`}
-              sub={`总计 ${num(ram, 'total_mb').toLocaleString()} MB`}
+              sub={t('总计 {0} MB', num(ram, 'total_mb').toLocaleString())}
             />
             <Stat
               Icon={HardDrive}
-              label="磁盘存储占用"
+              label={t('磁盘存储占用')}
               value={`${num(disk, 'used_gb').toFixed(1)} GB`}
-              sub={`总计 ${num(disk, 'total_gb').toFixed(1)} GB`}
+              sub={t('总计 {0} GB', num(disk, 'total_gb').toFixed(1))}
             />
             <Stat
               Icon={ArrowDown}
-              label="实时下行网络"
+              label={t('实时下行网络')}
               value={bps(num(network, 'rx_bps'))}
-              sub={`累计 ${bytes(num(network, 'rx_bytes'))}`}
+              sub={t('累计 {0}', bytes(num(network, 'rx_bytes')))}
             />
             <Stat
               Icon={ArrowUp}
-              label="实时上行网络"
+              label={t('实时上行网络')}
               value={bps(num(network, 'tx_bps'))}
-              sub={`累计 ${bytes(num(network, 'tx_bytes'))}`}
+              sub={t('累计 {0}', bytes(num(network, 'tx_bytes')))}
             />
             <Stat
               Icon={Database}
-              label="实时磁盘读取"
+              label={t('实时磁盘读取')}
               value={bps(num(diskIO, 'read_bps'))}
-              sub={`累计 ${bytes(num(diskIO, 'read_bytes'))}`}
+              sub={t('累计 {0}', bytes(num(diskIO, 'read_bytes')))}
             />
             <Stat
               Icon={Activity}
-              label="系统平均负载"
+              label={t('系统平均负载')}
               value={num(loadInfo, 'load1').toFixed(2)}
               sub={`5m: ${num(loadInfo, 'load5').toFixed(2)} / 15m: ${num(loadInfo, 'load15').toFixed(2)}`}
             />
           </div>
 
           <div className="history-grid">
-            <LineChart points={history} field="cpu" label="CPU 使用率趋势" color="#10b981" format={v => `${v.toFixed(1)}%`} />
-            <LineChart points={history} field="memory" label="内存占用趋势" color="#6366f1" format={v => `${v.toFixed(1)}%`} />
-            <LineChart points={history} field="network" label="网络吞吐趋势" color="#0284c7" format={bps} />
-            <LineChart points={history} field="disk_io" label="磁盘 I/O 趋势" color="#f59e0b" format={bps} />
+            <LineChart points={history} field="cpu" label={t('CPU 使用率趋势')} color="#10b981" format={v => `${v.toFixed(1)}%`} />
+            <LineChart points={history} field="memory" label={t('内存占用趋势')} color="#6366f1" format={v => `${v.toFixed(1)}%`} />
+            <LineChart points={history} field="network" label={t('网络吞吐趋势')} color="#0284c7" format={bps} />
+            <LineChart points={history} field="disk_io" label={t('磁盘 I/O 趋势')} color="#f59e0b" format={bps} />
           </div>
 
           <div className="probe-sections structured">
@@ -378,13 +379,13 @@ export default function HostDetailPanel({ id, onBack }: { id: string; onBack: ()
                 <summary>
                   <strong>{label}</strong>
                   {detail.errors[key] ? (
-                    <span className="status-badge error">探针异常</span>
+                    <span className="status-badge error">{t('探针异常')}</span>
                   ) : (
-                    <span className="status-badge online">正常</span>
+                    <span className="status-badge online">{t('正常')}</span>
                   )}
                 </summary>
                 {detail.errors[key] ? (
-                  <div className="form-error" style={{ margin: '16px' }}>{detail.errors[key]}</div>
+                  <div className="form-error" style={{ margin: '16px' }}>{tr(detail.errors[key])}</div>
                 ) : (
                   <div className="probe-content">
                     <StructuredValue value={detail.sources[key]} />

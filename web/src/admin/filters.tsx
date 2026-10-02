@@ -1,6 +1,7 @@
 import { ReactNode, useEffect, useState } from 'react'
 import { FilterX, Search } from 'lucide-react'
 import { AccountRecord, api, cached } from '../api'
+import { t } from '../shared/i18n'
 
 // Admin list filters live in the address bar (/admin/services?status=overdue),
 // so a link from another page (the overview cards, a customer's row) opens a
@@ -128,10 +129,10 @@ export function FilterBar({ shown, total, active, onReset, children }: { shown: 
     <div className="filter-bar">
       <div className="filter-fields">{children}</div>
       <div className="filter-summary">
-        <span>{active ? `筛选出 ${shown} / ${total} 条` : `共 ${total} 条`}</span>
+        <span>{active ? t('筛选出 {0} / {1} 条', shown, total) : t('共 {0} 条', total)}</span>
         {active > 0 && (
           <button type="button" className="text-button" onClick={onReset}>
-            <FilterX size={13} />清除筛选
+            <FilterX size={13} />{t('清除筛选')}
           </button>
         )}
       </div>
@@ -151,7 +152,7 @@ export function SearchFilter({ label, value, onChange, placeholder }: { label: s
   )
 }
 
-export function SelectFilter({ label, value, onChange, options, all = '全部' }: { label: string; value: string; onChange: (value: string) => void; options: Option[]; all?: string }) {
+export function SelectFilter({ label, value, onChange, options, all = t('全部') }: { label: string; value: string; onChange: (value: string) => void; options: Option[]; all?: string }) {
   // A value from a link that is not among the options still shows.
   const known = !value || options.some(([option]) => option === value)
   return (
@@ -173,9 +174,9 @@ export function DateRangeFilter({ label, from, to, onFrom, onTo }: { label: stri
     <label className="filter-field filter-dates">
       <span>{label}</span>
       <div>
-        <input type="date" value={from} max={to || undefined} onChange={event => onFrom(event.target.value)} aria-label={`${label}起`} />
-        <em>至</em>
-        <input type="date" value={to} min={from || undefined} onChange={event => onTo(event.target.value)} aria-label={`${label}止`} />
+        <input type="date" value={from} max={to || undefined} onChange={event => onFrom(event.target.value)} aria-label={t('{0}起', label)} />
+        <em>{t('至')}</em>
+        <input type="date" value={to} min={from || undefined} onChange={event => onTo(event.target.value)} aria-label={t('{0}止', label)} />
       </div>
     </label>
   )

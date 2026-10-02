@@ -1,3 +1,4 @@
+import { t } from './i18n'
 // navigatePortal moves the customer portal to a path such as
 // /portal/services/<id>; the shell and the pages follow it through the
 // popstate event, as they do for the browser's back button.
@@ -31,7 +32,7 @@ export function osOptions(ids: string[]) {
       .filter(part => /^[a-z]{3,}$/i.test(part) && !label.toLowerCase().includes(part.toLowerCase()) && !['hatch', 'localhost', 'latest', 'lxc', 'amd64', 'all'].includes(part.toLowerCase()))
       .join(' ')
     const sameBefore = labels.slice(0, index).filter(other => other === label).length
-    return { id, label: extra ? `${label}（${extra}）` : `${label}（${sameBefore + 1}）` }
+    return { id, label: extra ? t('{0}（{1}）', label, extra) : t('{0}（{1}）', label, sameBefore + 1) }
   })
 }
 

@@ -7,12 +7,13 @@ import { osOptions } from '../shared/nav'
 import { DateRangeFilter, FilterBar, SearchFilter, SelectFilter, includesText, matchesAny, uniqueOptions, useCustomerOptions, useSection, useUrlFilters, withinDays, type Option } from './filters'
 import { confirmDialog } from '../shared/dialog'
 import { toast } from '../shared/toast'
+import { t } from '../shared/i18n'
 
 const orderStatuses: Option[] = ['pending_payment', 'paid', 'fulfilling', 'completed', 'cancelled', 'review'].map(status => [status, statusLabel(status)])
 const invoiceStatuses: Option[] = ['open', 'paid', 'void', 'refunded', 'uncollectible', 'draft'].map(status => [status, statusLabel(status)])
-const invoiceKinds: Option[] = [['initial', '新购'], ['renewal', '续费'], ['topup', '充值']]
-const transactionStatuses: Option[] = [['succeeded', '成功'], ['pending', '处理中'], ['failed', '失败'], ['reversed', '已冲正']]
-const transactionTypes: Option[] = [['payment', '收款'], ['refund', '退款'], ['credit', '入账'], ['chargeback', '拒付'], ['adjustment', '调整']]
+const invoiceKinds: Option[] = [['initial', t('新购')], ['renewal', t('续费')], ['topup', t('充值')]]
+const transactionStatuses: Option[] = [['succeeded', t('成功')], ['pending', t('处理中')], ['failed', t('失败')], ['reversed', t('已冲正')]]
+const transactionTypes: Option[] = [['payment', t('收款')], ['refund', t('退款')], ['credit', t('入账')], ['chargeback', t('拒付')], ['adjustment', t('调整')]]
 
 const accountQuery = (account: string) => (account ? `?account_id=${encodeURIComponent(account)}` : '')
 
@@ -39,7 +40,7 @@ export function OrdersView() {
       setPlans(planRows.filter(plan => plan.enabled))
       setRegions(regionRows)
     } catch (err) {
-      setError(err instanceof Error ? err.message : '加载失败')
+      setError(err instanceof Error ? err.message : t('加载失败'))
     }
   }
 
@@ -58,10 +59,10 @@ export function OrdersView() {
     <section className="workspace-panel">
       <PageActions
         eyebrow="SALES ORDERS"
-        title="销售订单"
-        description="所有订单金额由服务端严格根据当前生效套餐价格原子计算与锁价。"
+        title={t('销售订单')}
+        description={t('所有订单金额由服务端严格根据当前生效套餐价格原子计算与锁价。')}
         action={() => setShowForm(true)}
-        actionLabel="创建订单"
+        actionLabel={t('创建订单')}
       />
 
       {error && <div className="form-error">{error}</div>}
@@ -80,22 +81,22 @@ export function OrdersView() {
       )}
 
       <FilterBar shown={shown.length} total={orders.length} active={active} onReset={reset}>
-        <SearchFilter label="订单号" value={filters.q} onChange={value => set('q', value)} placeholder="订单号或账单号" />
-        <SelectFilter label="客户名称" value={filters.account} onChange={value => set('account', value)} options={customers.map(item => [item.id, item.display_name] as Option)} all="全部客户" />
-        <SelectFilter label="订单状态" value={filters.status} onChange={value => set('status', value)} options={orderStatuses} />
-        <DateRangeFilter label="下单时间" from={filters.from} to={filters.to} onFrom={value => set('from', value)} onTo={value => set('to', value)} />
+        <SearchFilter label={t('订单号')} value={filters.q} onChange={value => set('q', value)} placeholder={t('订单号或账单号')} />
+        <SelectFilter label={t('客户名称')} value={filters.account} onChange={value => set('account', value)} options={customers.map(item => [item.id, item.display_name] as Option)} all={t('全部客户')} />
+        <SelectFilter label={t('订单状态')} value={filters.status} onChange={value => set('status', value)} options={orderStatuses} />
+        <DateRangeFilter label={t('下单时间')} from={filters.from} to={filters.to} onFrom={value => set('from', value)} onTo={value => set('to', value)} />
       </FilterBar>
 
       <div className="table-wrap">
         <table>
           <thead>
             <tr>
-              <th>订单号</th>
-              <th>客户名称</th>
-              <th>账单编号</th>
-              <th>订单金额</th>
-              <th>订单状态</th>
-              <th>下单时间</th>
+              <th>{t('订单号')}</th>
+              <th>{t('客户名称')}</th>
+              <th>{t('账单编号')}</th>
+              <th>{t('订单金额')}</th>
+              <th>{t('订单状态')}</th>
+              <th>{t('下单时间')}</th>
             </tr>
           </thead>
           <tbody>
@@ -114,7 +115,7 @@ export function OrdersView() {
             ))}
             {!shown.length && (
               <tr>
-                <td colSpan={6} className="empty-state">{orders.length ? '没有符合筛选条件的订单' : '尚未创建任何订单'}</td>
+                <td colSpan={6} className="empty-state">{orders.length ? t('没有符合筛选条件的订单') : t('尚未创建任何订单')}</td>
               </tr>
             )}
           </tbody>
@@ -170,7 +171,7 @@ export function OrderForm({
       })
       onCreated()
     } catch (err) {
-      setError(err instanceof Error ? err.message : '创建订单失败')
+      setError(err instanceof Error ? err.message : t('创建订单失败'))
     } finally {
       setSaving(false)
     }
@@ -180,18 +181,18 @@ export function OrderForm({
     <div className="inline-form">
       <div className="inline-form-heading">
         <div>
-          <h3>手工创建订单与账单</h3>
-          <p>提交后将自动为目标客户生成待付款订单及防篡改的账单明细。</p>
+          <h3>{t('手工创建订单与账单')}</h3>
+          <p>{t('提交后将自动为目标客户生成待付款订单及防篡改的账单明细。')}</p>
         </div>
         <button className="icon-button" onClick={onClose}><X size={18} /></button>
       </div>
 
       {!ready ? (
-        <div className="form-error">请确保系统中已至少存在 1 个有效客户、1 个上架套餐及 1 个节点地域。</div>
+        <div className="form-error">{t('请确保系统中已至少存在 1 个有效客户、1 个上架套餐及 1 个节点地域。')}</div>
       ) : (
         <form className="form-grid" onSubmit={submit}>
           <label>
-            <span>归属客户</span>
+            <span>{t('归属客户')}</span>
             <select name="account_id" value={customerID} onChange={event => setCustomerID(event.target.value)}>
               {customers.map(item => (
                 <option key={item.id} value={item.id}>
@@ -201,7 +202,7 @@ export function OrderForm({
             </select>
           </label>
           <label>
-            <span>选购套餐</span>
+            <span>{t('选购套餐')}</span>
             <select name="plan_id" value={planID} onChange={event => setPlanID(event.target.value)}>
               {sellablePlans.map(item => (
                 <option key={item.id} value={item.id}>
@@ -211,7 +212,7 @@ export function OrderForm({
             </select>
           </label>
           <label>
-            <span>节点地域</span>
+            <span>{t('节点地域')}</span>
             <select name="region_id">
               {regions.map(region => (
                 <option key={region.id} value={region.id}>
@@ -221,21 +222,21 @@ export function OrderForm({
             </select>
           </label>
           <label>
-            <span>计费周期</span>
+            <span>{t('计费周期')}</span>
             <select name="billing_cycle" required>
               {prices.map(price => (
                 <option key={price.billing_cycle} value={price.billing_cycle}>
-                  {cycleLabel(price.billing_cycle)} 付款 · {money(price.amount_minor + price.setup_fee_minor, price.currency)}
+                  {t('{0} 付款 · {1}', cycleLabel(price.billing_cycle), money(price.amount_minor + price.setup_fee_minor, price.currency))}
                 </option>
               ))}
             </select>
           </label>
           <label>
-            <span>购买数量</span>
+            <span>{t('购买数量')}</span>
             <input name="quantity" type="number" min="1" max="20" defaultValue="1" />
           </label>
           <label>
-            <span>预设操作系统镜像</span>
+            <span>{t('预设操作系统镜像')}</span>
             <select key={planID} name="template_id" defaultValue={plan?.default_template_id}>
               {osOptions(plan?.allowed_template_ids ?? []).map(template => (
                 <option key={template.id} value={template.id} title={template.id}>
@@ -246,14 +247,14 @@ export function OrderForm({
           </label>
 
           {!prices.length && (
-            <div className="form-error wide">所选套餐尚未配置该客户币种的价格，请先前往“商品套餐”补充对应币种。</div>
+            <div className="form-error wide">{t('所选套餐尚未配置该客户币种的价格，请先前往“商品套餐”补充对应币种。')}</div>
           )}
           {error && <div className="form-error wide">{error}</div>}
 
           <div className="form-actions wide">
-            <button type="button" className="secondary-button" onClick={onClose}>取消</button>
+            <button type="button" className="secondary-button" onClick={onClose}>{t('取消')}</button>
             <button className="primary-button" disabled={saving || !prices.length}>
-              {saving ? '正在生成…' : '生成订单'}
+              {saving ? t('正在生成…') : t('生成订单')}
             </button>
           </div>
         </form>
@@ -284,7 +285,7 @@ export function BillingView() {
       setInvoices(invoiceRows)
       setTransactions(transactionRows)
     } catch (err) {
-      setError(err instanceof Error ? err.message : '加载失败')
+      setError(err instanceof Error ? err.message : t('加载失败'))
     }
   }
 
@@ -324,9 +325,9 @@ export function BillingView() {
   async function pay(invoice: InvoiceRecord) {
     if (
       !(await confirmDialog({
-        title: `确认已线下收到款项 ${money(invoice.balance_minor, invoice.currency)}？`,
-        message: '此操作将记录不可更改的入账流水并触发 VPS 自动调度开通。',
-        confirmText: '确认入账',
+        title: t('确认已线下收到款项 {0}？', money(invoice.balance_minor, invoice.currency)),
+        message: t('此操作将记录不可更改的入账流水并触发 VPS 自动调度开通。'),
+        confirmText: t('确认入账'),
       }))
     ) {
       return
@@ -336,10 +337,10 @@ export function BillingView() {
     try {
       await api(`/api/v1/admin/invoices/${invoice.id}/pay`, { method: 'POST', body: JSON.stringify({ reference: '' }) })
       await load()
-      toast('success', `账单 ${invoice.number} 已确认入账`)
+      toast('success', t('账单 {0} 已确认入账', invoice.number))
     } catch (err) {
-      toast('error', '确认入账失败', err instanceof Error ? err.message : undefined)
-      setError(err instanceof Error ? err.message : '确认入账失败')
+      toast('error', t('确认入账失败'), err instanceof Error ? err.message : undefined)
+      setError(err instanceof Error ? err.message : t('确认入账失败'))
     } finally {
       setPaying('')
     }
@@ -350,8 +351,8 @@ export function BillingView() {
       <div className="page-actions">
         <div>
           <p className="eyebrow">BILLING & AUDIT LEDGER</p>
-          <h2>账单与财务流水</h2>
-          <p>采用金融级复式只追加（Append-Only）记账模型；任何退款与冲正均产生反向新流水。</p>
+          <h2>{t('账单与财务流水')}</h2>
+          <p>{t('采用金融级复式只追加（Append-Only）记账模型；任何退款与冲正均产生反向新流水。')}</p>
         </div>
       </div>
 
@@ -359,26 +360,26 @@ export function BillingView() {
 
       <div className="panel">
         <div className="panel-heading">
-          <h3>全部账单</h3>
-          <span className="tag">{invoices.length} 笔账单</span>
+          <h3>{t('全部账单')}</h3>
+          <span className="tag">{t('{0} 笔账单', invoices.length)}</span>
         </div>
         <FilterBar shown={shownInvoices.length} total={invoices.length} active={invoiceFilters} onReset={resetInvoices}>
-          <SearchFilter label="账单号" value={filters.invoice_q} onChange={value => set('invoice_q', value)} placeholder="账单号" />
-          <SelectFilter label="关联客户" value={filters.account} onChange={value => set('account', value)} options={customers} all="全部客户" />
-          <SelectFilter label="状态" value={filters.invoice_status} onChange={value => set('invoice_status', value)} options={invoiceStatuses} />
-          <SelectFilter label="类型" value={filters.invoice_kind} onChange={value => set('invoice_kind', value)} options={invoiceKinds} />
+          <SearchFilter label={t('账单号')} value={filters.invoice_q} onChange={value => set('invoice_q', value)} placeholder={t('账单号')} />
+          <SelectFilter label={t('关联客户')} value={filters.account} onChange={value => set('account', value)} options={customers} all={t('全部客户')} />
+          <SelectFilter label={t('状态')} value={filters.invoice_status} onChange={value => set('invoice_status', value)} options={invoiceStatuses} />
+          <SelectFilter label={t('类型')} value={filters.invoice_kind} onChange={value => set('invoice_kind', value)} options={invoiceKinds} />
         </FilterBar>
         <div className="table-wrap">
           <table>
             <thead>
               <tr>
-                <th>账单号</th>
-                <th>关联客户</th>
-                <th>账单金额</th>
-                <th>未付余额</th>
-                <th>状态</th>
-                <th>到期时间</th>
-                <th>操作</th>
+                <th>{t('账单号')}</th>
+                <th>{t('关联客户')}</th>
+                <th>{t('账单金额')}</th>
+                <th>{t('未付余额')}</th>
+                <th>{t('状态')}</th>
+                <th>{t('到期时间')}</th>
+                <th>{t('操作')}</th>
               </tr>
             </thead>
             <tbody>
@@ -399,7 +400,7 @@ export function BillingView() {
                         disabled={paying === invoice.id}
                         onClick={() => pay(invoice)}
                       >
-                        {paying === invoice.id ? '入账处理中…' : invoice.kind === 'topup' ? '确认到账（充值）' : '确认到账并开通'}
+                        {paying === invoice.id ? t('入账处理中…') : invoice.kind === 'topup' ? t('确认到账（充值）') : t('确认到账并开通')}
                       </button>
                     )}
                   </td>
@@ -407,7 +408,7 @@ export function BillingView() {
               ))}
               {!shownInvoices.length && (
                 <tr>
-                  <td colSpan={7} className="empty-state">{invoices.length ? '没有符合筛选条件的账单' : '暂无账单数据'}</td>
+                  <td colSpan={7} className="empty-state">{invoices.length ? t('没有符合筛选条件的账单') : t('暂无账单数据')}</td>
                 </tr>
               )}
             </tbody>
@@ -417,7 +418,7 @@ export function BillingView() {
 
       <div className="panel" id="transactions">
         <div className="panel-heading">
-          <h3>不可变资金交易流水</h3>
+          <h3>{t('不可变资金交易流水')}</h3>
           <span className="tag">APPEND ONLY</span>
         </div>
         <FilterBar
@@ -426,23 +427,23 @@ export function BillingView() {
           active={[filters.payer, filters.channel, filters.tx_status, filters.tx_type, filters.from, filters.to].filter(Boolean).length}
           onReset={resetTransactions}
         >
-          <SelectFilter label="付款客户" value={filters.payer} onChange={value => set('payer', value)} options={customers} all="全部客户" />
-          <SelectFilter label="收款渠道" value={filters.channel} onChange={value => set('channel', value)} options={uniqueOptions(transactions.map(item => item.provider)).map(([value]) => [value, value.toUpperCase()] as Option)} />
-          <SelectFilter label="流水状态" value={filters.tx_status} onChange={value => set('tx_status', value)} options={transactionStatuses} />
-          <SelectFilter label="类型" value={filters.tx_type} onChange={value => set('tx_type', value)} options={transactionTypes} />
-          <DateRangeFilter label="入账时间" from={filters.from} to={filters.to} onFrom={value => set('from', value)} onTo={value => set('to', value)} />
+          <SelectFilter label={t('付款客户')} value={filters.payer} onChange={value => set('payer', value)} options={customers} all={t('全部客户')} />
+          <SelectFilter label={t('收款渠道')} value={filters.channel} onChange={value => set('channel', value)} options={uniqueOptions(transactions.map(item => item.provider)).map(([value]) => [value, value.toUpperCase()] as Option)} />
+          <SelectFilter label={t('流水状态')} value={filters.tx_status} onChange={value => set('tx_status', value)} options={transactionStatuses} />
+          <SelectFilter label={t('类型')} value={filters.tx_type} onChange={value => set('tx_type', value)} options={transactionTypes} />
+          <DateRangeFilter label={t('入账时间')} from={filters.from} to={filters.to} onFrom={value => set('from', value)} onTo={value => set('to', value)} />
         </FilterBar>
         <div className="table-wrap">
           <table>
             <thead>
               <tr>
-                <th>外部交易单号</th>
-                <th>账单号</th>
-                <th>付款客户</th>
-                <th>收款渠道</th>
-                <th>实付金额</th>
-                <th>流水状态</th>
-                <th>入账时间</th>
+                <th>{t('外部交易单号')}</th>
+                <th>{t('账单号')}</th>
+                <th>{t('付款客户')}</th>
+                <th>{t('收款渠道')}</th>
+                <th>{t('实付金额')}</th>
+                <th>{t('流水状态')}</th>
+                <th>{t('入账时间')}</th>
               </tr>
             </thead>
             <tbody>
@@ -462,7 +463,7 @@ export function BillingView() {
               ))}
               {!shownTransactions.length && (
                 <tr>
-                  <td colSpan={7} className="empty-state">{transactions.length ? '没有符合筛选条件的流水' : '暂无交易流水记录'}</td>
+                  <td colSpan={7} className="empty-state">{transactions.length ? t('没有符合筛选条件的流水') : t('暂无交易流水记录')}</td>
                 </tr>
               )}
             </tbody>

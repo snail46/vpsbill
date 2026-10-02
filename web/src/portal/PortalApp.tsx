@@ -20,7 +20,7 @@ import { CustomerContact } from './Contact'
 import { LocaleMenu } from '../shared/LocaleMenu'
 import { TelegramPrompt } from '../Telegram'
 import { siteMeta } from '../shared/boot'
-import { lang } from '../shared/i18n'
+import { t, tr, lang } from '../shared/i18n'
 
 export type CustomerAuthScreen = 'loading' | 'install' | 'login' | 'register' | 'forgot' | 'reset' | 'ready' | 'uninstalled'
 
@@ -103,7 +103,7 @@ export function CustomerPortalApp() {
     return (
       <main className="session-loading">
         <BrandMark />
-        <strong>站点尚未完成安装。请打开管理后台地址（默认是服务器的后台端口）完成 Web 安装向导。</strong>
+        <strong>{t('站点尚未完成安装。请打开管理后台地址（默认是服务器的后台端口）完成 Web 安装向导。')}</strong>
       </main>
     )
   }
@@ -181,12 +181,12 @@ export function CustomerAuthPage({
           method: 'POST',
           body: JSON.stringify({ email }),
         })
-        setNotice(result.message)
+        setNotice(tr(result.message))
         return
       }
       if (reset) {
         if (password !== confirmPassword) {
-          setError('两次输入的新密码不一致')
+          setError(t('两次输入的新密码不一致'))
           return
         }
         const token = new URLSearchParams(window.location.search).get('token') ?? ''
@@ -195,7 +195,7 @@ export function CustomerAuthPage({
           body: JSON.stringify({ token, password }),
         })
         switchMode('login')
-        setNotice('密码已重置，请使用新密码登录。')
+        setNotice(t('密码已重置，请使用新密码登录。'))
         return
       }
       const body = register ? { display_name: displayName, email, password, locale: lang } : { email, password, totp_code: totpCode }
@@ -205,37 +205,37 @@ export function CustomerAuthPage({
       )
       onAuthenticated(current)
     } catch (err) {
-      setError(err instanceof Error ? err.message : '操作失败')
+      setError(err instanceof Error ? err.message : t('操作失败'))
     } finally {
       setSubmitting(false)
     }
   }
 
-  const title = register ? '创建客户账户' : forgot ? '找回登录密码' : reset ? '设置新密码' : '登录客户中心'
+  const title = register ? t('创建客户账户') : forgot ? t('找回登录密码') : reset ? t('设置新密码') : t('登录客户中心')
   const subtitle = register
-    ? '注册后会自动开通个人财务账本。'
+    ? t('注册后会自动开通个人财务账本。')
     : forgot
       ? meta?.password_reset_mail === false
-        ? '本站暂未开通邮件找回，请通过客服或工单联系商家为你生成重置链接。'
-        : '输入注册邮箱，我们会发送一封包含重置链接的邮件，30 分钟内有效。'
+        ? t('本站暂未开通邮件找回，请通过客服或工单联系商家为你生成重置链接。')
+        : t('输入注册邮箱，我们会发送一封包含重置链接的邮件，30 分钟内有效。')
       : reset
-        ? '新密码至少 12 个字符。设置后，所有已登录的设备都会退出。'
-        : '管理你的云资源与服务账单。'
-  const submitLabel = register ? '完成注册并登录' : forgot ? '发送重置邮件' : reset ? '保存新密码' : '登录客户中心'
+        ? t('新密码至少 12 个字符。设置后，所有已登录的设备都会退出。')
+        : t('管理你的云资源与服务账单。')
+  const submitLabel = register ? t('完成注册并登录') : forgot ? t('发送重置邮件') : reset ? t('保存新密码') : t('登录客户中心')
 
   return (
     <main className="auth-page customer-auth-page">
       <div className="auth-theme"><LocaleMenu /><ThemeToggle /></div>
       <section className="auth-brand-panel customer-brand-panel">
-        <Brand className="auth-brand" name={siteName} subtitle="客户服务中心" />
+        <Brand className="auth-brand" name={siteName} subtitle={t('客户服务中心')} />
         <div>
           <p className="eyebrow">YOUR CLOUD, UNDER CONTROL</p>
-          <h1>随心挑选、配置与管理你的 VPS 实例。</h1>
-          <p>实时运行监控、端口映射规则、密码管理与财务账单集中在统一入口。</p>
+          <h1>{t('随心挑选、配置与管理你的 VPS 实例。')}</h1>
+          <p>{t('实时运行监控、端口映射规则、密码管理与财务账单集中在统一入口。')}</p>
         </div>
         <div className="auth-proof">
           <ShieldCheck size={18} />
-          <span>多租户严格隔离 · 服务端会话 · 全链路审计</span>
+          <span>{t('多租户严格隔离 · 服务端会话 · 全链路审计')}</span>
         </div>
       </section>
       <section className="auth-form-panel">
@@ -243,26 +243,26 @@ export function CustomerAuthPage({
           <p className="eyebrow">CUSTOMER PORTAL</p>
           <h2>{title}</h2>
           <p>{subtitle}</p>
-          {register && <Field label="姓名 / 昵称" value={displayName} onChange={setDisplayName} autoComplete="name" />}
+          {register && <Field label={t('姓名 / 昵称')} value={displayName} onChange={setDisplayName} autoComplete="name" />}
           {!reset && !(forgot && meta?.password_reset_mail === false) && (
-            <Field label="登录邮箱" value={email} onChange={setEmail} type="email" autoComplete="email" />
+            <Field label={t('登录邮箱')} value={email} onChange={setEmail} type="email" autoComplete="email" />
           )}
           {!forgot && (
             <Field
-              label={reset ? '新密码' : '登录密码'}
+              label={reset ? t('新密码') : t('登录密码')}
               value={password}
               onChange={setPassword}
               type="password"
               autoComplete={register || reset ? 'new-password' : 'current-password'}
-              hint={register || reset ? '至少 12 个字符' : undefined}
+              hint={register || reset ? t('至少 12 个字符') : undefined}
             />
           )}
           {reset && (
-            <Field label="再次输入新密码" value={confirmPassword} onChange={setConfirmPassword} type="password" autoComplete="new-password" />
+            <Field label={t('再次输入新密码')} value={confirmPassword} onChange={setConfirmPassword} type="password" autoComplete="new-password" />
           )}
           {mode === 'login' && (
             <Field
-              label="二步验证码（启用后填写）"
+              label={t('二步验证码（启用后填写）')}
               value={totpCode}
               onChange={setTotpCode}
               autoComplete="one-time-code"
@@ -273,7 +273,7 @@ export function CustomerAuthPage({
           {notice && <div className="form-success" role="status">{notice}</div>}
           {!(forgot && meta?.password_reset_mail === false) && (
             <button className="primary-button" style={{ width: '100%', marginTop: '6px' }} disabled={submitting || mode === 'loading'}>
-              {mode === 'loading' ? '正在连接…' : submitting ? '正在提交…' : submitLabel}
+              {mode === 'loading' ? t('正在连接…') : submitting ? t('正在提交…') : submitLabel}
             </button>
           )}
           <div className="auth-links">
@@ -282,11 +282,11 @@ export function CustomerAuthPage({
               className="auth-switch button-link"
               onClick={() => switchMode(mode === 'login' ? 'register' : 'login')}
             >
-              {mode === 'login' ? '还没有账号？立即注册' : register ? '已有账号？返回登录' : '返回登录'}
+              {mode === 'login' ? t('还没有账号？立即注册') : register ? t('已有账号？返回登录') : t('返回登录')}
             </button>
             {mode === 'login' && (
               <button type="button" className="auth-switch button-link" onClick={() => switchMode('forgot')}>
-                忘记密码？
+                {t('忘记密码？')}
               </button>
             )}
           </div>
@@ -326,40 +326,40 @@ export function CustomerShell({ customer, siteName, onLogout }: { customer: Cust
   }
 
   const items: [PortalView, string, typeof LayoutDashboard][] = [
-    ['overview', '服务概览', LayoutDashboard],
-    ['shop', '选购 VPS', ShoppingCart],
-    ['services', '我的 VPS', Boxes],
-    ['billing', '订单与账单', WalletCards],
-    ['wallet', '账户余额', Coins],
-    ['hosting', '托管中心', Store],
-    ['trade', '交易市场', ArrowLeftRight],
-    ['support', '支持工单', Headphones],
-    ['profile', '账户资料', UserCircle],
+    ['overview', t('服务概览'), LayoutDashboard],
+    ['shop', t('选购 VPS'), ShoppingCart],
+    ['services', t('我的 VPS'), Boxes],
+    ['billing', t('订单与账单'), WalletCards],
+    ['wallet', t('账户余额'), Coins],
+    ['hosting', t('托管中心'), Store],
+    ['trade', t('交易市场'), ArrowLeftRight],
+    ['support', t('支持工单'), Headphones],
+    ['profile', t('账户资料'), UserCircle],
   ]
 
   const titles: Record<PortalView, string> = {
-    overview: '服务概览',
-    shop: '选购 VPS',
-    services: '我的 VPS',
-    billing: '订单与账单',
-    wallet: '账户余额',
-    hosting: '托管中心',
-    trade: '交易市场',
-    support: '支持工单',
-    profile: '账户资料',
-    announcements: '平台公告',
-    contact: '联系我们',
+    overview: t('服务概览'),
+    shop: t('选购 VPS'),
+    services: t('我的 VPS'),
+    billing: t('订单与账单'),
+    wallet: t('账户余额'),
+    hosting: t('托管中心'),
+    trade: t('交易市场'),
+    support: t('支持工单'),
+    profile: t('账户资料'),
+    announcements: t('平台公告'),
+    contact: t('联系我们'),
   }
 
   return (
     <div className="app-shell customer-shell">
       <aside className={menuOpen ? 'sidebar menu-open' : 'sidebar'}>
-        <Brand name={siteName || '客户中心'} subtitle="客户中心" />
-        <button type="button" className="menu-toggle" aria-label={menuOpen ? '关闭菜单' : '打开菜单'} aria-expanded={menuOpen} onClick={() => setMenuOpen(open => !open)}>
+        <Brand name={siteName || t('客户中心')} subtitle={t('客户中心')} />
+        <button type="button" className="menu-toggle" aria-label={menuOpen ? t('关闭菜单') : t('打开菜单')} aria-expanded={menuOpen} onClick={() => setMenuOpen(open => !open)}>
           {menuOpen ? <X size={20} /> : <Menu size={20} />}
           <span>{titles[view]}</span>
         </button>
-        <nav aria-label="客户导航">
+        <nav aria-label={t('客户导航')}>
           {items.map(([id, label, Icon]) => (
             <button
               key={id}
@@ -374,10 +374,10 @@ export function CustomerShell({ customer, siteName, onLogout }: { customer: Cust
           ))}
         </nav>
         {/* Contact sits at the foot of the menu, above the account. */}
-        <nav className="sidebar-foot" aria-label="联系我们">
+        <nav className="sidebar-foot" aria-label={t('联系我们')}>
           <button className={view === 'contact' ? 'nav-item active' : 'nav-item'} onClick={() => navigate('contact')}>
             <ContactIcon size={18} />
-            <span>联系我们</span>
+            <span>{t('联系我们')}</span>
             {view === 'contact' && <ChevronRight size={16} />}
           </button>
         </nav>
@@ -385,7 +385,7 @@ export function CustomerShell({ customer, siteName, onLogout }: { customer: Cust
           <span className="status-dot online" />
           <div>
             <strong>{customer.display_name}</strong>
-            <span>账户正常</span>
+            <span>{t('账户正常')}</span>
           </div>
         </div>
       </aside>
@@ -400,7 +400,7 @@ export function CustomerShell({ customer, siteName, onLogout }: { customer: Cust
             <ThemeToggle />
             <span>{customer.email}</span>
             <div className="avatar">{customer.display_name.slice(0, 1)}</div>
-            <button className="icon-button" aria-label="退出登录" onClick={onLogout} title="退出登录">
+            <button className="icon-button" aria-label={t('退出登录')} onClick={onLogout} title={t('退出登录')}>
               <LogOut size={16} />
             </button>
           </div>

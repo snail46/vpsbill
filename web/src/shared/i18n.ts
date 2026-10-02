@@ -66,8 +66,14 @@ export async function loadLocale() {
   registerLocale(module.words, module.rules)
 }
 
+// fill puts args into {0}, {1}…; like React, it shows nothing for a
+// boolean, null or undefined.
 function fill(text: string, args: unknown[]) {
-  return args.length ? text.replace(/\{(\d+)\}/g, (_, index: string) => String(args[Number(index)] ?? '')) : text
+  if (!args.length) return text
+  return text.replace(/\{(\d+)\}/g, (_, index: string) => {
+    const value = args[Number(index)]
+    return value == null || typeof value === 'boolean' ? '' : String(value)
+  })
 }
 
 // t translates interface text; {0}, {1}… are replaced by args.

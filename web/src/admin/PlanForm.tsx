@@ -21,6 +21,7 @@ import { confirmDialog, promptDialog } from '../shared/dialog'
 import { TagInput } from '../shared/tags'
 import { virtualizationLabel } from './Nodes'
 import { toast } from '../shared/toast'
+import { t, tr } from '../shared/i18n'
 
 type Virtualization = PlanRecord['virtualization']
 
@@ -29,15 +30,15 @@ type Virtualization = PlanRecord['virtualization']
 export type PlanSeed = Partial<PlanRecord> & { formula?: PriceFormula; cycles?: string[] }
 
 export const selectionLabels: Record<NodeSelection, string> = {
-  nodes: '指定节点',
-  pack: '自动 · 集中填充',
-  spread: '自动 · 分散均衡',
+  nodes: t('指定节点'),
+  pack: t('自动 · 集中填充'),
+  spread: t('自动 · 分散均衡'),
 }
 
 const selectionHints: Record<NodeSelection, string> = {
-  nodes: '只在勾选的节点上开通；勾选多个时，先填满剩余内存最少的一台。客户下单时只能选这些节点所在的地域。',
-  pack: '在同对接方式、同虚拟化的全部平台节点中，选剩余内存最少但还放得下的节点：先填满一台再用下一台。',
-  spread: '在同对接方式、同虚拟化的全部平台节点中，选剩余内存最多的节点，让各节点负载更均衡。',
+  nodes: t('只在勾选的节点上开通；勾选多个时，先填满剩余内存最少的一台。客户下单时只能选这些节点所在的地域。'),
+  pack: t('在同对接方式、同虚拟化的全部平台节点中，选剩余内存最少但还放得下的节点：先填满一台再用下一台。'),
+  spread: t('在同对接方式、同虚拟化的全部平台节点中，选剩余内存最多的节点，让各节点负载更均衡。'),
 }
 
 // placementText summarises a plan's node selection for its card.
@@ -45,8 +46,8 @@ export function placementText(plan: Pick<PlanRecord, 'node_selection' | 'node_id
   const selection = plan.node_selection ?? 'pack'
   if (selection !== 'nodes') return selectionLabels[selection]
   const ids = plan.node_ids ?? []
-  const names = nodes ? ids.map(id => nodes.find(node => node.id === id)?.name ?? '已删除节点') : []
-  return names.length ? `指定节点：${names.join('、')}` : `指定 ${ids.length} 个节点`
+  const names = nodes ? ids.map(id => nodes.find(node => node.id === id)?.name ?? t('已删除节点')) : []
+  return names.length ? t('指定节点：{0}', names.join('、')) : t('指定 {0} 个节点', ids.length)
 }
 
 // Settings a series of plans shares; a preset stores these.
@@ -156,7 +157,7 @@ export function NodePicker({
   const eligible = (nodes ?? []).filter(node => nodeFits(node, providerType, virtualization))
   return (
     <fieldset className="wide node-picker">
-      <legend>节点选择方式</legend>
+      <legend>{t('节点选择方式')}</legend>
       <div className="node-picker-modes">
         {(Object.keys(selectionLabels) as NodeSelection[]).map(mode => (
           <label key={mode} className={selection === mode ? 'node-mode selected' : 'node-mode'}>
@@ -170,7 +171,7 @@ export function NodePicker({
       </div>
       {selection === 'nodes' &&
         (nodes === null ? (
-          <div className="template-empty">无法读取节点列表（需要「节点查看」权限）。</div>
+          <div className="template-empty">{t('无法读取节点列表（需要「节点查看」权限）。')}</div>
         ) : eligible.length ? (
           <div className="template-picker">
             {eligible.map(node => (
@@ -185,16 +186,16 @@ export function NodePicker({
                 <span>
                   <strong>{node.name}</strong>
                   <small>
-                    {node.region_name} · {node.status === 'online' ? '在线' : '离线'} · 可售 {node.capacity_vcpu} 核 / {node.capacity_ram_mb} MB / {node.capacity_disk_gb} GB
+                    {t('{0} · {1} · 可售 {2} 核 / {3} MB / {4} GB', node.region_name, node.status === 'online' ? t('在线') : t('离线'), node.capacity_vcpu, node.capacity_ram_mb, node.capacity_disk_gb)}
                   </small>
-                  {node.health_hold_reason && <em>健康检查暂停开通：{node.health_hold_reason}</em>}
+                  {node.health_hold_reason && <em>{t('健康检查暂停开通：{0}', tr(node.health_hold_reason))}</em>}
                 </span>
               </label>
             ))}
           </div>
         ) : (
           <div className="template-empty">
-            暂无可指定的 {providerType.toUpperCase()} · {virtualization.toUpperCase()} 平台节点。
+            {t('暂无可指定的 {0} · {1} 平台节点。', providerType.toUpperCase(), virtualization.toUpperCase())}
           </div>
         ))}
     </fieldset>
@@ -310,8 +311,8 @@ export function PlanForm({
   }
 
   function checkShared() {
-    if (!allowed.length || !defaultTemplate) return '请至少勾选一个可用操作系统模板并指定默认模板'
-    if (selection === 'nodes' && !nodeIds.length) return '「指定节点」方式需至少勾选一个节点'
+    if (!allowed.length || !defaultTemplate) return t('请至少勾选一个可用操作系统模板并指定默认模板')
+    if (selection === 'nodes' && !nodeIds.length) return t('「指定节点」方式需至少勾选一个节点')
     return ''
   }
 
@@ -377,7 +378,7 @@ export function PlanForm({
       await api(request.path, { method: request.method, body: JSON.stringify(request.body) })
       onSaved()
     } catch (err) {
-      setError(err instanceof Error ? err.message : '保存失败')
+      setError(err instanceof Error ? err.message : t('保存失败'))
     } finally {
       setSaving(false)
     }
@@ -385,20 +386,20 @@ export function PlanForm({
 
   // batchPlans builds one plan per row, or returns why it cannot.
   function batchPlans(data: FormData) {
-    if (!rows.length) return '请至少添加一行套餐'
-    if (!cycles.length) return '请至少选择一个计费周期'
+    if (!rows.length) return t('请至少添加一行套餐')
+    if (!cycles.length) return t('请至少选择一个计费周期')
     const base = shared(data)
     const plans = []
     for (const [index, row] of rows.entries()) {
-      const label = `第 ${index + 1} 行`
-      if (!row.name.trim() || !row.code.trim()) return `${label}：请填写名称和编码`
-      if (row.vcpu < 1 || row.ram_mb < 64 || row.disk_gb < 1) return `${label}：CPU 至少 1 核、内存至少 64 MB、磁盘至少 1 GB`
+      const label = t('第 {0} 行', index + 1)
+      if (!row.name.trim() || !row.code.trim()) return t('{0}：请填写名称和编码', label)
+      if (row.vcpu < 1 || row.ram_mb < 64 || row.disk_gb < 1) return t('{0}：CPU 至少 1 核、内存至少 64 MB、磁盘至少 1 GB', label)
       const prices = cycles
         .filter(cycle => Number(row.prices[cycle] || 0) > 0)
         .map(cycle => ({ currency: 'CNY', billing_cycle: cycle, amount_minor: Math.round(Number(row.prices[cycle]) * 100), setup_fee_minor: 0, purchase_limit: null }))
-      if (!prices.length) return `${label}：至少填写一个价格`
+      if (!prices.length) return t('{0}：至少填写一个价格', label)
       const stock = row.stock.trim()
-      if (stock !== '' && !(Number.isInteger(Number(stock)) && Number(stock) >= 0)) return `${label}：库存需为非负整数，留空不限`
+      if (stock !== '' && !(Number.isInteger(Number(stock)) && Number(stock) >= 0)) return t('{0}：库存需为非负整数，留空不限', label)
       plans.push({
         ...base,
         // Rows keep their order after the number typed.
@@ -468,50 +469,50 @@ export function PlanForm({
     }
     setFormKey(key => key + 1)
     setError('')
-    setNotice(`已套用模板「${preset.name}」，请检查后保存。`)
+    setNotice(t('已套用模板「{0}」，请检查后保存。', preset.name))
   }
 
   async function savePreset() {
     const current = presets.find(item => item.id === presetID)
     const name = await promptDialog({
-      title: '存为套餐模板',
-      message: '保存当前表单里的公共设置（对接方式、虚拟化、分类、节点、网络、镜像、磁盘读写、流量带宽默认值），以及批量创建用的计费周期和单价公式；不含名称、编码、配置和价格。',
-      label: '模板名称',
+      title: t('存为套餐模板'),
+      message: t('保存当前表单里的公共设置（对接方式、虚拟化、分类、节点、网络、镜像、磁盘读写、流量带宽默认值），以及批量创建用的计费周期和单价公式；不含名称、编码、配置和价格。'),
+      label: t('模板名称'),
       defaultValue: current?.name ?? '',
-      placeholder: '如：香港 NAT 系列',
+      placeholder: t('如：香港 NAT 系列'),
       required: true,
-      validate: value => (value.trim().length > 60 ? '最多 60 个字' : ''),
+      validate: value => (value.trim().length > 60 ? t('最多 60 个字') : ''),
     })
     if (!name) return
     const seedValues = currentSeed()
     const settings: Record<string, unknown> = { formula: seedValues.formula, cycles: seedValues.cycles }
     for (const key of sharedKeys) settings[key] = seedValues[key]
     const existing = presets.find(item => item.name.trim().toLowerCase() === name.trim().toLowerCase())
-    if (existing && !(await confirmDialog({ title: `覆盖模板「${existing.name}」？`, message: '同名模板的内容会被当前设置替换。', confirmText: '覆盖' }))) return
+    if (existing && !(await confirmDialog({ title: t('覆盖模板「{0}」？', existing.name), message: t('同名模板的内容会被当前设置替换。'), confirmText: t('覆盖') }))) return
     try {
       const saved = await api<PlanPresetRecord>(existing ? `/api/v1/admin/plan-presets/${existing.id}` : '/api/v1/admin/plan-presets', {
         method: existing ? 'PUT' : 'POST',
         body: JSON.stringify({ name: name.trim(), settings }),
       })
       setPresetID(saved.id)
-      setNotice(`模板「${saved.name}」已保存。`)
+      setNotice(t('模板「{0}」已保存。', saved.name))
       onPresetsChanged()
     } catch (err) {
-      setError(err instanceof Error ? err.message : '保存模板失败')
+      setError(err instanceof Error ? err.message : t('保存模板失败'))
     }
   }
 
   async function deletePreset() {
     const preset = presets.find(item => item.id === presetID)
-    if (!preset || !(await confirmDialog({ title: `删除模板「${preset.name}」？`, message: '只删除模板本身，已创建的套餐不受影响。', confirmText: '删除', danger: true }))) return
+    if (!preset || !(await confirmDialog({ title: t('删除模板「{0}」？', preset.name), message: t('只删除模板本身，已创建的套餐不受影响。'), confirmText: t('删除'), danger: true }))) return
     try {
       await api(`/api/v1/admin/plan-presets/${preset.id}`, { method: 'DELETE' })
       setPresetID('')
       onPresetsChanged()
-      toast('success', `模板「${preset.name}」已删除`)
+      toast('success', t('模板「{0}」已删除', preset.name))
     } catch (err) {
-      toast('error', '删除模板失败', err instanceof Error ? err.message : undefined)
-      setError(err instanceof Error ? err.message : '删除模板失败')
+      toast('error', t('删除模板失败'), err instanceof Error ? err.message : undefined)
+      setError(err instanceof Error ? err.message : t('删除模板失败'))
     }
   }
 
@@ -552,10 +553,10 @@ export function PlanForm({
 
   const setFormulaField = (field: keyof Omit<PriceFormula, 'discounts'>, value: string) => setFormula(current => ({ ...current, [field]: Number(value) || 0 }))
 
-  const title = batch ? '批量创建套餐' : plan ? '编辑 VPS 商品套餐' : seed?.code ? '复制套餐' : '创建 VPS 商品套餐'
+  const title = batch ? t('批量创建套餐') : plan ? t('编辑 VPS 商品套餐') : seed?.code ? t('复制套餐') : t('创建 VPS 商品套餐')
   const intro = batch
-    ? '上面的公共设置对每一行都生效；表格里每行是一个套餐。全部校验通过后一起保存，有一行不通过就都不保存。'
-    : '套餐绑定一种对接方式，只会调度到该方式的节点；可用模板从这些在线节点读取，网络分配策略统一下发给实例。'
+    ? t('上面的公共设置对每一行都生效；表格里每行是一个套餐。全部校验通过后一起保存，有一行不通过就都不保存。')
+    : t('套餐绑定一种对接方式，只会调度到该方式的节点；可用模板从这些在线节点读取，网络分配策略统一下发给实例。')
 
   return (
     <div className="inline-form">
@@ -564,21 +565,21 @@ export function PlanForm({
           <h3>{title}</h3>
           <p>{intro}</p>
         </div>
-        <button className="icon-button" onClick={onClose} aria-label="关闭"><X size={18} /></button>
+        <button className="icon-button" onClick={onClose} aria-label={t('关闭')}><X size={18} /></button>
       </div>
 
       <div className="preset-bar">
         <label>
-          <span>套餐模板</span>
+          <span>{t('套餐模板')}</span>
           <select value={presetID} onChange={event => setPresetID(event.target.value)}>
-            <option value="">{presets.length ? '选择模板…' : '暂无模板'}</option>
+            <option value="">{presets.length ? t('选择模板…') : t('暂无模板')}</option>
             {presets.map(preset => <option key={preset.id} value={preset.id}>{preset.name}</option>)}
           </select>
         </label>
-        <button type="button" className="secondary-button compact" disabled={!presetID} onClick={applyPreset}>套用模板</button>
-        <button type="button" className="secondary-button compact" onClick={savePreset}>存为模板</button>
+        <button type="button" className="secondary-button compact" disabled={!presetID} onClick={applyPreset}>{t('套用模板')}</button>
+        <button type="button" className="secondary-button compact" onClick={savePreset}>{t('存为模板')}</button>
         {presetID && (
-          <button type="button" className="icon-button" title="删除模板" aria-label="删除模板" onClick={deletePreset}><Trash2 size={16} /></button>
+          <button type="button" className="icon-button" title={t('删除模板')} aria-label={t('删除模板')} onClick={deletePreset}><Trash2 size={16} /></button>
         )}
       </div>
       {notice && <div className="form-notice">{notice}</div>}
@@ -587,29 +588,29 @@ export function PlanForm({
         {!batch && (
           <>
             <label>
-              <span>套餐唯一编码</span>
+              <span>{t('套餐唯一编码')}</span>
               <input name="code" required placeholder="LXC-START" defaultValue={init.code} />
             </label>
             <label>
-              <span>套餐展示名称</span>
-              <input name="name" required placeholder="轻量入门型" defaultValue={init.name} />
+              <span>{t('套餐展示名称')}</span>
+              <input name="name" required placeholder={t('轻量入门型')} defaultValue={init.name} />
             </label>
           </>
         )}
         <label>
-          <span>商品分类</span>
+          <span>{t('商品分类')}</span>
           <select name="category_id" defaultValue={init.category_id ?? ''}>
-            <option value="">未分类</option>
+            <option value="">{t('未分类')}</option>
             {categories.map(category => <option key={category.id} value={category.id}>{category.name}</option>)}
           </select>
         </label>
         <label>
-          <span>排序{batch ? '（起始值，逐行加 1）' : ''}</span>
-          <input name="sort_order" type="number" min="-9999" max="9999" step="1" defaultValue={init.sort_order ?? 0} title="数字小的排在前面，相同时新建的在前" />
-          <small className="field-hint">数字小的排在前面</small>
+          <span>{t('排序{0}', batch ? t('（起始值，逐行加 1）') : '')}</span>
+          <input name="sort_order" type="number" min="-9999" max="9999" step="1" defaultValue={init.sort_order ?? 0} title={t('数字小的排在前面，相同时新建的在前')} />
+          <small className="field-hint">{t('数字小的排在前面')}</small>
         </label>
         <label>
-          <span>对接方式</span>
+          <span>{t('对接方式')}</span>
           <select
             name="provider_type"
             value={providerType}
@@ -626,7 +627,7 @@ export function PlanForm({
           </select>
         </label>
         <label>
-          <span>底层虚拟化</span>
+          <span>{t('底层虚拟化')}</span>
           <select
             name="virtualization"
             value={virtualization}
@@ -642,43 +643,43 @@ export function PlanForm({
         {!batch && (
           <>
             <label>
-              <span>vCPU 核心</span>
+              <span>{t('vCPU 核心')}</span>
               <input name="vcpu" type="number" min="1" defaultValue={init.vcpu || 1} required />
             </label>
             <label>
-              <span>内存容量 MB</span>
+              <span>{t('内存容量 MB')}</span>
               <input name="ram_mb" type="number" min="64" defaultValue={init.ram_mb || 512} required />
             </label>
             <label>
-              <span>磁盘空间 GB</span>
+              <span>{t('磁盘空间 GB')}</span>
               <input name="disk_gb" type="number" min="1" defaultValue={init.disk_gb || 10} required />
             </label>
             <label>
-              <span>月度流量 GB</span>
+              <span>{t('月度流量 GB')}</span>
               <input name="traffic_gb" type="number" min="0" defaultValue={init.traffic_gb ?? 1024} />
             </label>
             <label>
-              <span>下行带宽 Mbps</span>
+              <span>{t('下行带宽 Mbps')}</span>
               <input name="network_down_mbps" type="number" min="0" defaultValue={init.network_down_mbps ?? 100} />
             </label>
             <label>
-              <span>上行带宽 Mbps</span>
+              <span>{t('上行带宽 Mbps')}</span>
               <input name="network_up_mbps" type="number" min="0" defaultValue={init.network_up_mbps ?? 100} />
             </label>
           </>
         )}
         <label>
-          <span>快照配额</span>
+          <span>{t('快照配额')}</span>
           <input name="snapshot_limit" type="number" min="0" defaultValue={init.snapshot_limit ?? 1} />
         </label>
 
         <label className="wide">
-          <span>套餐描述{batch ? '（每个套餐都用这段）' : ''}（显示在「选购 VPS」的套餐卡片上，可留空）</span>
-          <textarea name="description" rows={2} maxLength={500} placeholder="如：CN2 GIA 回程，晚高峰稳定，适合建站和代理" defaultValue={init.description ?? ''} />
+          <span>{t('套餐描述{0}（显示在「选购 VPS」的套餐卡片上，可留空）', batch ? t('（每个套餐都用这段）') : '')}</span>
+          <textarea name="description" rows={2} maxLength={500} placeholder={t('如：CN2 GIA 回程，晚高峰稳定，适合建站和代理')} defaultValue={init.description ?? ''} />
         </label>
         <label className="wide">
-          <span>标签（显示在套餐卡片上）</span>
-          <TagInput value={tags} onChange={setTags} placeholder="如：CN2 GIA、原生 IP、解锁流媒体" />
+          <span>{t('标签（显示在套餐卡片上）')}</span>
+          <TagInput value={tags} onChange={setTags} placeholder={t('如：CN2 GIA、原生 IP、解锁流媒体')} />
         </label>
 
         <NodePicker
@@ -721,37 +722,37 @@ export function PlanForm({
         {providerType === 'hatch' && <DiskIOFields plan={plan ?? (init.disk_read_mbps !== undefined ? init : undefined)} capacity={capacity} />}
 
         <fieldset className="wide network-policy">
-          <legend>网络策略配置</legend>
+          <legend>{t('网络策略配置')}</legend>
           <label className="checkbox">
             <input name="assign_nat" type="checkbox" defaultChecked={init.assign_nat ?? true} />
-            分配 NAT 共享 IPv4
+            {t('分配 NAT 共享 IPv4')}
           </label>
           <label>
-            <span>NAT 端口映射配额</span>
+            <span>{t('NAT 端口映射配额')}</span>
             <input name="port_mapping_count" type="number" min="0" max="64" defaultValue={init.port_mapping_count ?? 0} />
           </label>
           <label className="checkbox">
             <input name="assign_ipv4" type="checkbox" defaultChecked={init.assign_ipv4 ?? false} />
-            分配独立公网 IPv4
+            {t('分配独立公网 IPv4')}
           </label>
           <label>
-            <span>公网 IPv4 数量</span>
+            <span>{t('公网 IPv4 数量')}</span>
             <input name="ipv4_count" type="number" min="1" max="64" defaultValue={init.ipv4_count ?? 1} />
           </label>
           <label className="checkbox">
             <input name="assign_ipv6" type="checkbox" defaultChecked={init.assign_ipv6 ?? true} />
-            分配独立 IPv6
+            {t('分配独立 IPv6')}
           </label>
           <label>
-            <span>独立 IPv6 数量</span>
+            <span>{t('独立 IPv6 数量')}</span>
             <input name="ipv6_count" type="number" min="1" max="64" defaultValue={init.ipv6_count ?? 1} />
           </label>
         </fieldset>
 
         <fieldset className="wide">
-          <legend>允许客户选择的系统镜像（动态读取自节点就绪镜像）</legend>
+          <legend>{t('允许客户选择的系统镜像（动态读取自节点就绪镜像）')}</legend>
           {loadingTemplates ? (
-            <div className="template-empty">正在向在线节点检索可用系统镜像…</div>
+            <div className="template-empty">{t('正在向在线节点检索可用系统镜像…')}</div>
           ) : (
             <div className="template-picker">
               {visibleTemplates.map(item => (
@@ -760,12 +761,12 @@ export function PlanForm({
                   <span>
                     <strong>{templateLabel(item.id)}</strong>
                     <small>{item.description || item.id}</small>
-                    <em>部署节点：{item.node_names.join('、')}</em>
+                    <em>{t('部署节点：{0}', item.node_names.join(t('、')))}</em>
                   </span>
                 </label>
               ))}
               {!visibleTemplates.length && (
-                <div className="template-empty">在线集群中暂无已启用且已就绪的 {virtualization.toUpperCase()} 系统镜像。</div>
+                <div className="template-empty">{t('在线集群中暂无已启用且已就绪的 {0} 系统镜像。', virtualization.toUpperCase())}</div>
               )}
               {allowed
                 .filter(id => !visibleTemplates.some(item => item.id === id))
@@ -774,7 +775,7 @@ export function PlanForm({
                     <input type="checkbox" checked onChange={event => toggleTemplate(id, event.target.checked)} />
                     <span>
                       <strong>{id}</strong>
-                      <small>该镜像当前节点未上报，保留后仍可保存供历史实例使用。</small>
+                      <small>{t('该镜像当前节点未上报，保留后仍可保存供历史实例使用。')}</small>
                     </span>
                   </label>
                 ))}
@@ -783,9 +784,9 @@ export function PlanForm({
         </fieldset>
 
         <label className="wide">
-          <span>默认系统镜像</span>
+          <span>{t('默认系统镜像')}</span>
           <select name="default_template_id" value={defaultTemplate} onChange={event => setDefaultTemplate(event.target.value)} required>
-            <option value="">请先在上方勾选镜像</option>
+            <option value="">{t('请先在上方勾选镜像')}</option>
             {allowed.map(id => (
               <option key={id} value={id}>
                 {templateLabel(id)}
@@ -797,17 +798,17 @@ export function PlanForm({
         {batch && (
           <>
             <fieldset className="wide price-formula">
-              <legend>按单价计算价格（可选）</legend>
-              <p className="field-hint">月付价 = 基础费 + 每核 × 核数 + 每 GB 内存 × 内存 + 每 10 GB 磁盘 × 磁盘 + 每 100 GB 流量 × 流量 + 每 10 Mbps × 下行带宽；其他周期 = 月付 × 月数 × (1 − 折扣)。算出后仍可在表格里逐个改。</p>
+              <legend>{t('按单价计算价格（可选）')}</legend>
+              <p className="field-hint">{t('月付价 = 基础费 + 每核 × 核数 + 每 GB 内存 × 内存 + 每 10 GB 磁盘 × 磁盘 + 每 100 GB 流量 × 流量 + 每 10 Mbps × 下行带宽；其他周期 = 月付 × 月数 × (1 − 折扣)。算出后仍可在表格里逐个改。')}</p>
               <div className="price-formula-grid">
                 {(
                   [
-                    ['base', '基础费 元/月'],
-                    ['vcpu', '每核 元'],
-                    ['ram_gb', '每 GB 内存 元'],
-                    ['disk_10gb', '每 10 GB 磁盘 元'],
-                    ['traffic_100gb', '每 100 GB 流量 元'],
-                    ['mbps_10', '每 10 Mbps 元'],
+                    ['base', t('基础费 元/月')],
+                    ['vcpu', t('每核 元')],
+                    ['ram_gb', t('每 GB 内存 元')],
+                    ['disk_10gb', t('每 10 GB 磁盘 元')],
+                    ['traffic_100gb', t('每 100 GB 流量 元')],
+                    ['mbps_10', t('每 10 Mbps 元')],
                   ] as const
                 ).map(([field, label]) => (
                   <label key={field}>
@@ -819,7 +820,7 @@ export function PlanForm({
                   .filter(cycle => cycle !== 'monthly')
                   .map(cycle => (
                     <label key={cycle}>
-                      <span>{cycleName(cycle)}折扣 %</span>
+                      <span>{t('{0}折扣 %', cycleName(cycle))}</span>
                       <input
                         type="number"
                         min="0"
@@ -831,24 +832,24 @@ export function PlanForm({
                     </label>
                   ))}
                 <label>
-                  <span>价格取整</span>
+                  <span>{t('价格取整')}</span>
                   <select value={formula.step} onChange={event => setFormulaField('step', event.target.value)}>
-                    <option value={0.01}>到分</option>
-                    <option value={0.1}>到角</option>
-                    <option value={1}>到元</option>
+                    <option value={0.01}>{t('到分')}</option>
+                    <option value={0.1}>{t('到角')}</option>
+                    <option value={1}>{t('到元')}</option>
                   </select>
                 </label>
               </div>
               <div className="price-formula-actions">
-                <button type="button" className="secondary-button compact" onClick={fillPrices}>按单价填入所有行的价格</button>
+                <button type="button" className="secondary-button compact" onClick={fillPrices}>{t('按单价填入所有行的价格')}</button>
               </div>
             </fieldset>
 
             <fieldset className="wide plan-series">
-              <legend>套餐系列</legend>
+              <legend>{t('套餐系列')}</legend>
               <div className="plan-series-tools">
                 <div className="plan-series-cycles">
-                  <span>出售周期</span>
+                  <span>{t('出售周期')}</span>
                   {namedCycles.map(cycle => (
                     <label key={cycle} className="checkbox">
                       <input
@@ -861,32 +862,32 @@ export function PlanForm({
                   ))}
                 </div>
                 <div className="plan-series-codes">
-                  <input value={codePrefix} placeholder="名称/编码前缀，如 HK-NAT" onChange={event => setCodePrefix(event.target.value)} />
-                  <button type="button" className="secondary-button compact" onClick={fillCodes}>补全空白的名称和编码</button>
+                  <input value={codePrefix} placeholder={t('名称/编码前缀，如 HK-NAT')} onChange={event => setCodePrefix(event.target.value)} />
+                  <button type="button" className="secondary-button compact" onClick={fillCodes}>{t('补全空白的名称和编码')}</button>
                 </div>
               </div>
               <div className="plan-series-table-wrap">
                 <table className="plan-series-table">
                   <thead>
                     <tr>
-                      <th>名称</th>
-                      <th>编码</th>
+                      <th>{t('名称')}</th>
+                      <th>{t('编码')}</th>
                       <th>vCPU</th>
-                      <th>内存 MB</th>
-                      <th>磁盘 GB</th>
-                      <th>流量 GB</th>
-                      <th>下行 Mbps</th>
-                      <th>上行 Mbps</th>
-                      {cycles.map(cycle => <th key={cycle}>{cycleName(cycle)} 元</th>)}
-                      <th>库存</th>
-                      <th aria-label="操作" />
+                      <th>{t('内存 MB')}</th>
+                      <th>{t('磁盘 GB')}</th>
+                      <th>{t('流量 GB')}</th>
+                      <th>{t('下行 Mbps')}</th>
+                      <th>{t('上行 Mbps')}</th>
+                      {cycles.map(cycle => <th key={cycle}>{t('{0} 元', cycleName(cycle))}</th>)}
+                      <th>{t('库存')}</th>
+                      <th aria-label={t('操作')} />
                     </tr>
                   </thead>
                   <tbody>
                     {rows.map(row => (
                       <tr key={row.key}>
-                        <td><input value={row.name} placeholder="名称" onChange={event => updateRow(row.key, { name: event.target.value })} /></td>
-                        <td><input value={row.code} placeholder="编码" onChange={event => updateRow(row.key, { code: event.target.value })} /></td>
+                        <td><input value={row.name} placeholder={t('名称')} onChange={event => updateRow(row.key, { name: event.target.value })} /></td>
+                        <td><input value={row.code} placeholder={t('编码')} onChange={event => updateRow(row.key, { code: event.target.value })} /></td>
                         {(['vcpu', 'ram_mb', 'disk_gb', 'traffic_gb', 'down', 'up'] as const).map(field => (
                           <td key={field}>
                             <input type="number" min="0" value={row[field]} onChange={event => updateRow(row.key, { [field]: Number(event.target.value) || 0 })} />
@@ -894,12 +895,12 @@ export function PlanForm({
                         ))}
                         {cycles.map(cycle => (
                           <td key={cycle}>
-                            <input type="number" min="0" step="0.01" placeholder="不售" value={row.prices[cycle] ?? ''} onChange={event => updateRowPrice(row.key, cycle, event.target.value)} />
+                            <input type="number" min="0" step="0.01" placeholder={t('不售')} value={row.prices[cycle] ?? ''} onChange={event => updateRowPrice(row.key, cycle, event.target.value)} />
                           </td>
                         ))}
-                        <td><input type="number" min="0" step="1" placeholder="不限" value={row.stock} onChange={event => updateRow(row.key, { stock: event.target.value })} /></td>
+                        <td><input type="number" min="0" step="1" placeholder={t('不限')} value={row.stock} onChange={event => updateRow(row.key, { stock: event.target.value })} /></td>
                         <td>
-                          <button type="button" className="icon-button" aria-label="删除这一行" disabled={rows.length === 1} onClick={() => setRows(current => current.filter(item => item.key !== row.key))}>
+                          <button type="button" className="icon-button" aria-label={t('删除这一行')} disabled={rows.length === 1} onClick={() => setRows(current => current.filter(item => item.key !== row.key))}>
                             <Trash2 size={15} />
                           </button>
                         </td>
@@ -910,7 +911,7 @@ export function PlanForm({
               </div>
               <button type="button" className="secondary-button compact" onClick={addRow}>
                 <Plus size={15} />
-                添加一行（配置翻倍）
+                {t('添加一行（配置翻倍）')}
               </button>
             </fieldset>
           </>
@@ -919,9 +920,9 @@ export function PlanForm({
         {error && <div className="form-error wide">{error}</div>}
 
         <div className="form-actions wide">
-          <button type="button" className="secondary-button" onClick={onClose}>取消</button>
+          <button type="button" className="secondary-button" onClick={onClose}>{t('取消')}</button>
           <button className="primary-button" disabled={saving}>
-            {saving ? '正在保存…' : batch ? `创建 ${rows.length} 个套餐` : plan ? '保存修改' : '创建商品套餐'}
+            {saving ? t('正在保存…') : batch ? t('创建 {0} 个套餐', rows.length) : plan ? t('保存修改') : t('创建商品套餐')}
           </button>
         </div>
       </form>

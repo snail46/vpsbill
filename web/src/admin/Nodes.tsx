@@ -5,11 +5,12 @@ import { OvercommitDialog, overcommitText } from '../Supply'
 import { PageActions, StatusBadge, formatBytes, NodeExpiry, CapacityBar, useReveal } from '../shared/ui'
 import { FilterBar, SelectFilter, matchesAny, useUrlFilters, type Option } from './filters'
 
-const nodeStatuses: Option[] = [['online', '在线'], ['offline', '离线'], ['degraded', '降级'], ['maintenance', '维护中'], ['unknown', '未知']]
+const nodeStatuses: Option[] = [['online', t('在线')], ['offline', t('离线')], ['degraded', t('降级')], ['maintenance', t('维护中')], ['unknown', t('未知')]]
 import { formatTime } from '../shared/time'
 import { ConnectSteps, PendingAgents } from '../shared/agents'
 import { confirmDialog } from '../shared/dialog'
 import { toast } from '../shared/toast'
+import { t, tr } from '../shared/i18n'
 
 type Enrollments = { install_command: string; agents: PendingAgentRecord[] }
 // FormTarget is what the node form opens for: a pending Hatch agent, a new
@@ -49,32 +50,32 @@ export function NodesView() {
   }, [])
 
   async function removeNode(node: NodeRecord) {
-    if (!(await confirmDialog({ title: `删除节点【${node.name}】？`, message: '仅在节点上没有未终止的服务时才能删除。', confirmText: '删除', danger: true }))) return
+    if (!(await confirmDialog({ title: t('删除节点【{0}】？', node.name), message: t('仅在节点上没有未终止的服务时才能删除。'), confirmText: t('删除'), danger: true }))) return
     setError('')
     try {
       await api(`/api/v1/admin/nodes/${node.id}`, { method: 'DELETE' })
       await load()
-      toast('success', `节点 ${node.name} 已删除`)
+      toast('success', t('节点 {0} 已删除', node.name))
     } catch (err) {
-      toast('error', '删除节点失败', err instanceof Error ? err.message : undefined)
-      setError(err instanceof Error ? err.message : '删除失败')
+      toast('error', t('删除节点失败'), err instanceof Error ? err.message : undefined)
+      setError(err instanceof Error ? err.message : t('删除失败'))
     }
   }
 
   async function dismiss(agent: PendingAgentRecord) {
-    if (!(await confirmDialog({ title: `从待接入列表移除 ${agent.hostname || '这台主机'}？`, message: '它重新连接后会再次出现。', confirmText: '移除' }))) return
+    if (!(await confirmDialog({ title: t('从待接入列表移除 {0}？', agent.hostname || t('这台主机')), message: t('它重新连接后会再次出现。'), confirmText: t('移除') }))) return
     try {
       await api(`/api/v1/admin/agent-enrollments/${agent.id}`, { method: 'DELETE' })
       void loadEnrollments()
-      toast('success', '已从待接入列表移除')
+      toast('success', t('已从待接入列表移除'))
     } catch (err) {
-      toast('error', '移除失败', err instanceof Error ? err.message : undefined)
-      setError(err instanceof Error ? err.message : '移除失败')
+      toast('error', t('移除失败'), err instanceof Error ? err.message : undefined)
+      setError(err instanceof Error ? err.message : t('移除失败'))
     }
   }
 
   async function testNode(id: string) {
-    const name = nodes.find(node => node.id === id)?.name ?? '节点'
+    const name = nodes.find(node => node.id === id)?.name ?? t('节点')
     setTesting(id)
     setError('')
     try {
@@ -82,12 +83,12 @@ export function NodesView() {
       await load()
       const capacity = result.capacity
       const parts: string[] = []
-      if (typeof result.latency_ms === 'number') parts.push(`耗时 ${result.latency_ms} 毫秒`)
-      if (capacity?.vcpu || capacity?.ram_mb) parts.push(`可分配 ${capacity.vcpu ?? 0} 核 / ${Math.round((capacity.ram_mb ?? 0) / 1024)} GB 内存 / ${capacity.disk_gb ?? 0} GB 磁盘`)
-      toast('success', `${name} 连通正常`, parts.join('，') || undefined)
+      if (typeof result.latency_ms === 'number') parts.push(t('耗时 {0} 毫秒', result.latency_ms))
+      if (capacity?.vcpu || capacity?.ram_mb) parts.push(t('可分配 {0} 核 / {1} GB 内存 / {2} GB 磁盘', capacity.vcpu ?? 0, Math.round((capacity.ram_mb ?? 0) / 1024), capacity.disk_gb ?? 0))
+      toast('success', t('{0} 连通正常', name), parts.join(t('，')) || undefined)
     } catch (err) {
-      toast('error', `${name} 连接失败`, err instanceof Error ? err.message : undefined)
-      setError(err instanceof Error ? err.message : '节点测试失败')
+      toast('error', t('{0} 连接失败', name), err instanceof Error ? err.message : undefined)
+      setError(err instanceof Error ? err.message : t('节点测试失败'))
     } finally {
       setTesting('')
     }
@@ -97,10 +98,10 @@ export function NodesView() {
     <section className="workspace-panel">
       <PageActions
         eyebrow="PROVIDER INTEGRATIONS"
-        title="虚拟化节点对接"
-        description="统一纳管宿主机：Hatch Agent 由宿主机主动连入，LXDAPI 与 CLICD 通过 API 对接。所有对接方式共用调度与账务模型。"
+        title={t('虚拟化节点对接')}
+        description={t('统一纳管宿主机：Hatch Agent 由宿主机主动连入，LXDAPI 与 CLICD 通过 API 对接。所有对接方式共用调度与账务模型。')}
         action={() => setForm({ type: 'lxdapi' })}
-        actionLabel="手动新增节点"
+        actionLabel={t('手动新增节点')}
       />
 
       {error && <div className="form-error" role="alert">{error}</div>}
@@ -113,7 +114,7 @@ export function NodesView() {
           regions={regions}
           onClose={() => setForm(null)}
           onCreated={name => {
-            setNotice('node' in form ? `节点 ${name} 已保存。` : `节点 ${name} 已接入，现在可以在「套餐」里为它创建套餐。`)
+            setNotice('node' in form ? t('节点 {0} 已保存。', name) : t('节点 {0} 已接入，现在可以在「套餐」里为它创建套餐。', name))
             setForm(null)
             void load()
             void loadEnrollments()
@@ -128,24 +129,24 @@ export function NodesView() {
         }} onDismiss={agent => void dismiss(agent)} onManual={type => setForm({ type })} />
 
       <div className="section-heading">
-        <h3>已接入节点</h3>
+        <h3>{t('已接入节点')}</h3>
         <button className="secondary-button" onClick={() => void load()}>
-          <RefreshCw size={15} />刷新
+          <RefreshCw size={15} />{t('刷新')}
         </button>
       </div>
       <FilterBar shown={shownNodes.length} total={nodes.length} active={active} onReset={reset}>
-        <SelectFilter label="连接状态" value={filters.status} onChange={value => set('status', value)} options={nodeStatuses} />
+        <SelectFilter label={t('连接状态')} value={filters.status} onChange={value => set('status', value)} options={nodeStatuses} />
       </FilterBar>
       <div className="table-wrap">
         <table>
           <thead>
             <tr>
-              <th>节点</th>
-              <th>地域</th>
-              <th>可售容量</th>
-              <th>连接状态</th>
-              <th>到期 / 本月流量</th>
-              <th>操作</th>
+              <th>{t('节点')}</th>
+              <th>{t('地域')}</th>
+              <th>{t('可售容量')}</th>
+              <th>{t('连接状态')}</th>
+              <th>{t('到期 / 本月流量')}</th>
+              <th>{t('操作')}</th>
             </tr>
           </thead>
           <tbody>
@@ -170,38 +171,38 @@ export function NodesView() {
                   <small>
                     {node.capacity_ram_mb.toLocaleString()} MB / {node.capacity_disk_gb.toLocaleString()} GB
                   </small>
-                  <small>检测 {node.reported_vcpu} 核 / {node.reported_ram_mb} MB / {node.reported_disk_gb} GB</small>
+                  <small>{t('检测 {0} 核 / {1} MB / {2} GB', node.reported_vcpu, node.reported_ram_mb, node.reported_disk_gb)}</small>
                   <small>{overcommitText(node.overcommit, true)}</small>
-                  {node.health_hold_reason && <small className="danger-text">暂停销售：{node.health_hold_reason}</small>}
-                  {node.shared_machine && <small className="warn-text">与 {node.shared_machine_with?.join('、')} 同机，资源合并计算</small>}
+                  {node.health_hold_reason && <small className="danger-text">{t('暂停销售：{0}', tr(node.health_hold_reason))}</small>}
+                  {node.shared_machine && <small className="warn-text">{t('与 {0} 同机，资源合并计算', node.shared_machine_with?.join(t('、')))}</small>}
                 </td>
                 <td>
                   <StatusBadge status={node.status} />
-                  <small>心跳 {node.last_seen_at ? formatTime(node.last_seen_at) : '—'}</small>
+                  <small>{t('心跳 {0}', node.last_seen_at ? formatTime(node.last_seen_at) : '—')}</small>
                 </td>
                 <td>
                   <NodeExpiry date={node.expires_at} />
                   <small>
                     {formatBytes(node.traffic_used_bytes ?? 0)}
-                    {node.traffic_quota_gb ? ` / ${node.traffic_quota_gb.toLocaleString()} GB` : ' · 不限'}
+                    {node.traffic_quota_gb ? ` / ${node.traffic_quota_gb.toLocaleString()} GB` : t(' · 不限')}
                   </small>
                 </td>
                 <td>
                   <button className="text-button" onClick={() => testNode(node.id)} disabled={testing === node.id}>
                     <RefreshCw size={13} />
-                    {testing === node.id ? '测试连通中…' : '测试连通性'}
+                    {testing === node.id ? t('测试连通中…') : t('测试连通性')}
                   </button>
                   <div className="row-actions">
-                    <button className="text-button" onClick={() => setForm({ node })}>编辑</button>
-                    <button className="text-button" onClick={() => setOverselling(node)}>超售</button>
-                    <button className="text-button danger" onClick={() => void removeNode(node)}>删除</button>
+                    <button className="text-button" onClick={() => setForm({ node })}>{t('编辑')}</button>
+                    <button className="text-button" onClick={() => setOverselling(node)}>{t('超售')}</button>
+                    <button className="text-button danger" onClick={() => void removeNode(node)}>{t('删除')}</button>
                   </div>
                 </td>
               </tr>
             ))}
             {!shownNodes.length && (
               <tr>
-                <td colSpan={6} className="empty-state">{nodes.length ? '没有该状态的节点' : '尚未接入任何虚拟化计算节点，按上面的教程接入第一台。'}</td>
+                <td colSpan={6} className="empty-state">{nodes.length ? t('没有该状态的节点') : t('尚未接入任何虚拟化计算节点，按上面的教程接入第一台。')}</td>
               </tr>
             )}
           </tbody>
@@ -245,11 +246,11 @@ function ConnectGuide({
   return (
     <section className="panel guide-panel">
       <div className="panel-heading">
-        <h3>接入教程</h3>
+        <h3>{t('接入教程')}</h3>
       </div>
       <div className="segmented" role="tablist">
         <button role="tab" aria-selected={tab === 'hatch'} className={tab === 'hatch' ? 'active' : ''} onClick={() => setTab('hatch')}>
-          Hatch Agent（推荐）{pending > 0 && <span className="count-badge">{pending}</span>}
+          {t('Hatch Agent（推荐）')}{pending > 0 && <span className="count-badge">{pending}</span>}
         </button>
         <button role="tab" aria-selected={tab === 'lxdapi'} className={tab === 'lxdapi' ? 'active' : ''} onClick={() => setTab('lxdapi')}>
           LXDAPI
@@ -262,23 +263,23 @@ function ConnectGuide({
       {tab === 'hatch' && (
         <div className="guide-body">
           <p>
-            自研 Agent，支持 LXC（LXD / Incus）和 Podman 容器，适合 NAT 小鸡。Agent 从母机主动连到本站，母机不用开放任何端口，也不用公网 API。
+            {t('自研 Agent，支持 LXC（LXD / Incus）和 Podman 容器，适合 NAT 小鸡。Agent 从母机主动连到本站，母机不用开放任何端口，也不用公网 API。')}
           </p>
           <ul className="auto-list">
-            <li>自动识别公网 IP、CPU / 内存 / 硬盘</li>
-            <li>按你选的虚拟化自动安装 Podman 或 Incus（含存储池、网桥和系统镜像），自动做内核网络调优和磁盘测速</li>
-            <li>自动出现在下方待接入列表，不用复制令牌；镜像列表和容量自动同步</li>
+            <li>{t('自动识别公网 IP、CPU / 内存 / 硬盘')}</li>
+            <li>{t('按你选的虚拟化自动安装 Podman 或 Incus（含存储池、网桥和系统镜像），自动做内核网络调优和磁盘测速')}</li>
+            <li>{t('自动出现在下方待接入列表，不用复制令牌；镜像列表和容量自动同步')}</li>
           </ul>
           {enrollments ? (
-            <ConnectSteps command={enrollments.install_command} where="本页" actionLabel="接入" />
+            <ConnectSteps command={enrollments.install_command} where={t('本页')} actionLabel={t('接入')} />
           ) : (
-            <p className="muted-text">正在读取安装命令…</p>
+            <p className="muted-text">{t('正在读取安装命令…')}</p>
           )}
-          <h4 className="subheading">待接入的母机</h4>
-          <PendingAgents agents={enrollments?.agents ?? []} actionLabel="接入" onAdd={onAdd} onDismiss={onDismiss} />
+          <h4 className="subheading">{t('待接入的母机')}</h4>
+          <PendingAgents agents={enrollments?.agents ?? []} actionLabel={t('接入')} onAdd={onAdd} onDismiss={onDismiss} />
           <p className="muted-text">
-            需要 LXC 时，先在母机装好 LXD 或 Incus，并建一个 btrfs 或 lvm 存储池（ZFS 池不能限制磁盘读写速度）。已有 Agent 令牌的老母机可以
-            <button type="button" className="link-button inline" onClick={() => onManual('hatch')}>手动填写令牌接入</button>。
+            {t('需要 LXC 时，先在母机装好 LXD 或 Incus，并建一个 btrfs 或 lvm 存储池（ZFS 池不能限制磁盘读写速度）。已有 Agent 令牌的老母机可以')}
+            <button type="button" className="link-button inline" onClick={() => onManual('hatch')}>{t('手动填写令牌接入')}</button>{t('。')}
           </p>
         </div>
       )}
@@ -286,39 +287,38 @@ function ConnectGuide({
       {tab === 'lxdapi' && (
         <div className="guide-body">
           <p>
-            对接第三方面板 <a href="https://github.com/xkatld/lxdapi-web-server" target="_blank" rel="noreferrer">LXDAPI</a>（LXC）。本站通过它的系统接口开通和管理容器。
+            {t('对接第三方面板')} <a href="https://github.com/xkatld/lxdapi-web-server" target="_blank" rel="noreferrer">LXDAPI</a>{t('（LXC）。本站通过它的系统接口开通和管理容器。')}
           </p>
           <ol className="step-list">
             <li>
-              在母机上按 LXDAPI 仓库 <code>Shell/</code> 目录依次运行 <code>lxd_install.sh</code>、<code>lxdapi_install.sh</code>、<code>image_import.sh</code>。
+              {t('在母机上按 LXDAPI 仓库')} <code>Shell/</code> {t('目录依次运行')} <code>lxd_install.sh</code>{t('、')}<code>lxdapi_install.sh</code>{t('、')}<code>image_import.sh</code>{t('。')}
             </li>
             <li>
-              LXDAPI 后台「NAT 配置」：填出口网卡（如 <code>eth0</code>）和端口段（如 40000–49999），开启「自动分配 22 端口」。服务商做 1:1 NAT
-              （网卡上只有内网 IP，如甲骨文）时，「网卡 IP」填网卡上的内网地址。
+              {t('LXDAPI 后台「NAT 配置」：填出口网卡（如')} <code>eth0</code>{t('）和端口段（如 40000–49999），开启「自动分配 22 端口」。服务商做 1:1 NAT （网卡上只有内网 IP，如甲骨文）时，「网卡 IP」填网卡上的内网地址。')}
             </li>
-            <li>在 LXDAPI 后台记下 API Hash。</li>
+            <li>{t('在 LXDAPI 后台记下 API Hash。')}</li>
             <li>
-              点下面的按钮填写接口地址（如 <code>https://节点IP:8443</code>）和 API Hash。证书指纹点「自动读取」即可，公网 IP 按接口地址自动填，网卡和端口段已预填默认值，与第 2 步保持一致即可。
+              {t('点下面的按钮填写接口地址（如')} <code>{t('https://节点IP:8443')}</code>{t('）和 API Hash。证书指纹点「自动读取」即可，公网 IP 按接口地址自动填，网卡和端口段已预填默认值，与第 2 步保持一致即可。')}
             </li>
           </ol>
           <p className="muted-text">
-            LXDAPI 的系统接口不提供镜像列表和宿主机容量，所以要手动填写可售镜像别名和可分配的 CPU / 内存 / 硬盘。它自带的 Ubuntu 24.04 镜像禁止密码 SSH，需要按文档修正一次。
+            {t('LXDAPI 的系统接口不提供镜像列表和宿主机容量，所以要手动填写可售镜像别名和可分配的 CPU / 内存 / 硬盘。它自带的 Ubuntu 24.04 镜像禁止密码 SSH，需要按文档修正一次。')}
           </p>
-          <button type="button" className="primary-button compact" onClick={() => onManual('lxdapi')}>新增 LXDAPI 节点</button>
+          <button type="button" className="primary-button compact" onClick={() => onManual('lxdapi')}>{t('新增 LXDAPI 节点')}</button>
         </div>
       )}
 
       {tab === 'clicd' && (
         <div className="guide-body">
           <p>
-            对接 <a href="https://cli.cd" target="_blank" rel="noreferrer">CLICD</a> 面板（LXC / KVM）。镜像列表、宿主机容量和硬件探针都从 CLICD 自动读取。
+            {t('对接')} <a href="https://cli.cd" target="_blank" rel="noreferrer">CLICD</a> {t('面板（LXC / KVM）。镜像列表、宿主机容量和硬件探针都从 CLICD 自动读取。')}
           </p>
           <ol className="step-list">
-            <li>按 CLICD 官方文档在母机上安装 CLICD，并在其后台启用并下载要出售的镜像。</li>
-            <li>在 CLICD 后台创建 API Key。</li>
-            <li>点下面的按钮，填写接口地址（如 <code>http://节点IP:8999</code>）和 API Key，勾选要出售的虚拟化类型。</li>
+            <li>{t('按 CLICD 官方文档在母机上安装 CLICD，并在其后台启用并下载要出售的镜像。')}</li>
+            <li>{t('在 CLICD 后台创建 API Key。')}</li>
+            <li>{t('点下面的按钮，填写接口地址（如')} <code>{t('http://节点IP:8999')}</code>{t('）和 API Key，勾选要出售的虚拟化类型。')}</li>
           </ol>
-          <button type="button" className="primary-button compact" onClick={() => onManual('clicd')}>新增 CLICD 节点</button>
+          <button type="button" className="primary-button compact" onClick={() => onManual('clicd')}>{t('新增 CLICD 节点')}</button>
         </div>
       )}
     </section>
@@ -336,7 +336,7 @@ function RegionManager({ regions, onChanged, onError }: { regions: RegionAdminRe
       setEditing(null)
       onChanged()
     } catch (err) {
-      onError(err instanceof Error ? err.message : '保存失败')
+      onError(err instanceof Error ? err.message : t('保存失败'))
     }
   }
 
@@ -344,8 +344,8 @@ function RegionManager({ regions, onChanged, onError }: { regions: RegionAdminRe
     <section className="panel">
       <div className="panel-heading">
         <div>
-          <h3>地域管理</h3>
-          <small>新增节点或机主发布母机时直接输入新地域名称即可自动创建；停用的地域不能再接入新节点。</small>
+          <h3>{t('地域管理')}</h3>
+          <small>{t('新增节点或机主发布母机时直接输入新地域名称即可自动创建；停用的地域不能再接入新节点。')}</small>
         </div>
       </div>
       <div className="region-list">
@@ -360,23 +360,23 @@ function RegionManager({ regions, onChanged, onError }: { regions: RegionAdminRe
               }}
             >
               <input name="name" defaultValue={region.name} maxLength={40} required autoFocus />
-              <button className="primary-button compact">保存</button>
-              <button type="button" className="text-button" onClick={() => setEditing(null)}>取消</button>
+              <button className="primary-button compact">{t('保存')}</button>
+              <button type="button" className="text-button" onClick={() => setEditing(null)}>{t('取消')}</button>
             </form>
           ) : (
             <div key={region.id} className={region.enabled ? 'region-item' : 'region-item disabled'}>
               <div>
                 <strong>{region.name}</strong>
-                <small>{region.code} · {region.nodes} 个节点{region.enabled ? '' : ' · 已停用'}</small>
+                <small>{t('{0} · {1} 个节点{2}', region.code, region.nodes, region.enabled ? '' : t(' · 已停用'))}</small>
               </div>
               <div className="row-actions">
-                <button className="text-button" onClick={() => setEditing(region.id)}>改名</button>
-                <button className="text-button" onClick={() => void save(region, region.name, !region.enabled)}>{region.enabled ? '停用' : '启用'}</button>
+                <button className="text-button" onClick={() => setEditing(region.id)}>{t('改名')}</button>
+                <button className="text-button" onClick={() => void save(region, region.name, !region.enabled)}>{region.enabled ? t('停用') : t('启用')}</button>
               </div>
             </div>
           ),
         )}
-        {!regions.length && <p className="muted-text">还没有地域，接入第一台节点时输入名称即可创建。</p>}
+        {!regions.length && <p className="muted-text">{t('还没有地域，接入第一台节点时输入名称即可创建。')}</p>}
       </div>
     </section>
   )
@@ -446,10 +446,10 @@ export function NodeForm({
       const input = form.elements.namedItem('option_tls_fingerprint') as HTMLInputElement | null
       if (input) input.value = result.fingerprint
       setNotice(
-        `已读取证书（${result.subject}，${formatTime(result.not_after)} 到期）${result.trusted ? '。这是受信任的证书，也可以直接勾选「校验 HTTPS 证书」。' : '，已填入指纹用于固定。'}`,
+        t('已读取证书（{0}，{1} 到期）{2}', result.subject, formatTime(result.not_after), result.trusted ? t('。这是受信任的证书，也可以直接勾选「校验 HTTPS 证书」。') : t('，已填入指纹用于固定。')),
       )
     } catch (err) {
-      setError(err instanceof Error ? err.message : '读取证书失败')
+      setError(err instanceof Error ? err.message : t('读取证书失败'))
     } finally {
       setProbing(false)
     }
@@ -496,13 +496,13 @@ export function NodeForm({
       })
       onCreated(String(data.get('name') ?? ''))
     } catch (err) {
-      setError(err instanceof Error ? err.message : '节点接入验证失败')
+      setError(err instanceof Error ? err.message : t('节点接入验证失败'))
     } finally {
       setSaving(false)
     }
   }
 
-  const heading = editing ? `编辑节点 ${node?.name}` : agent ? `接入母机 ${agent.hostname || ''}` : `新增 ${descriptor?.name ?? ''} 节点`
+  const heading = editing ? t('编辑节点 {0}', node?.name) : agent ? t('接入母机 {0}', agent.hostname || '') : t('新增 {0} 节点', descriptor?.name ?? '')
   const virtualizationDefaults = agent ? agentVirtualization(agent) : node?.virtualization_types
   return (
     <div className="inline-form" ref={panel}>
@@ -511,52 +511,52 @@ export function NodeForm({
           <h3>{heading}</h3>
           <p>
             {editing
-              ? '保存前会用新配置重新验证节点连接；对接方式与地域不可修改。'
+              ? t('保存前会用新配置重新验证节点连接；对接方式与地域不可修改。')
               : agent
-                ? `${agent.public_ipv4 || agent.remote_ip} · 已检测 ${agent.capacity ? `${agent.capacity.vcpu} 核 / ${agent.capacity.ram_mb} MB / ${agent.capacity.disk_gb} GB` : '容量待读取'}。补充名称和地域即可接入。`
-                : '保存时会实时连一次节点，失败会直接提示原因；所有密钥加密存储。'}
+                ? t('{0} · 已检测 {1}。补充名称和地域即可接入。', agent.public_ipv4 || agent.remote_ip, agent.capacity ? t('{0} 核 / {1} MB / {2} GB', agent.capacity.vcpu, agent.capacity.ram_mb, agent.capacity.disk_gb) : t('容量待读取'))
+                : t('保存时会实时连一次节点，失败会直接提示原因；所有密钥加密存储。')}
           </p>
         </div>
-        <button className="icon-button" aria-label="关闭" onClick={onClose}><X size={18} /></button>
+        <button className="icon-button" aria-label={t('关闭')} onClick={onClose}><X size={18} /></button>
       </div>
 
       <form className="form-grid" onSubmit={submit} key={`${selected}-${types.length}`}>
         {!agent && (
           <label>
-            <span>对接方式</span>
+            <span>{t('对接方式')}</span>
             <select name="provider_type" value={selected} disabled={editing} onChange={event => setSelected(event.target.value)}>
               {types.map(item => (
                 <option key={item.type} value={item.type}>
-                  {item.name}（{item.virtualization_types.join(' / ').toUpperCase()}）
+                  {t('{0}（{1}）', item.name, item.virtualization_types.join(' / ').toUpperCase())}
                 </option>
               ))}
             </select>
           </label>
         )}
         <label>
-          <span>节点名称</span>
-          <input name="name" required placeholder="例如 hk-nat-01" defaultValue={node?.name ?? agent?.hostname} />
+          <span>{t('节点名称')}</span>
+          <input name="name" required placeholder={t('例如 hk-nat-01')} defaultValue={node?.name ?? agent?.hostname} />
         </label>
         {!editing && (
           <label>
-            <span>地域</span>
-            <input name="region_name" required maxLength={40} list="admin-regions" placeholder="选择或输入，例如 香港" autoComplete="off" />
+            <span>{t('地域')}</span>
+            <input name="region_name" required maxLength={40} list="admin-regions" placeholder={t('选择或输入，例如 香港')} autoComplete="off" />
             <datalist id="admin-regions">
               {regions.filter(region => region.enabled).map(region => (
                 <option key={region.id} value={region.name} />
               ))}
             </datalist>
-            <small>输入新名称会自动创建地域</small>
+            <small>{t('输入新名称会自动创建地域')}</small>
           </label>
         )}
         {descriptor && !descriptor.agent_managed && (
           <label>
-            <span>API 接口根地址</span>
+            <span>{t('API 接口根地址')}</span>
             <input
               name="base_url"
               type="url"
               required
-              placeholder={descriptor.base_url_hint}
+              placeholder={tr(descriptor.base_url_hint)}
               defaultValue={node?.base_url}
               onBlur={event => event.currentTarget.form && fillPublicIP(event.currentTarget.form)}
             />
@@ -564,22 +564,22 @@ export function NodeForm({
         )}
         {!agent && (
           <label>
-            <span>{descriptor?.credential_label ?? 'API Key'}{editing ? '（留空保持不变）' : ''}</span>
+            <span>{tr(descriptor?.credential_label ?? 'API Key')}{editing ? t('（留空保持不变）') : ''}</span>
             <input name="api_key" type="password" required={!editing} autoComplete="off" />
-            {descriptor?.agent_managed && <small>在母机上运行 hatch-agent token 查看</small>}
+            {descriptor?.agent_managed && <small>{t('在母机上运行 hatch-agent token 查看')}</small>}
           </label>
         )}
         {options.map(field =>
           field.kind === 'bool' ? (
-            <label className="checkbox" key={field.key} title={field.help}>
-              <input type="checkbox" name={`option_${field.key}`} defaultChecked={node?.provider_options?.[field.key] === true} /> {field.label}
+            <label className="checkbox" key={field.key} title={tr(field.help)}>
+              <input type="checkbox" name={`option_${field.key}`} defaultChecked={node?.provider_options?.[field.key] === true} /> {tr(field.label)}
             </label>
           ) : (
-            <label key={field.key} title={field.help}>
-              <span>{field.label}{field.required ? '' : '（可选）'}</span>
+            <label key={field.key} title={tr(field.help)}>
+              <span>{tr(field.label)}{field.required ? '' : t('（可选）')}</span>
               {field.key === 'tls_fingerprint' ? (
                 <div className="input-with-button">
-                  <input name={`option_${field.key}`} type="text" placeholder="点「自动读取」" defaultValue={existingOption(field.key)} />
+                  <input name={`option_${field.key}`} type="text" placeholder={t('点「自动读取」')} defaultValue={existingOption(field.key)} />
                   <button
                     type="button"
                     className="secondary-button compact"
@@ -587,7 +587,7 @@ export function NodeForm({
                     onClick={event => event.currentTarget.form && void readCertificate(event.currentTarget.form)}
                   >
                     <ShieldCheck size={14} />
-                    {probing ? '读取中…' : '自动读取'}
+                    {probing ? t('读取中…') : t('自动读取')}
                   </button>
                 </div>
               ) : (
@@ -595,26 +595,26 @@ export function NodeForm({
                   name={`option_${field.key}`}
                   type={field.kind === 'number' ? 'number' : 'text'}
                   required={field.required}
-                  placeholder={field.placeholder}
+                  placeholder={tr(field.placeholder)}
                   defaultValue={existingOption(field.key)}
                 />
               )}
-              {field.help && <small>{field.help}</small>}
+              {field.help && <small>{tr(field.help)}</small>}
             </label>
           ),
         )}
         <label>
-          <span>母鸡到期日（可选）</span>
+          <span>{t('母鸡到期日（可选）')}</span>
           <input name="expires_at" type="date" defaultValue={node?.expires_at ?? ''} />
-          <small>向服务商租用的到期日，用于到期提醒</small>
+          <small>{t('向服务商租用的到期日，用于到期提醒')}</small>
         </label>
         <label>
-          <span>月流量限额 GB（可选）</span>
+          <span>{t('月流量限额 GB（可选）')}</span>
           <input name="traffic_quota_gb" type="number" min={0} defaultValue={node?.traffic_quota_gb ?? 0} />
-          <small>0 表示不限；按本节点实例流量合计告警</small>
+          <small>{t('0 表示不限；按本节点实例流量合计告警')}</small>
         </label>
         <fieldset className="wide">
-          <legend>出售的虚拟化类型</legend>
+          <legend>{t('出售的虚拟化类型')}</legend>
           {(descriptor?.virtualization_types ?? []).map((kind, index) => (
             <label className="checkbox" key={kind}>
               <input
@@ -632,9 +632,9 @@ export function NodeForm({
         {error && <div className="form-error wide">{error}</div>}
 
         <div className="form-actions wide">
-          <button type="button" className="secondary-button" onClick={onClose}>取消</button>
+          <button type="button" className="secondary-button" onClick={onClose}>{t('取消')}</button>
           <button className="primary-button" disabled={saving || !descriptor}>
-            {saving ? '正在验证…' : editing ? '验证并保存' : '验证并接入节点'}
+            {saving ? t('正在验证…') : editing ? t('验证并保存') : t('验证并接入节点')}
           </button>
         </div>
       </form>
@@ -644,9 +644,9 @@ export function NodeForm({
 
 export function virtualizationLabel(kind: string) {
   switch (kind) {
-    case 'lxc': return 'LXC 容器'
-    case 'kvm': return 'KVM 硬件虚拟化'
-    case 'podman': return 'Podman 容器'
+    case 'lxc': return t('LXC 容器')
+    case 'kvm': return t('KVM 硬件虚拟化')
+    case 'podman': return t('Podman 容器')
     default: return kind.toUpperCase()
   }
 }
@@ -671,11 +671,11 @@ export function HostsView({ onOpen }: { onOpen?: (id: string) => void }) {
       <div className="page-actions">
         <div>
           <p className="eyebrow">HOST TELEMETRY</p>
-          <h2>宿主机硬件探针</h2>
-          <p>展示集群节点总容量与分配情况；CLICD 节点可进一步查看 CPU、内存条、磁盘健康度与实时曲线。</p>
+          <h2>{t('宿主机硬件探针')}</h2>
+          <p>{t('展示集群节点总容量与分配情况；CLICD 节点可进一步查看 CPU、内存条、磁盘健康度与实时曲线。')}</p>
         </div>
         <button className="secondary-button" onClick={() => void load()}>
-          <RefreshCw size={15} />刷新
+          <RefreshCw size={15} />{t('刷新')}
         </button>
       </div>
 
@@ -698,36 +698,36 @@ export function HostsView({ onOpen }: { onOpen?: (id: string) => void }) {
             <div className="host-summary">
               <span>
                 <strong>{host.capacity_vcpu - host.reserved_vcpu}</strong> / {host.capacity_vcpu}
-                <small>空闲 vCPU</small>
+                <small>{t('空闲 vCPU')}</small>
               </span>
               <span>
                 <strong>{(host.capacity_ram_mb - host.reserved_ram_mb).toLocaleString()}</strong> /{' '}
                 {host.capacity_ram_mb.toLocaleString()}
-                <small>空闲内存 MB</small>
+                <small>{t('空闲内存 MB')}</small>
               </span>
               <span>
                 <strong>{(host.capacity_disk_gb - host.reserved_disk_gb).toLocaleString()}</strong> /{' '}
                 {host.capacity_disk_gb.toLocaleString()}
-                <small>空闲磁盘 GB</small>
+                <small>{t('空闲磁盘 GB')}</small>
               </span>
             </div>
 
-            <CapacityBar label="CPU 分配率" used={host.reserved_vcpu} total={host.capacity_vcpu} />
-            <CapacityBar label="内存预留率" used={host.reserved_ram_mb} total={host.capacity_ram_mb} suffix=" MB" />
+            <CapacityBar label={t('CPU 分配率')} used={host.reserved_vcpu} total={host.capacity_vcpu} />
+            <CapacityBar label={t('内存预留率')} used={host.reserved_ram_mb} total={host.capacity_ram_mb} suffix=" MB" />
 
             <footer>
-              <span>虚拟化：{host.virtualization_types.join(' / ').toUpperCase()}</span>
-              <span>最后心跳：{host.last_seen_at ? formatTime(host.last_seen_at) : '从未'}</span>
+              <span>{t('虚拟化：{0}', host.virtualization_types.join(' / ').toUpperCase())}</span>
+              <span>{t('最后心跳：{0}', host.last_seen_at ? formatTime(host.last_seen_at) : t('从未'))}</span>
             </footer>
 
             {host.provider_type === 'clicd' && onOpen && (
               <button className="secondary-button host-detail-button" onClick={() => onOpen(host.id)}>
-                查看深度硬件探针与采样曲线 <ChevronRight size={15} />
+                {t('查看深度硬件探针与采样曲线')} <ChevronRight size={15} />
               </button>
             )}
           </article>
         ))}
-        {!hosts.length && <div className="empty-card">暂无宿主机探针数据，请先接入虚拟化节点。</div>}
+        {!hosts.length && <div className="empty-card">{t('暂无宿主机探针数据，请先接入虚拟化节点。')}</div>}
       </div>
     </section>
   )

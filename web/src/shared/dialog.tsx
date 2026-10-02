@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { AlertTriangle, HelpCircle, PenLine } from 'lucide-react'
+import { t } from './i18n'
 
 // In-page replacements for window.confirm and window.prompt. Each call
 // returns a promise; the dialogs share one host that mounts itself on first
@@ -92,7 +93,7 @@ function Dialog({ request, onClose }: { request: Request; onClose: (result: bool
   const [touched, setTouched] = useState(false)
   const field = useRef<HTMLInputElement & HTMLTextAreaElement>(null)
   const confirmButton = useRef<HTMLButtonElement>(null)
-  const problem = prompt?.validate?.(value) || (prompt?.required && !value.trim() ? '请填写内容' : '')
+  const problem = prompt?.validate?.(value) || (prompt?.required && !value.trim() ? t('请填写内容') : '')
 
   useEffect(() => {
     const focus = field.current ?? confirmButton.current
@@ -154,10 +155,10 @@ function Dialog({ request, onClose }: { request: Request; onClose: (result: bool
         </div>
         <footer>
           <button type="button" className="secondary-button compact" onClick={() => onClose(null)}>
-            {request.cancelText ?? '取消'}
+            {request.cancelText ?? t('取消')}
           </button>
           <button ref={confirmButton} type="submit" className={request.danger ? 'danger-button compact' : 'primary-button compact'}>
-            {request.confirmText ?? '确定'}
+            {request.confirmText ?? t('确定')}
           </button>
         </footer>
       </form>

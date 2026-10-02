@@ -4,6 +4,7 @@ import { api, cached, CustomerServiceRecord, TicketDetailRecord, TicketRecord } 
 import { AttachmentPicker, ticketRequestBody, useAttachmentLimit } from '../TicketAttachments'
 import { ticketStatusLabel, TicketConversation } from '../shared/ui'
 import { formatTime } from '../shared/time'
+import { t } from '../shared/i18n'
 
 export function CustomerSupport() {
   const [tickets, setTickets] = useState<TicketRecord[]>(() => cached<TicketRecord[]>('/api/v1/customer/tickets') ?? [])
@@ -23,7 +24,7 @@ export function CustomerSupport() {
       setTickets(ticketRows)
       setServices(serviceRows)
     } catch (err) {
-      setError(err instanceof Error ? err.message : '加载失败')
+      setError(err instanceof Error ? err.message : t('加载失败'))
     }
   }
 
@@ -36,7 +37,7 @@ export function CustomerSupport() {
       setDetail(await api<TicketDetailRecord>(`/api/v1/customer/tickets/${id}`))
       setCreating(false)
     } catch (err) {
-      setError(err instanceof Error ? err.message : '加载失败')
+      setError(err instanceof Error ? err.message : t('加载失败'))
     }
   }
 
@@ -62,7 +63,7 @@ export function CustomerSupport() {
       // Re-read so the view has the joined customer and instance names.
       await open(result.ticket.id)
     } catch (err) {
-      setError(err instanceof Error ? err.message : '创建失败')
+      setError(err instanceof Error ? err.message : t('创建失败'))
     }
   }
 
@@ -78,7 +79,7 @@ export function CustomerSupport() {
       await load()
       return true
     } catch (err) {
-      setError(err instanceof Error ? err.message : '回复失败')
+      setError(err instanceof Error ? err.message : t('回复失败'))
       return false
     }
   }
@@ -88,8 +89,8 @@ export function CustomerSupport() {
       <div className="page-actions">
         <div>
           <p className="eyebrow">SUPPORT</p>
-          <h2>支持工单</h2>
-          <p>工单可与具体 VPS 实例关联，沟通历史与操作均由服务端留痕审计。</p>
+          <h2>{t('支持工单')}</h2>
+          <p>{t('工单可与具体 VPS 实例关联，沟通历史与操作均由服务端留痕审计。')}</p>
         </div>
         <button
           className="primary-button compact"
@@ -98,7 +99,7 @@ export function CustomerSupport() {
             setDetail(null)
           }}
         >
-          <Plus size={16} />新建工单
+          <Plus size={16} />{t('新建工单')}
         </button>
       </div>
 
@@ -107,22 +108,22 @@ export function CustomerSupport() {
       {creating && (
         <form className="panel form-grid" onSubmit={create}>
           <label>
-            <span>工单主题</span>
-            <input name="subject" minLength={3} maxLength={160} placeholder="请简述您遇到的问题" required />
+            <span>{t('工单主题')}</span>
+            <input name="subject" minLength={3} maxLength={160} placeholder={t('请简述您遇到的问题')} required />
           </label>
           <label>
-            <span>优先级</span>
+            <span>{t('优先级')}</span>
             <select name="priority" defaultValue="normal">
-              <option value="low">低</option>
-              <option value="normal">普通</option>
-              <option value="high">高</option>
-              <option value="urgent">紧急</option>
+              <option value="low">{t('低')}</option>
+              <option value="normal">{t('普通')}</option>
+              <option value="high">{t('高')}</option>
+              <option value="urgent">{t('紧急')}</option>
             </select>
           </label>
           <label>
-            <span>关联 VPS 实例（可选）</span>
+            <span>{t('关联 VPS 实例（可选）')}</span>
             <select name="service_id">
-              <option value="">不关联具体实例</option>
+              <option value="">{t('不关联具体实例')}</option>
               {services.map(service => (
                 <option key={service.id} value={service.id}>
                   {service.instance_name}
@@ -131,8 +132,8 @@ export function CustomerSupport() {
             </select>
           </label>
           <label className="wide">
-            <span>问题详述</span>
-            <textarea name="body" rows={6} maxLength={10000} placeholder="请详细提供现象、报错信息或重现步骤…" required={!createFiles.length} />
+            <span>{t('问题详述')}</span>
+            <textarea name="body" rows={6} maxLength={10000} placeholder={t('请详细提供现象、报错信息或重现步骤…')} required={!createFiles.length} />
           </label>
           <div className="wide">
             <AttachmentPicker files={createFiles} onChange={setCreateFiles} maxMB={maxMB} onError={setError} />
@@ -146,9 +147,9 @@ export function CustomerSupport() {
                 setCreateFiles([])
               }}
             >
-              取消
+              {t('取消')}
             </button>
-            <button className="primary-button compact">提交工单</button>
+            <button className="primary-button compact">{t('提交工单')}</button>
           </div>
         </form>
       )}
@@ -167,17 +168,17 @@ export function CustomerSupport() {
               </div>
               <span className={`ticket-state ${ticket.status}`}>{ticketStatusLabel(ticket.status)}</span>
               <small>
-                {ticket.message_count} 条消息 · 最近更新 {formatTime(ticket.last_reply_at)}
+                {t('{0} 条消息 · 最近更新 {1}', ticket.message_count, formatTime(ticket.last_reply_at))}
               </small>
             </button>
           ))}
-          {!tickets.length && <div className="empty-card">暂无支持工单记录</div>}
+          {!tickets.length && <div className="empty-card">{t('暂无支持工单记录')}</div>}
         </div>
 
         {detail ? (
           <TicketConversation detail={detail} onReply={reply} maxMB={maxMB} onError={setError} />
         ) : (
-          <div className="panel support-placeholder">选择左侧工单查看完整沟通历史与回复</div>
+          <div className="panel support-placeholder">{t('选择左侧工单查看完整沟通历史与回复')}</div>
         )}
       </div>
     </section>

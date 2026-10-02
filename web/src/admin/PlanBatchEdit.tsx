@@ -3,6 +3,7 @@ import { X } from 'lucide-react'
 import { api, imageLabel, AvailableTemplateRecord, NodeRecord, NodeSelection, PlanCategoryRecord, PlanRecord } from '../api'
 import { NodePicker, nodeFits } from './PlanForm'
 import { TagInput } from '../shared/tags'
+import { t } from '../shared/i18n'
 
 // planBody is what PUT expects for a saved platform plan.
 export function planBody(plan: PlanRecord) {
@@ -51,11 +52,11 @@ export function planBody(plan: PlanRecord) {
 
 type NumberField = 'traffic_gb' | 'network_down_mbps' | 'network_up_mbps' | 'snapshot_limit' | 'port_mapping_count'
 const numberFields: { field: NumberField; label: string; min: number; max?: number }[] = [
-  { field: 'traffic_gb', label: '月度流量 GB（0 不限）', min: 0 },
-  { field: 'network_down_mbps', label: '下行带宽 Mbps', min: 0 },
-  { field: 'network_up_mbps', label: '上行带宽 Mbps', min: 0 },
-  { field: 'snapshot_limit', label: '快照配额', min: 0 },
-  { field: 'port_mapping_count', label: 'NAT 端口映射配额', min: 0, max: 64 },
+  { field: 'traffic_gb', label: t('月度流量 GB（0 不限）'), min: 0 },
+  { field: 'network_down_mbps', label: t('下行带宽 Mbps'), min: 0 },
+  { field: 'network_up_mbps', label: t('上行带宽 Mbps'), min: 0 },
+  { field: 'snapshot_limit', label: t('快照配额'), min: 0 },
+  { field: 'port_mapping_count', label: t('NAT 端口映射配额'), min: 0, max: 64 },
 ]
 
 // PlanBatchEdit changes the chosen settings of several plans at once. Only
@@ -115,25 +116,25 @@ export function PlanBatchEdit({
       for (const { field } of numberFields) {
         if (!on[field]) continue
         const value = Number(numbers[field])
-        if (numbers[field].trim() === '' || !Number.isInteger(value) || value < 0) return `请填写有效的${numberFields.find(item => item.field === field)?.label}`
+        if (numbers[field].trim() === '' || !Number.isInteger(value) || value < 0) return t('请填写有效的{0}', numberFields.find(item => item.field === field)?.label)
         body[field] = value
       }
       if (on.images) {
         // An image joins only plans whose provider and virtualization have it.
         const fits = addImages.filter(id => templates.some(item => item.id === id && item.provider_type === plan.provider_type && item.virtualization === plan.virtualization))
         body.allowed_template_ids = [...new Set([...body.allowed_template_ids, ...fits])].filter(id => !removeImages.includes(id))
-        if (!body.allowed_template_ids.length) return `套餐「${plan.name}」移除后没有可选镜像`
+        if (!body.allowed_template_ids.length) return t('套餐「{0}」移除后没有可选镜像', plan.name)
         if (defaultImage && body.allowed_template_ids.includes(defaultImage)) body.default_template_id = defaultImage
         if (!body.allowed_template_ids.includes(body.default_template_id)) body.default_template_id = body.allowed_template_ids[0]
       }
       if (on.nodes) {
-        if (selection === 'nodes' && !nodeIds.length) return '「指定节点」方式需至少勾选一个节点'
+        if (selection === 'nodes' && !nodeIds.length) return t('「指定节点」方式需至少勾选一个节点')
         body.node_selection = selection
         body.node_ids = selection === 'nodes' ? nodeIds : []
       }
       if (on.price) {
         const value = Number(percent)
-        if (!percent.trim() || !Number.isFinite(value) || value <= -100 || value > 1000) return '价格调整需在 -99% 到 1000% 之间'
+        if (!percent.trim() || !Number.isFinite(value) || value <= -100 || value > 1000) return t('价格调整需在 -99% 到 1000% 之间')
         body.prices = body.prices.map(price => ({ ...price, amount_minor: Math.max(1, Math.round((price.amount_minor * (100 + value)) / 100)) }))
       }
       bodies.push(body)
@@ -143,7 +144,7 @@ export function PlanBatchEdit({
 
   async function save() {
     if (!Object.values(on).some(Boolean)) {
-      setError('请至少勾选一项要修改的设置')
+      setError(t('请至少勾选一项要修改的设置'))
       return
     }
     const bodies = build()
@@ -157,7 +158,7 @@ export function PlanBatchEdit({
       await api('/api/v1/admin/plans/batch', { method: 'PUT', body: JSON.stringify({ plans: bodies }) })
       onSaved()
     } catch (err) {
-      setError(err instanceof Error ? err.message : '批量修改失败')
+      setError(err instanceof Error ? err.message : t('批量修改失败'))
     } finally {
       setSaving(false)
     }
@@ -180,61 +181,61 @@ export function PlanBatchEdit({
     <div className="inline-form">
       <div className="inline-form-heading">
         <div>
-          <h3>批量修改 {plans.length} 个套餐</h3>
-          <p>只修改勾选的设置，其余保持各自原样。所有套餐一起保存，有一个不通过就都不保存。修改会让套餐版本号 +1，已购实例不受影响。</p>
+          <h3>{t('批量修改 {0} 个套餐', plans.length)}</h3>
+          <p>{t('只修改勾选的设置，其余保持各自原样。所有套餐一起保存，有一个不通过就都不保存。修改会让套餐版本号 +1，已购实例不受影响。')}</p>
         </div>
-        <button className="icon-button" onClick={onClose} aria-label="关闭"><X size={18} /></button>
+        <button className="icon-button" onClick={onClose} aria-label={t('关闭')}><X size={18} /></button>
       </div>
-      <p className="batch-edit-targets">{plans.map(plan => plan.name).join('、')}</p>
+      <p className="batch-edit-targets">{plans.map(plan => plan.name).join(t('、'))}</p>
 
       <div className="batch-edit">
         {Row({
           id: 'category',
-          title: '商品分类',
+          title: t('商品分类'),
           children: (
             <select value={category} onChange={event => setCategory(event.target.value)}>
-              <option value="">未分类</option>
+              <option value="">{t('未分类')}</option>
               {categories.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
             </select>
           ),
         })}
         {Row({
           id: 'enabled',
-          title: '上架状态',
+          title: t('上架状态'),
           children: (
             <select value={enabled ? 'on' : 'off'} onChange={event => setEnabled(event.target.value === 'on')}>
-              <option value="on">上架</option>
-              <option value="off">下架</option>
+              <option value="on">{t('上架')}</option>
+              <option value="off">{t('下架')}</option>
             </select>
           ),
         })}
         {Row({
           id: 'tags',
-          title: '标签（替换为）',
-          children: <TagInput value={tags} onChange={setTags} placeholder="留空表示清除标签" />,
+          title: t('标签（替换为）'),
+          children: <TagInput value={tags} onChange={setTags} placeholder={t('留空表示清除标签')} />,
         })}
         {Row({
           id: 'description',
-          title: '套餐描述（替换为）',
-          children: <textarea rows={2} maxLength={500} value={description} placeholder="留空表示清除描述" onChange={event => setDescription(event.target.value)} />,
+          title: t('套餐描述（替换为）'),
+          children: <textarea rows={2} maxLength={500} value={description} placeholder={t('留空表示清除描述')} onChange={event => setDescription(event.target.value)} />,
         })}
         {numberFields.map(({ field, label: title, min, max }) =>
           Row({
             id: field,
             title,
             children: (
-              <input type="number" min={min} max={max} value={numbers[field]} placeholder="新的值" onChange={event => setNumbers(state => ({ ...state, [field]: event.target.value }))} />
+              <input type="number" min={min} max={max} value={numbers[field]} placeholder={t('新的值')} onChange={event => setNumbers(state => ({ ...state, [field]: event.target.value }))} />
             ),
           })
         )}
         {Row({
           id: 'images',
-          title: '系统镜像',
+          title: t('系统镜像'),
           children: (
             <div className="batch-edit-images">
               <div>
-                <strong>添加镜像</strong>
-                <small>只加到对接方式和虚拟化都匹配的套餐</small>
+                <strong>{t('添加镜像')}</strong>
+                <small>{t('只加到对接方式和虚拟化都匹配的套餐')}</small>
                 {addableIDs.length ? (
                   addableIDs.map(id => (
                     <label key={id} className="checkbox">
@@ -243,12 +244,12 @@ export function PlanBatchEdit({
                     </label>
                   ))
                 ) : (
-                  <small>在线节点暂无可添加的镜像</small>
+                  <small>{t('在线节点暂无可添加的镜像')}</small>
                 )}
               </div>
               <div>
-                <strong>移除镜像</strong>
-                <small>已装该镜像的实例不受影响</small>
+                <strong>{t('移除镜像')}</strong>
+                <small>{t('已装该镜像的实例不受影响')}</small>
                 {current.map(id => (
                   <label key={id} className="checkbox">
                     <input type="checkbox" checked={removeImages.includes(id)} onChange={event => setRemoveImages(state => (event.target.checked ? [...state, id] : state.filter(item => item !== id)))} />
@@ -257,10 +258,10 @@ export function PlanBatchEdit({
                 ))}
               </div>
               <div>
-                <strong>默认镜像</strong>
-                <small>套餐可选该镜像时才会改；被移除时改用第一个可选镜像</small>
+                <strong>{t('默认镜像')}</strong>
+                <small>{t('套餐可选该镜像时才会改；被移除时改用第一个可选镜像')}</small>
                 <select value={defaultImage} onChange={event => setDefaultImage(event.target.value)}>
-                  <option value="">保持不变</option>
+                  <option value="">{t('保持不变')}</option>
                   {[...new Set([...current, ...addImages])]
                     .filter(id => !removeImages.includes(id))
                     .map(id => <option key={id} value={id}>{label(id)}</option>)}
@@ -271,7 +272,7 @@ export function PlanBatchEdit({
         })}
         {Row({
           id: 'nodes',
-          title: '节点选择方式',
+          title: t('节点选择方式'),
           children: sameKind ? (
             <NodePicker
               nodes={nodes}
@@ -283,16 +284,16 @@ export function PlanBatchEdit({
               onIds={setNodeIds}
             />
           ) : (
-            <small className="field-hint">所选套餐的对接方式或虚拟化不一致（{kinds.join('、')}），请分开修改节点。</small>
+            <small className="field-hint">{t('所选套餐的对接方式或虚拟化不一致（{0}），请分开修改节点。', kinds.join(t('、')))}</small>
           ),
         })}
         {Row({
           id: 'price',
-          title: '价格按比例调整',
+          title: t('价格按比例调整'),
           children: (
             <label className="batch-edit-inline">
-              <input type="number" step="1" value={percent} placeholder="如 10 或 -10" onChange={event => setPercent(event.target.value)} />
-              <span>%（所有计费周期，取整到分）。和单独改价一样，已购实例续费也按新价格（锁定了续费价的除外）。</span>
+              <input type="number" step="1" value={percent} placeholder={t('如 10 或 -10')} onChange={event => setPercent(event.target.value)} />
+              <span>{t('%（所有计费周期，取整到分）。和单独改价一样，已购实例续费也按新价格（锁定了续费价的除外）。')}</span>
             </label>
           ),
         })}
@@ -300,9 +301,9 @@ export function PlanBatchEdit({
 
       {error && <div className="form-error">{error}</div>}
       <div className="form-actions">
-        <button type="button" className="secondary-button" onClick={onClose}>取消</button>
+        <button type="button" className="secondary-button" onClick={onClose}>{t('取消')}</button>
         <button type="button" className="primary-button" disabled={saving} onClick={save}>
-          {saving ? '正在保存…' : `保存到 ${plans.length} 个套餐`}
+          {saving ? t('正在保存…') : t('保存到 {0} 个套餐', plans.length)}
         </button>
       </div>
     </div>

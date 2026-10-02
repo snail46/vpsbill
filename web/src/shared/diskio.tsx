@@ -1,13 +1,14 @@
 import { useEffect, useRef } from 'react'
 import type { PlanRecord, StockCapacityRecord } from '../api'
+import { t } from './i18n'
 
 type DiskIO = Pick<PlanRecord, 'disk_read_mbps' | 'disk_write_mbps' | 'disk_read_iops' | 'disk_write_iops'>
 
 const fields: { name: keyof DiskIO; label: string }[] = [
-  { name: 'disk_read_mbps', label: '磁盘读 MB/s' },
-  { name: 'disk_write_mbps', label: '磁盘写 MB/s' },
-  { name: 'disk_read_iops', label: '磁盘读 IOPS' },
-  { name: 'disk_write_iops', label: '磁盘写 IOPS' },
+  { name: 'disk_read_mbps', label: t('磁盘读 MB/s') },
+  { name: 'disk_write_mbps', label: t('磁盘写 MB/s') },
+  { name: 'disk_read_iops', label: t('磁盘读 IOPS') },
+  { name: 'disk_write_iops', label: t('磁盘写 IOPS') },
 ]
 
 // diskIOText summarises a plan's disk limits for plan cards; empty when the
@@ -16,8 +17,8 @@ export function diskIOText(plan: Partial<DiskIO>) {
   const read = plan.disk_read_mbps || 0
   const write = plan.disk_write_mbps || 0
   if (!read && !write && !plan.disk_read_iops && !plan.disk_write_iops) return ''
-  const speed = read || write ? `磁盘 ${read || '不限'}/${write || '不限'} MB/s` : '磁盘'
-  const iops = plan.disk_read_iops || plan.disk_write_iops ? ` · ${plan.disk_read_iops || '不限'}/${plan.disk_write_iops || '不限'} IOPS` : ''
+  const speed = read || write ? t('磁盘 {0}/{1} MB/s', read || t('不限'), write || t('不限')) : t('磁盘')
+  const iops = plan.disk_read_iops || plan.disk_write_iops ? ` · ${plan.disk_read_iops || t('不限')}/${plan.disk_write_iops || t('不限')} IOPS` : ''
   return speed + iops
 }
 
@@ -49,27 +50,23 @@ export function DiskIOFields({ plan, capacity }: { plan?: Partial<DiskIO>; capac
         {fields.map(field => (
           <label key={field.name}>
             <span>{field.label}</span>
-            <input name={field.name} type="number" min="0" step="1" placeholder="不限" defaultValue={plan?.[field.name] || ''} />
+            <input name={field.name} type="number" min="0" step="1" placeholder={t('不限')} defaultValue={plan?.[field.name] || ''} />
           </label>
         ))}
       </div>
       <small className="field-hint">
         {suggestion ? (
           <>
-            建议每台：读 {suggestion.disk_read_mbps} MB/s、写 {suggestion.disk_write_mbps} MB/s、读 {suggestion.disk_read_iops} IOPS、写{' '}
-            {suggestion.disk_write_iops} IOPS。母机磁盘实测读 {suggestion.host.read_mbps} MB/s、写 {suggestion.host.write_mbps} MB/s、读{' '}
-            {suggestion.host.read_iops} IOPS、写 {suggestion.host.write_iops} IOPS，按本套餐配置满载约 {suggestion.instances} 台，按其中 1/4
-            同时读写、每台最多占一半计算。{' '}
+            {t('建议每台：读 {0} MB/s、写 {1} MB/s、读 {2} IOPS、写 {3} IOPS。母机磁盘实测读 {4} MB/s、写 {5} MB/s、读 {6} IOPS、写 {7} IOPS，按本套餐配置满载约 {8} 台，按其中 1/4 同时读写、每台最多占一半计算。', suggestion.disk_read_mbps, suggestion.disk_write_mbps, suggestion.disk_read_iops, suggestion.disk_write_iops, suggestion.host.read_mbps, suggestion.host.write_mbps, suggestion.host.read_iops, suggestion.host.write_iops, suggestion.instances)}
             <button type="button" className="link-button" onClick={() => { touched.current = true; fill() }}>
-              填入建议值
+              {t('填入建议值')}
             </button>
           </>
         ) : capacity ? (
-          '母机还没有上报磁盘测速（Hatch Agent 升级后启动时自动测一次），暂无建议值。'
+          t('母机还没有上报磁盘测速（Hatch Agent 升级后启动时自动测一次），暂无建议值。')
         ) : (
-          '正在读取母机磁盘性能…'
-        )}{' '}
-        留空不限速；只对 Hatch 节点生效，对新开通和重装的实例生效。
+          t('正在读取母机磁盘性能…')
+        )}{t('留空不限速；只对 Hatch 节点生效，对新开通和重装的实例生效。')}
       </small>
       {suggestion?.unsupported?.map(reason => (
         <small key={reason} className="field-hint field-warning">

@@ -73,8 +73,13 @@ func (a adminSettings) testMail(w http.ResponseWriter, r *http.Request) {
 	to := principalFromContext(r.Context()).Email
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
+	subject := runtime.AppName + " 邮件设置测试"
 	body := "这是一封测试邮件，说明 " + runtime.AppName + " 可以正常发送密码找回邮件。\n\n" + runtime.PublicURL + "\n"
-	if err := mail.Send(ctx, runtime.SMTP, to, runtime.AppName+" 邮件设置测试", body); err != nil {
+	if runtime.Lang(r.Header.Get("Accept-Language")) == "en" {
+		subject = runtime.AppName + ": mail settings test"
+		body = "This is a test email. It shows that " + runtime.AppName + " can send password recovery email.\n\n" + runtime.PublicURL + "\n"
+	}
+	if err := mail.Send(ctx, runtime.SMTP, to, subject, body); err != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]any{"error": "smtp_failed", "message": "发送失败：" + err.Error()})
 		return
 	}

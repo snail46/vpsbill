@@ -4,6 +4,7 @@ import { api } from '../api'
 import { chargedMoney } from '../shared/currency'
 import { formatTime } from '../shared/time'
 import { toast } from '../shared/toast'
+import { t, tr } from '../shared/i18n'
 
 type SeenChat = { id: number; title: string; username: string; admin: boolean }
 type TelegramSettingsRecord = {
@@ -78,7 +79,7 @@ export function TelegramSettings() {
   useEffect(() => {
     api<TelegramSettingsRecord>('/api/v1/admin/settings/telegram')
       .then(show)
-      .catch(err => setError(err instanceof Error ? err.message : '加载失败'))
+      .catch(err => setError(err instanceof Error ? err.message : t('加载失败')))
   }, [])
 
   const body = () =>
@@ -97,11 +98,11 @@ export function TelegramSettings() {
       const result = await api<{ settings: TelegramSettingsRecord; warnings: string[] }>('/api/v1/admin/settings/telegram', { method: 'PUT', body: body() })
       show(result.settings)
       setWarnings(result.warnings ?? [])
-      toast('success', 'Telegram 设置已保存', result.settings.enabled ? `机器人 @${result.settings.bot_username} 已启用。` : '活动未启用，客户看不到绑定入口。')
+      toast('success', t('Telegram 设置已保存'), result.settings.enabled ? t('机器人 @{0} 已启用。', result.settings.bot_username) : t('活动未启用，客户看不到绑定入口。'))
     } catch (err) {
-      const message = err instanceof Error ? err.message : '保存失败'
+      const message = err instanceof Error ? err.message : t('保存失败')
       setError(message)
-      toast('error', '保存失败', message)
+      toast('error', t('保存失败'), message)
     } finally {
       setBusy(false)
     }
@@ -113,11 +114,11 @@ export function TelegramSettings() {
     try {
       const result = await api<CheckRecord>('/api/v1/admin/settings/telegram/check', { method: 'POST', body: body() })
       setWarnings(result.warnings ?? [])
-      toast(result.warnings?.length ? 'info' : 'success', `已连接机器人 @${result.bot_username}`, result.chat_title ? `群：${result.chat_title}（${result.chat_id}）` : '还没有设置群。')
+      toast(result.warnings?.length ? 'info' : 'success', t('已连接机器人 @{0}', result.bot_username), result.chat_title ? t('群：{0}（{1}）', result.chat_title, result.chat_id) : t('还没有设置群。'))
     } catch (err) {
-      const message = err instanceof Error ? err.message : '连接失败'
+      const message = err instanceof Error ? err.message : t('连接失败')
       setError(message)
-      toast('error', '连接 Telegram 失败', message)
+      toast('error', t('连接 Telegram 失败'), message)
     } finally {
       setChecking(false)
     }
@@ -128,115 +129,115 @@ export function TelegramSettings() {
   return (
     <form className="panel telegram-settings" onSubmit={save}>
       <div className="panel-heading">
-        <h3>Telegram 绑定与奖励</h3>
+        <h3>{t('Telegram 绑定与奖励')}</h3>
         <span className={saved?.enabled && status?.running ? 'tag success' : 'tag'}>
-          {!saved?.bot_token_configured ? '未配置' : !saved.enabled ? '未启用' : status?.running ? '机器人运行中' : '机器人未运行'}
+          {!saved?.bot_token_configured ? t('未配置') : !saved.enabled ? t('未启用') : status?.running ? t('机器人运行中') : t('机器人未运行')}
         </span>
       </div>
       <p className="muted-text">
-        客户把站点账号和 Telegram 账号绑定后，在交流群里签到、邀请新成员可以获得账户余额（只能在本站消费，不能提现）。启用后，未绑定的客户会在前台右下角看到绑定提示。
+        {t('客户把站点账号和 Telegram 账号绑定后，在交流群里签到、邀请新成员可以获得账户余额（只能在本站消费，不能提现）。启用后，未绑定的客户会在前台右下角看到绑定提示。')}
       </p>
       <ol className="telegram-steps muted-text">
-        <li>在 Telegram 找 @BotFather 发送 /newbot 创建机器人，把得到的 Token 填到下面并保存。</li>
-        <li>把机器人拉进交流群并设为管理员，至少勾选「邀请用户」和「删除消息」权限（管理员才能收到普通消息和成员进出消息）。</li>
-        <li>在下面选择或填写群，点「测试连接」确认无误后勾选启用并保存。</li>
+        <li>{t('在 Telegram 找 @BotFather 发送 /newbot 创建机器人，把得到的 Token 填到下面并保存。')}</li>
+        <li>{t('把机器人拉进交流群并设为管理员，至少勾选「邀请用户」和「删除消息」权限（管理员才能收到普通消息和成员进出消息）。')}</li>
+        <li>{t('在下面选择或填写群，点「测试连接」确认无误后勾选启用并保存。')}</li>
       </ol>
       {stats && saved?.bot_token_configured && (
         <section className="metrics telegram-stats">
-          <article><span>已绑定账号</span><strong>{stats.links}</strong></article>
-          <article><span>今日签到</span><strong>{stats.checkins_today}</strong></article>
-          <article><span>今日已发奖励</span><strong>{chargedMoney(stats.rewarded_today_minor)}</strong></article>
-          <article><span>累计已发奖励</span><strong>{chargedMoney(stats.rewarded_total_minor)}</strong></article>
-          <article><span>邀请（已奖励 / 待结算）</span><strong>{stats.invites_rewarded} / {stats.invites_pending}</strong></article>
+          <article><span>{t('已绑定账号')}</span><strong>{stats.links}</strong></article>
+          <article><span>{t('今日签到')}</span><strong>{stats.checkins_today}</strong></article>
+          <article><span>{t('今日已发奖励')}</span><strong>{chargedMoney(stats.rewarded_today_minor)}</strong></article>
+          <article><span>{t('累计已发奖励')}</span><strong>{chargedMoney(stats.rewarded_total_minor)}</strong></article>
+          <article><span>{t('邀请（已奖励 / 待结算）')}</span><strong>{stats.invites_rewarded} / {stats.invites_pending}</strong></article>
         </section>
       )}
-      {status?.last_error && <div className="note-banner warn">机器人最近一次出错：{status.last_error}</div>}
-      {warnings.map(item => <div className="note-banner warn" key={item}>{item}</div>)}
+      {status?.last_error && <div className="note-banner warn">{t('机器人最近一次出错：{0}', status.last_error)}</div>}
+      {warnings.map(item => <div className="note-banner warn" key={item}>{tr(item)}</div>)}
 
       <div className="form-grid">
         <label className="check-row wide">
           <input type="checkbox" checked={enabled} onChange={event => setEnabled(event.target.checked)} />
-          启用 Telegram 绑定与奖励
+          {t('启用 Telegram 绑定与奖励')}
         </label>
         <label>
           <span>Bot Token</span>
-          <input type="password" autoComplete="off" value={token} onChange={event => setToken(event.target.value)} placeholder={saved?.bot_token_configured ? `已配置（@${saved.bot_username}），留空保持不变` : '123456:ABC-DEF…'} />
+          <input type="password" autoComplete="off" value={token} onChange={event => setToken(event.target.value)} placeholder={saved?.bot_token_configured ? t('已配置（@{0}），留空保持不变', saved.bot_username) : '123456:ABC-DEF…'} />
         </label>
         <label>
-          <span>交流群</span>
-          <input value={chat} onChange={event => setChat(event.target.value)} placeholder={saved?.chat_id ? `${saved.chat_title}（${saved.chat_id}），留空保持不变` : '@群用户名 或 群 ID（-100…）'} />
+          <span>{t('交流群')}</span>
+          <input value={chat} onChange={event => setChat(event.target.value)} placeholder={saved?.chat_id ? t('{0}（{1}），留空保持不变', saved.chat_title, saved.chat_id) : t('@群用户名 或 群 ID（-100…）')} />
           {!!status?.chats.length && (
             <small>
-              机器人所在的群：
+              {t('机器人所在的群：')}
               {status.chats.map(item => (
                 <button type="button" className="button-link" key={item.id} onClick={() => setChat(String(item.id))}>
-                  {item.title}{item.admin ? '' : '（不是管理员）'}
+                  {item.title}{item.admin ? '' : t('（不是管理员）')}
                 </button>
               ))}
             </small>
           )}
-          {!status?.chats.length && <small>私有群没有用户名：保存 Token 后把机器人拉进群，这里会列出它所在的群。</small>}
+          {!status?.chats.length && <small>{t('私有群没有用户名：保存 Token 后把机器人拉进群，这里会列出它所在的群。')}</small>}
         </label>
         <label>
-          <span>群链接（客户前台的「进入交流群」）</span>
-          <input value={chatURL} onChange={event => setChatURL(event.target.value)} placeholder="https://t.me/yourgroup，公开群可留空自动填写" />
+          <span>{t('群链接（客户前台的「进入交流群」）')}</span>
+          <input value={chatURL} onChange={event => setChatURL(event.target.value)} placeholder={t('https://t.me/yourgroup，公开群可留空自动填写')} />
         </label>
         <label>
-          <span>Bot API 地址（可选）</span>
+          <span>{t('Bot API 地址（可选）')}</span>
           <input value={apiBase} onChange={event => setApiBase(event.target.value)} placeholder="https://api.telegram.org" />
-          <small>服务器无法直接访问 Telegram 时，填反向代理地址。</small>
+          <small>{t('服务器无法直接访问 Telegram 时，填反向代理地址。')}</small>
         </label>
         <label>
-          <span>绑定奖励（元，0 为不奖励）</span>
+          <span>{t('绑定奖励（元，0 为不奖励）')}</span>
           <input type="number" min="0" max="1000" step="0.01" value={bind} onChange={event => setBind(event.target.value)} required />
-          <small>每个站点账号和每个 Telegram 账号各只发一次。</small>
+          <small>{t('每个站点账号和每个 Telegram 账号各只发一次。')}</small>
         </label>
         <label>
-          <span>每日签到奖励（元，最小 – 最大）</span>
+          <span>{t('每日签到奖励（元，最小 – 最大）')}</span>
           <div className="inline-fields">
-            <input aria-label="签到奖励最小值" type="number" min="0" max="1000" step="0.01" value={checkinMin} onChange={event => setCheckinMin(event.target.value)} required />
-            <input aria-label="签到奖励最大值" type="number" min="0" max="1000" step="0.01" value={checkinMax} onChange={event => setCheckinMax(event.target.value)} required />
+            <input aria-label={t('签到奖励最小值')} type="number" min="0" max="1000" step="0.01" value={checkinMin} onChange={event => setCheckinMin(event.target.value)} required />
+            <input aria-label={t('签到奖励最大值')} type="number" min="0" max="1000" step="0.01" value={checkinMax} onChange={event => setCheckinMax(event.target.value)} required />
           </div>
-          <small>在两个数之间随机；填相同的数为固定金额。</small>
+          <small>{t('在两个数之间随机；填相同的数为固定金额。')}</small>
         </label>
         <label>
-          <span>邀请奖励（元 / 人，0 为关闭）</span>
+          <span>{t('邀请奖励（元 / 人，0 为关闭）')}</span>
           <input type="number" min="0" max="1000" step="0.01" value={invite} onChange={event => setInvite(event.target.value)} required />
         </label>
         <label>
-          <span>被邀请人需留群（小时）</span>
+          <span>{t('被邀请人需留群（小时）')}</span>
           <input type="number" min="0" max="720" step="1" value={holdHours} onChange={event => setHoldHours(event.target.value)} required />
-          <small>期间退群的不计奖励。</small>
+          <small>{t('期间退群的不计奖励。')}</small>
         </label>
         <label className="check-row">
           <input type="checkbox" checked={requireLink} onChange={event => setRequireLink(event.target.checked)} />
-          被邀请人绑定站点账号（邮箱已验证）后才计奖励
+          {t('被邀请人绑定站点账号（邮箱已验证）后才计奖励')}
         </label>
         <label>
-          <span>每人每日邀请奖励上限（人，0 为不限）</span>
+          <span>{t('每人每日邀请奖励上限（人，0 为不限）')}</span>
           <input type="number" min="0" max="1000" step="1" value={dailyCap} onChange={event => setDailyCap(event.target.value)} required />
         </label>
         <label>
-          <span>全站每日奖励总预算（元，0 为不限）</span>
+          <span>{t('全站每日奖励总预算（元，0 为不限）')}</span>
           <input type="number" min="0" max="1000000" step="0.01" value={budget} onChange={event => setBudget(event.target.value)} required />
-          <small>当天发完后，签到提示「奖励已发完」，邀请奖励顺延到次日。</small>
+          <small>{t('当天发完后，签到提示「奖励已发完」，邀请奖励顺延到次日。')}</small>
         </label>
         <label>
-          <span>群内回复保留（秒，0 为不删除）</span>
+          <span>{t('群内回复保留（秒，0 为不删除）')}</span>
           <input type="number" min="0" max="3600" step="1" value={replyTTL} onChange={event => setReplyTTL(event.target.value)} required />
         </label>
         <label className="check-row">
           <input type="checkbox" checked={welcome} onChange={event => setWelcome(event.target.checked)} />
-          新成员进群时发送欢迎和绑定指引
+          {t('新成员进群时发送欢迎和绑定指引')}
         </label>
       </div>
       <div className="form-actions">
         <button type="button" className="secondary-button" disabled={checking} onClick={() => void check()}>
-          <PlugZap size={15} />{checking ? '正在连接…' : '测试连接'}
+          <PlugZap size={15} />{checking ? t('正在连接…') : t('测试连接')}
         </button>
-        <button className="primary-button" disabled={busy || !saved}>{busy ? '正在保存…' : '保存 Telegram 设置'}</button>
+        <button className="primary-button" disabled={busy || !saved}>{busy ? t('正在保存…') : t('保存 Telegram 设置')}</button>
       </div>
-      {status?.last_poll_at && <p className="muted-text">机器人上次收到 Telegram 响应：{formatTime(status.last_poll_at)}</p>}
+      {status?.last_poll_at && <p className="muted-text">{t('机器人上次收到 Telegram 响应：{0}', formatTime(status.last_poll_at))}</p>}
       {error && <div className="form-error">{error}</div>}
     </form>
   )

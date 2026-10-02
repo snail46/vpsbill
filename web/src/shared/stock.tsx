@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { PlanRecord, StockCapacityRecord } from '../api'
+import { t } from './i18n'
 
 // stockLeft is how many more instances a plan can sell (null = no stock set).
 export function stockLeft(plan: Pick<PlanRecord, 'stock_limit' | 'stock_held'>) {
@@ -9,7 +10,7 @@ export function stockLeft(plan: Pick<PlanRecord, 'stock_limit' | 'stock_held'>) 
 export function StockTag({ plan }: { plan: Pick<PlanRecord, 'stock_limit' | 'stock_held'> }) {
   const left = stockLeft(plan)
   if (left === null) return null
-  return <span className={left > 0 ? 'tag stock-tag' : 'tag stock-tag sold-out'}>{left > 0 ? `库存 ${left}` : '已售罄'}</span>
+  return <span className={left > 0 ? 'tag stock-tag' : 'tag stock-tag sold-out'}>{left > 0 ? t('库存 {0}', left) : t('已售罄')}</span>
 }
 
 // StockField edits a plan's stock. The ceiling is recomputed from the form's
@@ -54,7 +55,7 @@ export function StockField({
             // A new plan defaults to everything its nodes can hold.
             if (!plan && !touched.current && input.current) input.current.value = String(value.max)
           })
-          .catch(err => !cancelled && setError(err instanceof Error ? err.message : '无法计算库存上限'))
+          .catch(err => !cancelled && setError(err instanceof Error ? err.message : t('无法计算库存上限')))
       }, 400)
     }
     const onChange = (event: Event) => {
@@ -78,15 +79,15 @@ export function StockField({
   return (
     <div ref={ref} className="stock-field">
       <label>
-        <span>库存（台，含已售；留空只受资源限制）</span>
-        <input ref={input} name="stock_limit" type="number" min="0" step="1" placeholder="不限" defaultValue={plan?.stock_limit ?? ''} />
+        <span>{t('库存（台，含已售；留空只受资源限制）')}</span>
+        <input ref={input} name="stock_limit" type="number" min="0" step="1" placeholder={t('不限')} defaultValue={plan?.stock_limit ?? ''} />
       </label>
       <small className="field-hint">
         {error
           ? error
           : capacity
-            ? `最多 ${capacity.max} 台（按母机配置、超售倍数、其他套餐占用和本套餐配置计算${capacity.nodes > 1 ? `，${capacity.nodes} 个节点` : ''}）${plan ? `；已售及待支付 ${plan.stock_held ?? 0} 台` : ''}`
-            : '正在计算库存上限…'}
+            ? t('最多 {0} 台（按母机配置、超售倍数、其他套餐占用和本套餐配置计算{1}）{2}', capacity.max, capacity.nodes > 1 ? t('，{0} 个节点', capacity.nodes) : '', plan ? t('；已售及待支付 {0} 台', plan.stock_held ?? 0) : '')
+            : t('正在计算库存上限…')}
       </small>
     </div>
   )

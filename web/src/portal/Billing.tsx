@@ -4,6 +4,7 @@ import { api, cached, CustomerCatalogRecord, CustomerInvoiceRecord, CustomerTran
 import { StatusBadge, money } from '../shared/ui'
 import { Charged, CurrencyNote } from '../shared/LocaleMenu'
 import { formatDate, formatTime } from '../shared/time'
+import { t } from '../shared/i18n'
 
 export function CustomerBilling() {
   const [invoices, setInvoices] = useState<CustomerInvoiceRecord[]>(() => cached<CustomerInvoiceRecord[]>('/api/v1/customer/invoices') ?? [])
@@ -30,7 +31,7 @@ export function CustomerBilling() {
       setCheckoutEnabled(c.checkout_enabled)
       setBalance(w.balance_minor)
     } catch (err) {
-      setError(err instanceof Error ? err.message : '加载失败')
+      setError(err instanceof Error ? err.message : t('加载失败'))
     }
   }
 
@@ -47,7 +48,7 @@ export function CustomerBilling() {
       })
       window.location.assign(intent.checkout_url)
     } catch (err) {
-      setError(err instanceof Error ? err.message : '创建收银台失败')
+      setError(err instanceof Error ? err.message : t('创建收银台失败'))
       setPaying('')
     }
   }
@@ -58,10 +59,10 @@ export function CustomerBilling() {
     setNotice('')
     try {
       await api(`/api/v1/customer/invoices/${invoice.id}/pay-balance`, { method: 'POST' })
-      setNotice(`账单 ${invoice.number} 已用余额支付`)
+      setNotice(t('账单 {0} 已用余额支付', invoice.number))
       await load()
     } catch (err) {
-      setError(err instanceof Error ? err.message : '余额支付失败')
+      setError(err instanceof Error ? err.message : t('余额支付失败'))
     } finally {
       setPaying('')
     }
@@ -72,11 +73,11 @@ export function CustomerBilling() {
       <div className="page-actions">
         <div>
           <p className="eyebrow">BILLING & LEDGER</p>
-          <h2>订单、账单与付款明细</h2>
-          <p>所有交易采用不可变账本设计；网关验签完成到账后系统自动调度开通。</p>
+          <h2>{t('订单、账单与付款明细')}</h2>
+          <p>{t('所有交易采用不可变账本设计；网关验签完成到账后系统自动调度开通。')}</p>
         </div>
         <button className="secondary-button" onClick={() => void load()}>
-          <RefreshCw size={15} />刷新
+          <RefreshCw size={15} />{t('刷新')}
         </button>
       </div>
 
@@ -84,23 +85,23 @@ export function CustomerBilling() {
       {notice && <div className="form-success">{notice}</div>}
       <CurrencyNote />
       <div className="note-banner">
-        账户余额 <strong>{money(balance, invoices[0]?.currency || 'CNY')}</strong>，可直接用于支付新购和续费账单。<a href="/portal/wallet">充值或查看明细</a>
+        {t('账户余额')} <strong>{money(balance, invoices[0]?.currency || 'CNY')}</strong>{t('，可直接用于支付新购和续费账单。')}<a href="/portal/wallet">{t('充值或查看明细')}</a>
       </div>
 
       <div className="panel">
         <div className="panel-heading">
-          <h3>订单记录</h3>
-          <span className="tag">{orders.length} 笔订单</span>
+          <h3>{t('订单记录')}</h3>
+          <span className="tag">{t('{0} 笔订单', orders.length)}</span>
         </div>
         <div className="table-wrap">
           <table>
             <thead>
               <tr>
-                <th>订单编号</th>
-                <th>关联账单</th>
-                <th>订单金额</th>
-                <th>订单状态</th>
-                <th>创建时间</th>
+                <th>{t('订单编号')}</th>
+                <th>{t('关联账单')}</th>
+                <th>{t('订单金额')}</th>
+                <th>{t('订单状态')}</th>
+                <th>{t('创建时间')}</th>
               </tr>
             </thead>
             <tbody>
@@ -115,7 +116,7 @@ export function CustomerBilling() {
               ))}
               {!orders.length && (
                 <tr>
-                  <td colSpan={5} className="empty-state">暂无订单记录</td>
+                  <td colSpan={5} className="empty-state">{t('暂无订单记录')}</td>
                 </tr>
               )}
             </tbody>
@@ -125,19 +126,19 @@ export function CustomerBilling() {
 
       <div className="panel">
         <div className="panel-heading">
-          <h3>账单记录</h3>
-          <span className="tag">{invoices.length} 张账单</span>
+          <h3>{t('账单记录')}</h3>
+          <span className="tag">{t('{0} 张账单', invoices.length)}</span>
         </div>
         <div className="table-wrap">
           <table>
             <thead>
               <tr>
-                <th>账单号</th>
-                <th>应付总额</th>
-                <th>待结余额</th>
-                <th>状态</th>
-                <th>到期时间</th>
-                <th>操作</th>
+                <th>{t('账单号')}</th>
+                <th>{t('应付总额')}</th>
+                <th>{t('待结余额')}</th>
+                <th>{t('状态')}</th>
+                <th>{t('到期时间')}</th>
+                <th>{t('操作')}</th>
               </tr>
             </thead>
             <tbody>
@@ -145,7 +146,7 @@ export function CustomerBilling() {
                 <tr key={item.id}>
                   <td>
                     <strong>{item.number}</strong>
-                    <small className="block">{({ initial: '新购', renewal: '续费', topup: '余额充值' } as Record<string, string>)[item.kind] || item.kind}</small>
+                    <small className="block">{({ initial: t('新购'), renewal: t('续费'), topup: t('余额充值') } as Record<string, string>)[item.kind] || item.kind}</small>
                   </td>
                   <td><strong>{money(item.total_minor, item.currency)}</strong></td>
                   <td style={{ color: item.balance_minor > 0 ? 'var(--warning-text)' : 'inherit' }}>
@@ -159,10 +160,10 @@ export function CustomerBilling() {
                       <button
                         className="primary-button compact"
                         disabled={paying === item.id || balance < item.balance_minor}
-                        title={balance < item.balance_minor ? `余额 ${money(balance, item.currency)} 不足` : ''}
+                        title={balance < item.balance_minor ? t('余额 {0} 不足', money(balance, item.currency)) : ''}
                         onClick={() => void payWithBalance(item)}
                       >
-                        余额支付
+                        {t('余额支付')}
                       </button>
                     )}
                     {item.status === 'open' &&
@@ -172,17 +173,17 @@ export function CustomerBilling() {
                           disabled={paying === item.id}
                           onClick={() => checkout(item)}
                         >
-                          {paying === item.id ? '跳转中…' : '立即支付'}
+                          {paying === item.id ? t('跳转中…') : t('立即支付')}
                         </button>
                       ) : (
-                        <span style={{ color: 'var(--text-muted)', fontSize: '12px' }}>请联系商家线下结算</span>
+                        <span style={{ color: 'var(--text-muted)', fontSize: '12px' }}>{t('请联系商家线下结算')}</span>
                       ))}
                   </td>
                 </tr>
               ))}
               {!invoices.length && (
                 <tr>
-                  <td colSpan={6} className="empty-state">暂无账单记录</td>
+                  <td colSpan={6} className="empty-state">{t('暂无账单记录')}</td>
                 </tr>
               )}
             </tbody>
@@ -192,19 +193,19 @@ export function CustomerBilling() {
 
       <div className="panel">
         <div className="panel-heading">
-          <h3>付款交易流水</h3>
+          <h3>{t('付款交易流水')}</h3>
           <span className="tag">IMMUTABLE LEDGER</span>
         </div>
         <div className="table-wrap">
           <table>
             <thead>
               <tr>
-                <th>流水参考号</th>
-                <th>关联账单</th>
-                <th>支付渠道</th>
-                <th>实付金额</th>
-                <th>流水状态</th>
-                <th>入账时间</th>
+                <th>{t('流水参考号')}</th>
+                <th>{t('关联账单')}</th>
+                <th>{t('支付渠道')}</th>
+                <th>{t('实付金额')}</th>
+                <th>{t('流水状态')}</th>
+                <th>{t('入账时间')}</th>
               </tr>
             </thead>
             <tbody>
@@ -220,7 +221,7 @@ export function CustomerBilling() {
               ))}
               {!transactions.length && (
                 <tr>
-                  <td colSpan={6} className="empty-state">暂无付款流水记录</td>
+                  <td colSpan={6} className="empty-state">{t('暂无付款流水记录')}</td>
                 </tr>
               )}
             </tbody>

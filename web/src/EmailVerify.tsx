@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { MailCheck } from 'lucide-react'
 import { api } from './api'
 import { BrandMark } from './shared/ui'
+import { t, tr } from './shared/i18n'
 
 // EmailVerifyBanner reminds a customer to confirm their address; buying,
 // top-ups and publishing stay locked until they do.
@@ -16,9 +17,9 @@ export function EmailVerifyBanner({ email }: { email: string }) {
         window.location.reload()
         return
       }
-      setMessage(result.message || '验证邮件已发送')
+      setMessage(tr(result.message) || t('验证邮件已发送'))
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : '发送失败')
+      setMessage(err instanceof Error ? err.message : t('发送失败'))
     } finally {
       setBusy(false)
     }
@@ -27,11 +28,11 @@ export function EmailVerifyBanner({ email }: { email: string }) {
     <div className="note-banner warn verify-banner">
       <MailCheck size={16} />
       <span>
-        邮箱 {email} 还没有验证。请打开注册时收到的验证邮件；验证前不能下单、充值、发布母机或参与交易。
+        {t('邮箱 {0} 还没有验证。请打开注册时收到的验证邮件；验证前不能下单、充值、发布母机或参与交易。', email)}
         {message && <strong> {message}</strong>}
       </span>
       <button className="secondary-button compact" disabled={busy} onClick={() => void resend()}>
-        {busy ? '发送中…' : '重新发送'}
+        {busy ? t('发送中…') : t('重新发送')}
       </button>
     </div>
   )
@@ -47,17 +48,17 @@ export function VerifyEmailPage() {
       .then(() => setState('done'))
       .catch(err => {
         setState('failed')
-        setMessage(err instanceof Error ? err.message : '验证失败')
+        setMessage(err instanceof Error ? err.message : t('验证失败'))
       })
   }, [])
   return (
     <main className="session-loading">
       <BrandMark />
-      {state === 'working' && <strong>正在验证邮箱…</strong>}
-      {state === 'done' && <strong>邮箱已验证，现在可以正常下单和充值了。</strong>}
+      {state === 'working' && <strong>{t('正在验证邮箱…')}</strong>}
+      {state === 'done' && <strong>{t('邮箱已验证，现在可以正常下单和充值了。')}</strong>}
       {state === 'failed' && <strong>{message}</strong>}
       {state !== 'working' && (
-        <a className="primary-button compact" href="/portal">进入客户中心</a>
+        <a className="primary-button compact" href="/portal">{t('进入客户中心')}</a>
       )}
     </main>
   )

@@ -424,7 +424,11 @@ func (m *Manager) Install(ctx context.Context, in InstallInput) (InstallResult, 
 	if err = tx.Commit(ctx); err != nil {
 		return InstallResult{}, err
 	}
-	m.current.Store(&v)
+	// Read the stored row back, so settings the installer does not ask for
+	// carry the database's defaults.
+	if err := m.reload(ctx); err != nil {
+		m.current.Store(&v)
+	}
 	generated.Identity = identity
 	return generated, nil
 }

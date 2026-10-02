@@ -182,7 +182,8 @@ func (a *backupAPI) restore(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &input) {
 		return
 	}
-	if strings.TrimSpace(input.Confirm) != "还原" {
+	// The English page asks for "restore".
+	if confirm := strings.TrimSpace(input.Confirm); confirm != "还原" && !strings.EqualFold(confirm, "restore") {
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "validation_error", "message": "请输入「还原」确认操作"})
 		return
 	}

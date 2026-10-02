@@ -53,6 +53,15 @@ func (a adminSettings) localeResult(w http.ResponseWriter, err error) {
 	}
 }
 
+// mailLang is the language to write to a user in: the one stored for the
+// user, else the one the page asking for the mail is in.
+func (a *authenticator) mailLang(r *http.Request, locale string) string {
+	if locale == "" {
+		locale = r.Header.Get("Accept-Language")
+	}
+	return a.settings.Current().Lang(locale)
+}
+
 // customerSetLocale remembers the language a customer reads the site in,
 // which is the language of the mail they get.
 func (a *authenticator) customerSetLocale(w http.ResponseWriter, r *http.Request) {

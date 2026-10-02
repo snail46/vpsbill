@@ -1,4 +1,4 @@
-import { lang, tr } from './shared/i18n'
+import { t, lang, tr } from './shared/i18n'
 export type StaffUser = {
   id: string
   email: string
@@ -539,8 +539,10 @@ async function request<T>(path: string, init: RequestInit): Promise<T> {
   if (response.status === 204) return undefined as T
   const payload = (await response.json().catch(() => ({}))) as Partial<Envelope<T>>
   if (!response.ok) {
-    const error = new Error(tr(payload.message) || '请求失败') as Error & { status?: number }
+    // raw is the server's own wording, for code that looks into it.
+    const error = new Error(tr(payload.message) || t('请求失败')) as Error & { status?: number; raw?: string }
     error.status = response.status
+    error.raw = payload.message
     throw error
   }
   return payload.data as T
@@ -882,11 +884,3 @@ export type ReportRecord = {
 
 export type ChatMuteRecord = { account_id: string; account_name: string; until: string; reason: string }
 
-export const reportReasons: Record<string, string> = {
-  resources: '实际资源与宣传不符',
-  oversell: '性能严重不足（超出公开的超售倍数）',
-  false_info: '位置、线路等信息不实',
-  abuse: '辱骂或骚扰',
-  spam: '广告或刷屏',
-  other: '其他',
-}

@@ -6,6 +6,7 @@ import { ticketStatusLabel, TicketConversation } from '../shared/ui'
 import { formatTime } from '../shared/time'
 import { useUrlFilters } from './filters'
 import { toast } from '../shared/toast'
+import { t } from '../shared/i18n'
 
 export function AdminSupport() {
   const [tickets, setTickets] = useState<TicketRecord[]>(() => cached<TicketRecord[]>('/api/v1/admin/tickets') ?? [])
@@ -30,7 +31,7 @@ export function AdminSupport() {
     try {
       setDetail(await api<TicketDetailRecord>(`/api/v1/admin/tickets/${id}`))
     } catch (err) {
-      setError(err instanceof Error ? err.message : '加载失败')
+      setError(err instanceof Error ? err.message : t('加载失败'))
     }
   }
 
@@ -46,7 +47,7 @@ export function AdminSupport() {
       load()
       return true
     } catch (err) {
-      setError(err instanceof Error ? err.message : '回复失败')
+      setError(err instanceof Error ? err.message : t('回复失败'))
       return false
     }
   }
@@ -60,10 +61,10 @@ export function AdminSupport() {
       })
       await open(detail.ticket.id)
       load()
-      toast('success', '工单状态已更新')
+      toast('success', t('工单状态已更新'))
     } catch (err) {
-      toast('error', '更新工单状态失败', err instanceof Error ? err.message : undefined)
-      setError(err instanceof Error ? err.message : '更新失败')
+      toast('error', t('更新工单状态失败'), err instanceof Error ? err.message : undefined)
+      setError(err instanceof Error ? err.message : t('更新失败'))
     }
   }
 
@@ -72,11 +73,11 @@ export function AdminSupport() {
       <div className="page-actions">
         <div>
           <p className="eyebrow">SUPPORT DESK</p>
-          <h2>工单管理</h2>
-          <p>集中处理客户咨询、故障报障，支持添加团队内部备忘与工单流转。</p>
+          <h2>{t('工单管理')}</h2>
+          <p>{t('集中处理客户咨询、故障报障，支持添加团队内部备忘与工单流转。')}</p>
         </div>
         <button className="secondary-button" onClick={() => load()}>
-          <RefreshCw size={15} />刷新
+          <RefreshCw size={15} />{t('刷新')}
         </button>
       </div>
 
@@ -84,16 +85,16 @@ export function AdminSupport() {
 
       <div className="segmented" role="tablist">
         <button role="tab" aria-selected={scope === 'platform'} className={scope === 'platform' ? 'active' : ''} onClick={() => setScope('platform')}>
-          平台工单 <span className="count">{listed.filter(ticket => !ticket.host_account_id).length}</span>
+          {t('平台工单')} <span className="count">{listed.filter(ticket => !ticket.host_account_id).length}</span>
         </button>
         <button role="tab" aria-selected={scope === 'hosted'} className={scope === 'hosted' ? 'active' : ''} onClick={() => setScope('hosted')}>
-          托管工单 <span className="count">{listed.filter(ticket => ticket.host_account_id).length}</span>
+          {t('托管工单')} <span className="count">{listed.filter(ticket => ticket.host_account_id).length}</span>
         </button>
         <label className="checkbox segmented-option">
-          <input type="checkbox" checked={Boolean(filters.open)} onChange={event => set('open', event.target.checked ? '1' : '')} /> 只看未解决
+          <input type="checkbox" checked={Boolean(filters.open)} onChange={event => set('open', event.target.checked ? '1' : '')} /> {t('只看未解决')}
         </label>
       </div>
-      {scope === 'hosted' && <p className="muted-text">托管工单由母机机主作为第一处理人，平台可以查看并在必要时介入回复。</p>}
+      {scope === 'hosted' && <p className="muted-text">{t('托管工单由母机机主作为第一处理人，平台可以查看并在必要时介入回复。')}</p>}
 
       <div className="support-layout">
         <div className="ticket-list">
@@ -107,22 +108,22 @@ export function AdminSupport() {
                 <strong>{ticket.subject}</strong>
                 <span>
                   {ticket.customer_name} · {ticket.number}
-                  {ticket.host_account_id ? ` · 机主 ${ticket.host_name}` : ''}
+                  {ticket.host_account_id ? t(' · 机主 {0}', ticket.host_name) : ''}
                 </span>
               </div>
               <span className={`ticket-state ${ticket.status}`}>{ticketStatusLabel(ticket.status)}</span>
               <small>
-                优先级：{ticket.priority.toUpperCase()} · {ticket.message_count} 条消息
+                {t('优先级：{0} · {1} 条消息', ticket.priority.toUpperCase(), ticket.message_count)}
               </small>
             </button>
           ))}
-          {!tickets.length && <div className="empty-card">当前无工单待处理</div>}
+          {!tickets.length && <div className="empty-card">{t('当前无工单待处理')}</div>}
         </div>
 
         {detail ? (
           <TicketConversation detail={detail} onReply={reply} admin onStatus={status} maxMB={maxMB} onError={setError} />
         ) : (
-          <div className="panel support-placeholder">选择左侧工单开始回复与流转</div>
+          <div className="panel support-placeholder">{t('选择左侧工单开始回复与流转')}</div>
         )}
       </div>
     </section>
@@ -147,11 +148,11 @@ export function AuditView() {
       <div className="page-actions">
         <div>
           <p className="eyebrow">AUDIT TRAIL</p>
-          <h2>安全审计日志</h2>
-          <p>核心与敏感操作采用服务端只追加（Append-Only）模型记录，展示最近 500 条操作。</p>
+          <h2>{t('安全审计日志')}</h2>
+          <p>{t('核心与敏感操作采用服务端只追加（Append-Only）模型记录，展示最近 500 条操作。')}</p>
         </div>
         <button className="secondary-button" onClick={() => load()}>
-          <RefreshCw size={15} />刷新
+          <RefreshCw size={15} />{t('刷新')}
         </button>
       </div>
 
@@ -161,12 +162,12 @@ export function AuditView() {
         <table>
           <thead>
             <tr>
-              <th>记录时间</th>
-              <th>操作者</th>
-              <th>执行动作</th>
-              <th>目标对象</th>
-              <th>来源 IP</th>
-              <th>元数据明细</th>
+              <th>{t('记录时间')}</th>
+              <th>{t('操作者')}</th>
+              <th>{t('执行动作')}</th>
+              <th>{t('目标对象')}</th>
+              <th>{t('来源 IP')}</th>
+              <th>{t('元数据明细')}</th>
             </tr>
           </thead>
           <tbody>
@@ -194,7 +195,7 @@ export function AuditView() {
             ))}
             {!rows.length && (
               <tr>
-                <td colSpan={6} className="empty-state">暂无审计日志记录</td>
+                <td colSpan={6} className="empty-state">{t('暂无审计日志记录')}</td>
               </tr>
             )}
           </tbody>

@@ -1,5 +1,6 @@
 import { KeyboardEvent, useState } from 'react'
 import { X } from 'lucide-react'
+import { t } from './i18n'
 
 // The server keeps at most this many tags of this length (see
 // cleanPlanLabels).
@@ -18,11 +19,11 @@ export function TagInput({ value, onChange, placeholder }: { value: string[]; on
       const tag = raw.trim().replace(/\s+/g, ' ')
       if (!tag || next.includes(tag)) continue
       if ([...tag].length > maxTagLength) {
-        setHint(`每个标签最多 ${maxTagLength} 个字`)
+        setHint(t('每个标签最多 {0} 个字', maxTagLength))
         return
       }
       if (next.length >= maxTags) {
-        setHint(`最多 ${maxTags} 个标签`)
+        setHint(t('最多 {0} 个标签', maxTags))
         break
       }
       next.push(tag)
@@ -46,7 +47,7 @@ export function TagInput({ value, onChange, placeholder }: { value: string[]; on
         {value.map(tag => (
           <span key={tag} className="tag-chip">
             {tag}
-            <button type="button" aria-label={`删除标签 ${tag}`} onClick={() => onChange(value.filter(item => item !== tag))}>
+            <button type="button" aria-label={t('删除标签 {0}', tag)} onClick={() => onChange(value.filter(item => item !== tag))}>
               <X size={12} />
             </button>
           </span>
@@ -63,7 +64,7 @@ export function TagInput({ value, onChange, placeholder }: { value: string[]; on
           onBlur={() => draft.trim() && add(draft)}
         />
       </div>
-      <small className="field-hint">{hint || `回车或逗号添加，最多 ${maxTags} 个，每个不超过 ${maxTagLength} 字`}</small>
+      <small className="field-hint">{hint || t('回车或逗号添加，最多 {0} 个，每个不超过 {1} 字', maxTags, maxTagLength)}</small>
     </div>
   )
 }

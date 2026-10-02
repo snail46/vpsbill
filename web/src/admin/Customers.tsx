@@ -7,10 +7,11 @@ import { formatTime } from '../shared/time'
 import { AdminLink, FilterBar, SearchFilter, SelectFilter, adminHref, includesText, matchesAny, useUrlFilters, type Option } from './filters'
 import { confirmDialog } from '../shared/dialog'
 import { toast } from '../shared/toast'
+import { t } from '../shared/i18n'
 
-const customerKinds: Option[] = [['individual', '个人客户'], ['business', '企业客户']]
-const customerStatuses: Option[] = [['active', '正常'], ['suspended', '已暂停'], ['pending', '待激活'], ['closed', '已关闭']]
-const balanceFilters: Option[] = [['positive', '有余额'], ['zero', '余额为零'], ['negative', '欠款（余额为负）']]
+const customerKinds: Option[] = [['individual', t('个人客户')], ['business', t('企业客户')]]
+const customerStatuses: Option[] = [['active', t('正常')], ['suspended', t('已暂停')], ['pending', t('待激活')], ['closed', t('已关闭')]]
+const balanceFilters: Option[] = [['positive', t('有余额')], ['zero', t('余额为零')], ['negative', t('欠款（余额为负）')]]
 
 function balanceMatches(filter: string, balance: number) {
   return !filter || (filter === 'positive' ? balance > 0 : filter === 'negative' ? balance < 0 : balance === 0)
@@ -27,7 +28,7 @@ export function CustomersView() {
   const [copied, setCopied] = useState(false)
 
   async function issueResetLink(customer: AccountRecord) {
-    if (!(await confirmDialog({ title: `为客户【${customer.display_name}】生成密码重置链接？`, message: '链接只能使用一次；此前未使用的链接会失效。', confirmText: '生成链接' }))) return
+    if (!(await confirmDialog({ title: t('为客户【{0}】生成密码重置链接？', customer.display_name), message: t('链接只能使用一次；此前未使用的链接会失效。'), confirmText: t('生成链接') }))) return
     setUpdating(customer.id)
     setError('')
     setCopied(false)
@@ -38,7 +39,7 @@ export function CustomersView() {
       )
       setResetLink({ name: customer.display_name, ...result })
     } catch (err) {
-      setError(err instanceof Error ? err.message : '生成重置链接失败')
+      setError(err instanceof Error ? err.message : t('生成重置链接失败'))
     } finally {
       setUpdating('')
     }
@@ -64,17 +65,17 @@ export function CustomersView() {
 
   async function toggleStatus(customer: AccountRecord) {
     const status = customer.status === 'active' ? 'suspended' : 'active'
-    if (status === 'suspended' && !(await confirmDialog({ title: `暂停客户【${customer.display_name}】的账户？`, message: '这会撤销其全部登录会话。', confirmText: '暂停账户', danger: true }))) {
+    if (status === 'suspended' && !(await confirmDialog({ title: t('暂停客户【{0}】的账户？', customer.display_name), message: t('这会撤销其全部登录会话。'), confirmText: t('暂停账户'), danger: true }))) {
       return
     }
     setUpdating(customer.id)
     try {
       await api(`/api/v1/admin/customers/${customer.id}`, { method: 'PATCH', body: JSON.stringify({ status }) })
       await load()
-      toast('success', status === 'suspended' ? `已暂停 ${customer.display_name} 的账户` : `已恢复 ${customer.display_name} 的账户`)
+      toast('success', status === 'suspended' ? t('已暂停 {0} 的账户', customer.display_name) : t('已恢复 {0} 的账户', customer.display_name))
     } catch (err) {
-      toast('error', '更新账户状态失败', err instanceof Error ? err.message : undefined)
-      setError(err instanceof Error ? err.message : '更新状态失败')
+      toast('error', t('更新账户状态失败'), err instanceof Error ? err.message : undefined)
+      setError(err instanceof Error ? err.message : t('更新状态失败'))
     } finally {
       setUpdating('')
     }
@@ -84,10 +85,10 @@ export function CustomersView() {
     <section className="workspace-panel">
       <PageActions
         eyebrow="CUSTOMER ACCOUNTS"
-        title="客户管理"
-        description="客户是订单、账单明细、VPS 实例与资金交易流水的统一归属主体。"
+        title={t('客户管理')}
+        description={t('客户是订单、账单明细、VPS 实例与资金交易流水的统一归属主体。')}
         action={() => setShowForm(true)}
-        actionLabel="新增客户"
+        actionLabel={t('新增客户')}
       />
 
       {error && <div className="form-error">{error}</div>}
@@ -96,12 +97,12 @@ export function CustomersView() {
         <div className="inline-form reset-link-panel">
           <div className="inline-form-heading">
             <div>
-              <h3>{resetLink.name} 的密码重置链接</h3>
+              <h3>{t('{0} 的密码重置链接', resetLink.name)}</h3>
               <p>
-                登录邮箱 {resetLink.email}，{formatTime(resetLink.expires_at)} 前有效，只能使用一次。请通过工单或其他可信渠道发给客户本人。
+                {t('登录邮箱 {0}，{1} 前有效，只能使用一次。请通过工单或其他可信渠道发给客户本人。', resetLink.email, formatTime(resetLink.expires_at))}
               </p>
             </div>
-            <button className="icon-button" onClick={() => setResetLink(null)} aria-label="关闭">
+            <button className="icon-button" onClick={() => setResetLink(null)} aria-label={t('关闭')}>
               <X size={16} />
             </button>
           </div>
@@ -113,7 +114,7 @@ export function CustomersView() {
                 void navigator.clipboard?.writeText(resetLink.link).then(() => setCopied(true), () => setCopied(false))
               }}
             >
-              {copied ? '已复制' : '复制链接'}
+              {copied ? t('已复制') : t('复制链接')}
             </button>
           </div>
         </div>
@@ -134,25 +135,25 @@ export function CustomersView() {
       )}
 
       <FilterBar shown={shown.length} total={customers.length} active={active} onReset={reset}>
-        <SearchFilter label="客户主体" value={filters.q} onChange={value => set('q', value)} placeholder="名称、企业全称或 ID" />
-        <SelectFilter label="客户类型" value={filters.kind} onChange={value => set('kind', value)} options={customerKinds} />
-        <SearchFilter label="账单邮箱" value={filters.email} onChange={value => set('email', value)} placeholder="邮箱" />
-        <SelectFilter label="账户余额" value={filters.balance} onChange={value => set('balance', value)} options={balanceFilters} />
-        <SelectFilter label="账户状态" value={filters.status} onChange={value => set('status', value)} options={customerStatuses} />
+        <SearchFilter label={t('客户主体')} value={filters.q} onChange={value => set('q', value)} placeholder={t('名称、企业全称或 ID')} />
+        <SelectFilter label={t('客户类型')} value={filters.kind} onChange={value => set('kind', value)} options={customerKinds} />
+        <SearchFilter label={t('账单邮箱')} value={filters.email} onChange={value => set('email', value)} placeholder={t('邮箱')} />
+        <SelectFilter label={t('账户余额')} value={filters.balance} onChange={value => set('balance', value)} options={balanceFilters} />
+        <SelectFilter label={t('账户状态')} value={filters.status} onChange={value => set('status', value)} options={customerStatuses} />
       </FilterBar>
 
       <div className="table-wrap">
         <table>
           <thead>
             <tr>
-              <th>客户主体</th>
-              <th>客户类型</th>
-              <th>账单邮箱</th>
-              <th>账户余额</th>
-              <th>实例 / 订单 / 账单 / 流水</th>
-              <th>账户状态</th>
-              <th>注册时间</th>
-              <th>操作</th>
+              <th>{t('客户主体')}</th>
+              <th>{t('客户类型')}</th>
+              <th>{t('账单邮箱')}</th>
+              <th>{t('账户余额')}</th>
+              <th>{t('实例 / 订单 / 账单 / 流水')}</th>
+              <th>{t('账户状态')}</th>
+              <th>{t('注册时间')}</th>
+              <th>{t('操作')}</th>
             </tr>
           </thead>
           <tbody>
@@ -162,7 +163,7 @@ export function CustomersView() {
                   <strong>{customer.display_name}</strong>
                   <small>{customer.id}</small>
                 </td>
-                <td>{customer.kind === 'business' ? '企业客户' : '个人客户'}</td>
+                <td>{customer.kind === 'business' ? t('企业客户') : t('个人客户')}</td>
                 <td>{customer.billing_email}</td>
                 <td className={(customer.balance_minor || 0) < 0 ? 'amount-negative' : ''}>
                   {walletMoney(customer.balance_minor || 0, customer.default_currency)}
@@ -180,17 +181,17 @@ export function CustomersView() {
                       disabled={updating === customer.id}
                       onClick={() => void toggleStatus(customer)}
                     >
-                      {customer.status === 'active' ? '暂停账户' : '恢复正常'}
+                      {customer.status === 'active' ? t('暂停账户') : t('恢复正常')}
                     </button>
                     <button
                       className="text-button"
                       disabled={updating === customer.id}
                       onClick={() => void issueResetLink(customer)}
                     >
-                      重置密码链接
+                      {t('重置密码链接')}
                     </button>
                     <button className="text-button" onClick={() => setWalletFor(customer)}>
-                      余额明细
+                      {t('余额明细')}
                     </button>
                   </div>
                 </td>
@@ -198,7 +199,7 @@ export function CustomersView() {
             ))}
             {!shown.length && (
               <tr>
-                <td colSpan={8} className="empty-state">{customers.length ? '没有符合筛选条件的客户' : '尚未创建任何客户账户'}</td>
+                <td colSpan={8} className="empty-state">{customers.length ? t('没有符合筛选条件的客户') : t('尚未创建任何客户账户')}</td>
               </tr>
             )}
           </tbody>
@@ -213,17 +214,17 @@ export function CustomersView() {
 function CustomerLinks({ customer }: { customer: AccountRecord }) {
   const counts = customer.counts
   const links: [string, string, string, string?][] = [
-    ['实例', adminHref('services', { account: customer.id }), counts ? `${counts.active_services}${counts.services > counts.active_services ? `/${counts.services}` : ''}` : '—', counts && counts.services > counts.active_services ? '在用 / 全部（含已删除）' : undefined],
-    ['订单', adminHref('orders', { account: customer.id }), counts ? String(counts.orders) : '—'],
-    ['账单', adminHref('billing', { account: customer.id }), counts ? String(counts.invoices) : '—', counts?.open_invoices ? `${counts.open_invoices} 张未付` : undefined],
-    ['流水', adminHref('billing', { payer: customer.id }, 'transactions'), counts ? String(counts.transactions) : '—'],
+    [t('实例'), adminHref('services', { account: customer.id }), counts ? `${counts.active_services}${counts.services > counts.active_services ? `/${counts.services}` : ''}` : '—', counts && counts.services > counts.active_services ? t('在用 / 全部（含已删除）') : undefined],
+    [t('订单'), adminHref('orders', { account: customer.id }), counts ? String(counts.orders) : '—'],
+    [t('账单'), adminHref('billing', { account: customer.id }), counts ? String(counts.invoices) : '—', counts?.open_invoices ? t('{0} 张未付', counts.open_invoices) : undefined],
+    [t('流水'), adminHref('billing', { payer: customer.id }, 'transactions'), counts ? String(counts.transactions) : '—'],
   ]
   return (
     <div className="customer-links">
       {links.map(([label, href, count, hint]) => (
-        <AdminLink key={label} href={href} title={hint ? `${label}：${hint}` : `查看${customer.display_name}的${label}`}>
+        <AdminLink key={label} href={href} title={hint ? t('{0}：{1}', label, hint) : t('查看{0}的{1}', customer.display_name, label)}>
           {label} <strong>{count}</strong>
-          {label === '账单' && counts?.open_invoices ? <em>{counts.open_invoices} 未付</em> : null}
+          {label === t('账单') && counts?.open_invoices ? <em>{t('{0} 未付', counts.open_invoices)}</em> : null}
         </AdminLink>
       ))}
     </div>
@@ -254,7 +255,7 @@ export function CustomerForm({ onClose, onCreated }: { onClose: () => void; onCr
       })
       onCreated()
     } catch (err) {
-      setError(err instanceof Error ? err.message : '创建失败')
+      setError(err instanceof Error ? err.message : t('创建失败'))
     } finally {
       setSaving(false)
     }
@@ -264,54 +265,54 @@ export function CustomerForm({ onClose, onCreated }: { onClose: () => void; onCr
     <div className="inline-form">
       <div className="inline-form-heading">
         <div>
-          <h3>创建新客户</h3>
-          <p>录入客户基础信息。企业客户可按需选填法定企业全称及纳税人识别号。</p>
+          <h3>{t('创建新客户')}</h3>
+          <p>{t('录入客户基础信息。企业客户可按需选填法定企业全称及纳税人识别号。')}</p>
         </div>
         <button className="icon-button" onClick={onClose}><X size={18} /></button>
       </div>
 
       <form className="form-grid" onSubmit={submit}>
         <label>
-          <span>客户类型</span>
+          <span>{t('客户类型')}</span>
           <select name="kind">
-            <option value="individual">个人</option>
-            <option value="business">企业</option>
+            <option value="individual">{t('个人')}</option>
+            <option value="business">{t('企业')}</option>
           </select>
         </label>
         <label>
-          <span>显示名称 / 昵称</span>
-          <input name="display_name" required placeholder="张三 / 某某科技" />
+          <span>{t('显示名称 / 昵称')}</span>
+          <input name="display_name" required placeholder={t('张三 / 某某科技')} />
         </label>
         <label>
-          <span>账单通知邮箱</span>
+          <span>{t('账单通知邮箱')}</span>
           <input name="billing_email" type="email" required placeholder="billing@example.com" />
         </label>
         <label>
-          <span>法定名称（企业）</span>
-          <input name="legal_name" placeholder="某某网络科技有限公司" />
+          <span>{t('法定名称（企业）')}</span>
+          <input name="legal_name" placeholder={t('某某网络科技有限公司')} />
         </label>
         <label>
-          <span>统一社会信用代码 / 税号</span>
+          <span>{t('统一社会信用代码 / 税号')}</span>
           <input name="tax_id" placeholder="91310000XXXXXXXXXX" />
         </label>
         <label>
-          <span>国家 / 地区代码</span>
+          <span>{t('国家 / 地区代码')}</span>
           <input name="country_code" maxLength={2} defaultValue="CN" />
         </label>
         <label>
-          <span>默认计费币种</span>
+          <span>{t('默认计费币种')}</span>
           <select name="default_currency">
-            <option value="CNY">CNY 人民币</option>
-            <option value="USD">USD 美元</option>
+            <option value="CNY">{t('CNY 人民币')}</option>
+            <option value="USD">{t('USD 美元')}</option>
           </select>
         </label>
 
         {error && <div className="form-error wide">{error}</div>}
 
         <div className="form-actions wide">
-          <button type="button" className="secondary-button" onClick={onClose}>取消</button>
+          <button type="button" className="secondary-button" onClick={onClose}>{t('取消')}</button>
           <button className="primary-button" disabled={saving}>
-            {saving ? '正在创建…' : '保存客户'}
+            {saving ? t('正在创建…') : t('保存客户')}
           </button>
         </div>
       </form>

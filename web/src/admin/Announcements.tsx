@@ -4,6 +4,7 @@ import { api, cached, AnnouncementRecord } from '../api'
 import { formatTime } from '../shared/time'
 import { confirmDialog } from '../shared/dialog'
 import { toast } from '../shared/toast'
+import { t } from '../shared/i18n'
 
 // AnnouncementsView lets staff publish notices on the customer overview.
 export function AnnouncementsView() {
@@ -14,7 +15,7 @@ export function AnnouncementsView() {
   const load = () =>
     api<AnnouncementRecord[]>('/api/v1/admin/announcements')
       .then(setItems)
-      .catch(err => setError(err instanceof Error ? err.message : '加载失败'))
+      .catch(err => setError(err instanceof Error ? err.message : t('加载失败')))
   useEffect(() => {
     void load()
   }, [])
@@ -35,19 +36,19 @@ export function AnnouncementsView() {
       setEditing(null)
       await load()
     } catch (err) {
-      setError(err instanceof Error ? err.message : '保存失败')
+      setError(err instanceof Error ? err.message : t('保存失败'))
     }
   }
 
   async function remove(item: AnnouncementRecord) {
-    if (!(await confirmDialog({ title: `删除公告「${item.title}」？`, message: '删除后客户将不再看到这条公告。', confirmText: '删除', danger: true }))) return
+    if (!(await confirmDialog({ title: t('删除公告「{0}」？', item.title), message: t('删除后客户将不再看到这条公告。'), confirmText: t('删除'), danger: true }))) return
     try {
       await api(`/api/v1/admin/announcements/${item.id}`, { method: 'DELETE' })
       await load()
-      toast('success', '公告已删除')
+      toast('success', t('公告已删除'))
     } catch (err) {
-      toast('error', '删除公告失败', err instanceof Error ? err.message : undefined)
-      setError(err instanceof Error ? err.message : '删除失败')
+      toast('error', t('删除公告失败'), err instanceof Error ? err.message : undefined)
+      setError(err instanceof Error ? err.message : t('删除失败'))
     }
   }
 
@@ -57,42 +58,42 @@ export function AnnouncementsView() {
       <div className="page-actions">
         <div>
           <p className="eyebrow">ANNOUNCEMENTS</p>
-          <h2>平台公告</h2>
-          <p>已发布的公告显示在客户中心「服务概览」，置顶的排在最前。</p>
+          <h2>{t('平台公告')}</h2>
+          <p>{t('已发布的公告显示在客户中心「服务概览」，置顶的排在最前。')}</p>
         </div>
         <button className="primary-button compact" onClick={() => setEditing('new')}>
-          <Plus size={14} />新建公告
+          <Plus size={14} />{t('新建公告')}
         </button>
       </div>
       {error && <div className="form-error">{error}</div>}
       {editing && (
         <form key={current?.id ?? 'new'} className="panel form-grid" onSubmit={save}>
           <label className="wide">
-            <span>标题（1–120 字）</span>
+            <span>{t('标题（1–120 字）')}</span>
             <input name="title" required maxLength={120} defaultValue={current?.title} />
           </label>
           <label className="wide">
-            <span>正文（最多 4000 字，换行会保留）</span>
+            <span>{t('正文（最多 4000 字，换行会保留）')}</span>
             <textarea name="body" rows={6} maxLength={4000} defaultValue={current?.body} />
           </label>
           <label className="check-row">
             <input type="checkbox" name="published" defaultChecked={current ? current.published : true} />
-            发布（不勾选则保存为草稿）
+            {t('发布（不勾选则保存为草稿）')}
           </label>
           <label className="check-row">
             <input type="checkbox" name="pinned" defaultChecked={current?.pinned} />
-            置顶
+            {t('置顶')}
           </label>
           <div className="form-actions wide">
-            <button type="button" className="secondary-button" onClick={() => setEditing(null)}>取消</button>
-            <button className="primary-button compact">保存</button>
+            <button type="button" className="secondary-button" onClick={() => setEditing(null)}>{t('取消')}</button>
+            <button className="primary-button compact">{t('保存')}</button>
           </div>
         </form>
       )}
       <div className="table-wrap">
         <table>
           <thead>
-            <tr><th>标题</th><th>状态</th><th>发布时间</th><th>操作</th></tr>
+            <tr><th>{t('标题')}</th><th>{t('状态')}</th><th>{t('发布时间')}</th><th>{t('操作')}</th></tr>
           </thead>
           <tbody>
             {items.map(item => (
@@ -101,16 +102,16 @@ export function AnnouncementsView() {
                   <strong>{item.pinned && <Pin size={12} />} {item.title}</strong>
                   {item.body && <small>{item.body.slice(0, 60)}{item.body.length > 60 ? '…' : ''}</small>}
                 </td>
-                <td><span className={item.published ? 'tag success' : 'tag'}>{item.published ? '已发布' : '草稿'}</span></td>
+                <td><span className={item.published ? 'tag success' : 'tag'}>{item.published ? t('已发布') : t('草稿')}</span></td>
                 <td>{formatTime(item.created_at)}</td>
                 <td className="row-actions">
-                  <button className="text-button" onClick={() => setEditing(item)}>编辑</button>
-                  <button className="text-button danger" onClick={() => void remove(item)}>删除</button>
+                  <button className="text-button" onClick={() => setEditing(item)}>{t('编辑')}</button>
+                  <button className="text-button danger" onClick={() => void remove(item)}>{t('删除')}</button>
                 </td>
               </tr>
             ))}
             {!items.length && (
-              <tr><td colSpan={4} className="empty-state">还没有公告</td></tr>
+              <tr><td colSpan={4} className="empty-state">{t('还没有公告')}</td></tr>
             )}
           </tbody>
         </table>

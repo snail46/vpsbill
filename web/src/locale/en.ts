@@ -1,4 +1,8 @@
-// English text, keyed by the Chinese text the site is written in.
-export const words: Record<string, string> = {}
+// English: the interface text, and the text that comes from the server
+// (messages and descriptions stored with the data).
+import { ui } from './en-ui'
+import { serverRules, serverWords } from './en-server'
 
-export const rules: [RegExp, string][] = []
+export const words: Record<string, string> = { ...serverWords, ...ui }
+
+export const rules: [RegExp, string][] = serverRules

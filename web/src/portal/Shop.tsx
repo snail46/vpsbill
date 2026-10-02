@@ -7,6 +7,7 @@ import { cycleLabel, money, bandwidthLabel } from '../shared/ui'
 import { CurrencyNote } from '../shared/LocaleMenu'
 import { cycleOrder, priceLeft } from '../shared/cycles'
 import { stockLeft, StockTag } from '../shared/stock'
+import { t } from '../shared/i18n'
 
 // cardPrice shows the monthly price when the plan sells one, otherwise the
 // shortest cycle.
@@ -53,7 +54,7 @@ export function CustomerShop({ customer }: { customer: CustomerIdentity }) {
   const groups = [
     ...categories.map(category => ({ id: category.id, name: category.name, description: category.description })),
     ...(categories.length && sellable.some(plan => !categories.some(category => category.id === plan.category_id))
-      ? [{ id: '', name: '其他', description: '' }]
+      ? [{ id: '', name: t('其他'), description: '' }]
       : []),
   ]
   const activeGroup = groups.find(group => group.id === (categoryID ?? sellable.find(plan => plan.id === selectedID)?.category_id ?? groups[0]?.id)) ?? groups[0]
@@ -105,7 +106,7 @@ export function CustomerShop({ customer }: { customer: CustomerIdentity }) {
       })
       setCreated(order)
     } catch (err) {
-      setError(err instanceof Error ? err.message : '下单失败')
+      setError(err instanceof Error ? err.message : t('下单失败'))
     } finally {
       setSaving(false)
     }
@@ -121,7 +122,7 @@ export function CustomerShop({ customer }: { customer: CustomerIdentity }) {
       })
       window.location.assign(intent.checkout_url)
     } catch (err) {
-      setError(err instanceof Error ? err.message : '创建收银台失败')
+      setError(err instanceof Error ? err.message : t('创建收银台失败'))
       setPaying(false)
     }
   }
@@ -133,9 +134,9 @@ export function CustomerShop({ customer }: { customer: CustomerIdentity }) {
       <div className="page-actions">
         <div>
           <p className="eyebrow">MARKETPLACE</p>
-          <h2>选购 VPS 套餐</h2>
+          <h2>{t('选购 VPS 套餐')}</h2>
           <p>
-            <span className="tag source-platform shop-self-tag">平台自营</span>本页套餐全部由平台自营：平台的母机、平台定价、平台售后。支付完成后自动开通。
+            <span className="tag source-platform shop-self-tag">{t('平台自营')}</span>{t('本页套餐全部由平台自营：平台的母机、平台定价、平台售后。支付完成后自动开通。')}
           </p>
         </div>
       </div>
@@ -145,16 +146,16 @@ export function CustomerShop({ customer }: { customer: CustomerIdentity }) {
         <button type="button" className="shop-market-link" onClick={() => navigatePortal('/portal/hosting?tab=market')}>
           <Store size={18} aria-hidden />
           <span>
-            <strong>托管市场</strong>
-            <small>机主自营的母机，地区和价格更多样，平台担保资金</small>
+            <strong>{t('托管市场')}</strong>
+            <small>{t('机主自营的母机，地区和价格更多样，平台担保资金')}</small>
           </span>
           <ArrowRight size={16} aria-hidden />
         </button>
         <button type="button" className="shop-market-link" onClick={() => navigatePortal('/portal/trade')}>
           <ArrowLeftRight size={18} aria-hidden />
           <span>
-            <strong>交易市场</strong>
-            <small>其他用户转让的现成实例，余额购买，即买即用</small>
+            <strong>{t('交易市场')}</strong>
+            <small>{t('其他用户转让的现成实例，余额购买，即买即用')}</small>
           </span>
           <ArrowRight size={16} aria-hidden />
         </button>
@@ -165,8 +166,8 @@ export function CustomerShop({ customer }: { customer: CustomerIdentity }) {
 
       <div className={categories.length ? 'shop-body with-categories' : 'shop-body'}>
         {categories.length > 0 && (
-          <aside className="shop-categories" aria-label="套餐分类">
-            <p className="eyebrow">套餐分类</p>
+          <aside className="shop-categories" aria-label={t('套餐分类')}>
+            <p className="eyebrow">{t('套餐分类')}</p>
             <div role="tablist">
               {groups.map(group => (
                 <button
@@ -190,7 +191,7 @@ export function CustomerShop({ customer }: { customer: CustomerIdentity }) {
           <div className="shop-self-banner">
             <ShieldCheck size={16} aria-hidden />
             <span>
-              <strong>平台自营</strong>以下套餐由平台直接提供和运维，售后请提交工单。机主出租的母机在「托管市场」，用户转让的实例在「交易市场」。
+              <strong>{t('平台自营')}</strong>{t('以下套餐由平台直接提供和运维，售后请提交工单。机主出租的母机在「托管市场」，用户转让的实例在「交易市场」。')}
             </span>
           </div>
           {activeGroup?.description && (
@@ -211,10 +212,10 @@ export function CustomerShop({ customer }: { customer: CustomerIdentity }) {
                     onClick={() => setSelectedID(plan.id)}
                   >
                     <div>
-                      <span className="tag source-platform">自营</span>
+                      <span className="tag source-platform">{t('自营')}</span>
                       <span className="tag">{plan.virtualization.toUpperCase()}</span>
                       <StockTag plan={plan} />
-                      {selectedID === plan.id && <span className="selected-mark">已选定</span>}
+                      {selectedID === plan.id && <span className="selected-mark">{t('已选定')}</span>}
                     </div>
                     <h3>{plan.name}</h3>
                     <small>{plan.code}</small>
@@ -226,19 +227,19 @@ export function CustomerShop({ customer }: { customer: CustomerIdentity }) {
                     {plan.description && <p className="shop-description">{plan.description}</p>}
                     <div className="shop-specs">
                       <span>{plan.vcpu} vCPU</span>
-                      <span>{plan.ram_mb} MB 内存</span>
+                      <span>{t('{0} MB 内存', plan.ram_mb)}</span>
                       <span>{plan.disk_gb} GB SSD</span>
-                      <span>{plan.traffic_gb ? `${plan.traffic_gb} GB 流量` : '不限流量'}</span>
+                      <span>{plan.traffic_gb ? t('{0} GB 流量', plan.traffic_gb) : t('不限流量')}</span>
                       <span>{bandwidthLabel(plan.network_down_mbps)}</span>
                     </div>
                     <div className="shop-price">
-                      {price ? money(price.amount_minor, price.currency) : '暂无报价'}
+                      {price ? money(price.amount_minor, price.currency) : t('暂无报价')}
                       <small>/ {price ? cycleLabel(price.billing_cycle) : ''}</small>
                     </div>
                   </button>
                 )
               })}
-              {catalog && !plans.length && <div className="empty-card" style={{ gridColumn: '1 / -1' }}>当前币种暂无可售套餐</div>}
+              {catalog && !plans.length && <div className="empty-card" style={{ gridColumn: '1 / -1' }}>{t('当前币种暂无可售套餐')}</div>}
             </div>
 
             {selected && (
@@ -248,13 +249,13 @@ export function CustomerShop({ customer }: { customer: CustomerIdentity }) {
                     <p className="eyebrow">ORDER</p>
                     <h3>{selected.name}</h3>
                     <small>
-                      {selected.vcpu} 核 · {selected.ram_mb >= 1024 ? `${+(selected.ram_mb / 1024).toFixed(1)} GB` : `${selected.ram_mb} MB`} · {selected.disk_gb} GB · {bandwidthLabel(selected.network_down_mbps)}
+                      {t('{0} 核 · {1} · {2} GB · {3}', selected.vcpu, selected.ram_mb >= 1024 ? `${+(selected.ram_mb / 1024).toFixed(1)} GB` : `${selected.ram_mb} MB`, selected.disk_gb, bandwidthLabel(selected.network_down_mbps))}
                     </small>
                   </header>
                   <label>
-                    <span>地域</span>
+                    <span>{t('地域')}</span>
                     <select key={selected.id} name="region_id" required>
-                      {!regions.length && <option value="">该套餐暂无可售地域</option>}
+                      {!regions.length && <option value="">{t('该套餐暂无可售地域')}</option>}
                       {regions.map(region => (
                         <option key={region.id} value={region.id}>
                           {region.name}
@@ -263,18 +264,18 @@ export function CustomerShop({ customer }: { customer: CustomerIdentity }) {
                     </select>
                   </label>
                   <label>
-                    <span>计费周期</span>
+                    <span>{t('计费周期')}</span>
                     <select name="billing_cycle" value={cycle} onChange={event => setCycle(event.target.value)}>
                       {prices.map(price => (
                         <option key={price.billing_cycle} value={price.billing_cycle} disabled={priceLeft(price) === 0}>
                           {cycleLabel(price.billing_cycle)} · {money(price.amount_minor, price.currency)}
-                          {priceLeft(price) === 0 ? '（已达限购次数）' : priceLeft(price) !== null ? `（限购剩 ${priceLeft(price)} 次）` : ''}
+                          {priceLeft(price) === 0 ? t('（已达限购次数）') : priceLeft(price) !== null ? t('（限购剩 {0} 次）', priceLeft(price)) : ''}
                         </option>
                       ))}
                     </select>
                   </label>
                   <label>
-                    <span>系统</span>
+                    <span>{t('系统')}</span>
                     <select key={selected.id} name="template_id" defaultValue={selected.default_template_id}>
                       {osOptions(selected.allowed_template_ids).map(template => (
                         <option key={template.id} value={template.id}>
@@ -284,12 +285,12 @@ export function CustomerShop({ customer }: { customer: CustomerIdentity }) {
                     </select>
                   </label>
                   <label>
-                    <span>数量</span>
+                    <span>{t('数量')}</span>
                     <input name="quantity" type="number" min="1" max={Math.max(1, Math.min(20, stockLeft(selected) ?? 20))} defaultValue="1" />
                   </label>
                   <CouponField planId={selected.id} cycle={cycle} onApplied={(code, discount) => { setCoupon(code); setDiscount(discount) }} />
                   <div className="shop-order-total">
-                    <span>每台应付{currentPrice?.setup_fee_minor ? '（含开通费）' : ''}{discount ? '（已扣优惠）' : ''}</span>
+                    <span>{t('每台应付{0}{1}', currentPrice?.setup_fee_minor ? t('（含开通费）') : '', discount ? t('（已扣优惠）') : '')}</span>
                     <strong>
                       {money(
                         (currentPrice?.amount_minor || 0) + (currentPrice?.setup_fee_minor || 0) - discount,
@@ -298,22 +299,22 @@ export function CustomerShop({ customer }: { customer: CustomerIdentity }) {
                     </strong>
                   </div>
                   <button className="primary-button" disabled={saving || !regions.length || stockLeft(selected) === 0}>
-                    {saving ? '正在生成订单…' : stockLeft(selected) === 0 ? '已售罄' : '立即下单'}
+                    {saving ? t('正在生成订单…') : stockLeft(selected) === 0 ? t('已售罄') : t('立即下单')}
                   </button>
                 </form>
 
                 {created && (
                   <div className="checkout-success shop-order-result">
                     <div>
-                      <strong>订单 {created.number} 已生成</strong>
-                      <span>应付总额 {money(created.total_minor, created.currency)}{created.discount_minor ? `（已优惠 ${money(created.discount_minor, created.currency)}）` : ''}，关联账单 {created.invoice_number}</span>
+                      <strong>{t('订单 {0} 已生成', created.number)}</strong>
+                      <span>{t('应付总额 {0}{1}，关联账单 {2}', money(created.total_minor, created.currency), created.discount_minor ? t('（已优惠 {0}）', money(created.discount_minor, created.currency)) : '', created.invoice_number)}</span>
                     </div>
                     {catalog?.checkout_enabled ? (
                       <button className="primary-button compact" disabled={paying} onClick={checkout}>
-                        {paying ? '正在前往收银台…' : '前往在线支付'}
+                        {paying ? t('正在前往收银台…') : t('前往在线支付')}
                       </button>
                     ) : (
-                      <span>当前未配置在线支付渠道，请联系商家后台完成入账。</span>
+                      <span>{t('当前未配置在线支付渠道，请联系商家后台完成入账。')}</span>
                     )}
                   </div>
                 )}

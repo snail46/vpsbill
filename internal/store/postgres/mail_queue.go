@@ -88,6 +88,17 @@ func (s *MailStore) FailMail(ctx context.Context, id string, attempts, maxAttemp
 
 // StaffEmails lists active staff login addresses, the fallback recipients
 // for merchant notices.
+// UserLocale is the language the user with this address reads the site
+// in, or "" when unknown.
+func (s *MailStore) UserLocale(ctx context.Context, email string) (string, error) {
+	var locale string
+	err := s.db.QueryRow(ctx, "SELECT locale FROM users WHERE lower(email)=lower($1)", email).Scan(&locale)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	return locale, err
+}
+
 func (s *MailStore) StaffEmails(ctx context.Context) ([]string, error) {
 	rows, err := s.db.Query(ctx, `SELECT u.email FROM staff_members sm JOIN users u ON u.id=sm.user_id WHERE u.status='active' ORDER BY u.created_at`)
 	if err != nil {

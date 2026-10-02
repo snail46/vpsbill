@@ -6,6 +6,7 @@ import { AttachmentGallery, AttachmentPicker } from '../TicketAttachments'
 import { formatTime, startOfDay } from './time'
 import { useSiteBrand, useSiteLogo } from './boot'
 import { toast } from './toast'
+import { t, tr } from './i18n'
 
 export type Meta = {
   name: string
@@ -129,7 +130,7 @@ export function SessionLoading({ portal }: { portal: 'admin' | 'customer' }) {
     <main className="session-loading delayed">
       <BrandMark />
       <div className="spinner" />
-      <strong>正在恢复{portal === 'admin' ? '商家控制中心' : '客户中心'}会话…</strong>
+      <strong>{t('正在恢复{0}会话…', portal === 'admin' ? t('商家控制中心') : t('客户中心'))}</strong>
     </main>
   )
 }
@@ -198,11 +199,12 @@ export function PageActions({
 
 export function JobError({ value }: { value?: string }) {
   if (!value) return <span className="job-error-empty">—</span>
+  value = tr(value)
   if (value.length <= 100) return <span className="job-error-text">{value}</span>
   return (
     <details className="job-error-details">
       <summary>
-        {value.slice(0, 100)}…<b>展开诊断详情</b>
+        {value.slice(0, 100)}…<b>{t('展开诊断详情')}</b>
       </summary>
       <pre>{value}</pre>
     </details>
@@ -212,39 +214,39 @@ export function JobError({ value }: { value?: string }) {
 // statusLabels name the statuses of services, jobs, invoices, orders and
 // payments.
 export const statusLabels: Record<string, string> = {
-  online: '在线',
-  active: '正常',
-  disabled: '已下架',
-  offline: '离线',
-  pending_payment: '待支付',
-  open: '待支付',
-  paid: '已支付',
-  fulfilling: '开通中',
-  provisioning: '开通中',
-  completed: '已完成',
-  succeeded: '成功',
-  failed: '等待重试',
-  pending: '排队中',
-  running: '运行中',
-  creating: '创建中',
-  stopped: '已关机',
-  overdue: '已逾期',
-  suspended: '已暂停',
-  terminating: '待删除',
-  terminated: '已删除',
-  review: '需人工审核',
-  uncollectible: '无法收回',
-  missing: '实例缺失',
-  unknown: '未知',
-  error: '异常',
-  dead: '需人工处理',
-  cancelled: '已取消',
-  void: '已作废',
-  refunded: '已退款',
-  draft: '草稿',
-  fraud: '风险拦截',
-  closed: '已关闭',
-  locked: '已锁定',
+  online: t('在线'),
+  active: t('正常'),
+  disabled: t('已下架'),
+  offline: t('离线'),
+  pending_payment: t('待支付'),
+  open: t('待支付'),
+  paid: t('已支付'),
+  fulfilling: t('开通中'),
+  provisioning: t('开通中'),
+  completed: t('已完成'),
+  succeeded: t('成功'),
+  failed: t('等待重试'),
+  pending: t('排队中'),
+  running: t('运行中'),
+  creating: t('创建中'),
+  stopped: t('已关机'),
+  overdue: t('已逾期'),
+  suspended: t('已暂停'),
+  terminating: t('待删除'),
+  terminated: t('已删除'),
+  review: t('需人工审核'),
+  uncollectible: t('无法收回'),
+  missing: t('实例缺失'),
+  unknown: t('未知'),
+  error: t('异常'),
+  dead: t('需人工处理'),
+  cancelled: t('已取消'),
+  void: t('已作废'),
+  refunded: t('已退款'),
+  draft: t('草稿'),
+  fraud: t('风险拦截'),
+  closed: t('已关闭'),
+  locked: t('已锁定'),
 }
 
 export function statusLabel(status: string) {
@@ -260,11 +262,11 @@ export { cycleUnit as cycleLabel } from './cycles'
 export function ticketStatusLabel(status: string) {
   return (
     ({
-      open: '待处理',
-      customer_reply: '客户已回复',
-      staff_reply: '已回复',
-      resolved: '已解决',
-      closed: '已关闭',
+      open: t('待处理'),
+      customer_reply: t('客户已回复'),
+      staff_reply: t('已回复'),
+      resolved: t('已解决'),
+      closed: t('已关闭'),
     } as Record<string, string>)[status] || status
   )
 }
@@ -272,10 +274,10 @@ export function ticketStatusLabel(status: string) {
 export function ticketAuthorLabel(type: string) {
   return (
     ({
-      customer: '客户',
-      staff: '工作人员',
-      host: '母机机主',
-      system: '系统通知',
+      customer: t('客户'),
+      staff: t('工作人员'),
+      host: t('母机机主'),
+      system: t('系统通知'),
     } as Record<string, string>)[type] || type
   )
 }
@@ -283,7 +285,7 @@ export function ticketAuthorLabel(type: string) {
 // bandwidthLabel names an instance's bandwidth by its download speed, the
 // figure customers compare; 0 means unlimited.
 export function bandwidthLabel(downMbps?: number) {
-  return downMbps ? `${downMbps} Mbps` : '不限带宽'
+  return downMbps ? `${downMbps} Mbps` : t('不限带宽')
 }
 
 // money shows an amount in the visitor's display currency (see currency.ts).
@@ -302,13 +304,13 @@ export function formatBytes(value: number) {
 
 // NodeExpiry shows a host's rental expiry, highlighted in its final week.
 export function NodeExpiry({ date }: { date?: string }) {
-  if (!date) return <span className="muted-text">未设置到期</span>
+  if (!date) return <span className="muted-text">{t('未设置到期')}</span>
   const days = Math.ceil((startOfDay(date).getTime() - Date.now()) / 86_400_000)
   const tone = days < 0 ? 'expiry-past' : days <= 7 ? 'expiry-soon' : ''
   return (
     <span className={tone}>
       {date}
-      {days < 0 ? ' · 已到期' : days <= 7 ? ` · ${days} 天后` : ''}
+      {days < 0 ? t(' · 已到期') : days <= 7 ? t(' · {0} 天后', days) : ''}
     </span>
   )
 }
@@ -336,7 +338,7 @@ export function CapacityBar({
       <div className="capacity-track">
         <i style={{ width: `${rate}%` }} />
       </div>
-      <small>{rate}% 已分配预留</small>
+      <small>{t('{0}% 已分配预留', rate)}</small>
     </div>
   )
 }
@@ -390,9 +392,9 @@ export function TicketConversation({
           <h3>{detail.ticket.subject}</h3>
           <small>
             {[
-              detail.ticket.customer_name && `客户：${detail.ticket.customer_name}`,
-              detail.ticket.instance_name && `关联实例：${detail.ticket.instance_name}`,
-            ].filter(Boolean).join(' · ') || `创建于 ${formatTime(detail.ticket.created_at)}`}
+              detail.ticket.customer_name && t('客户：{0}', detail.ticket.customer_name),
+              detail.ticket.instance_name && t('关联实例：{0}', detail.ticket.instance_name),
+            ].filter(Boolean).join(' · ') || t('创建于 {0}', formatTime(detail.ticket.created_at))}
           </small>
         </div>
         <span className={`ticket-state ${detail.ticket.status}`}>{ticketStatusLabel(detail.ticket.status)}</span>
@@ -403,10 +405,10 @@ export function TicketConversation({
           <article key={message.id} className={`message ${message.author_type}${message.internal ? ' internal' : ''}`}>
             <header>
               <strong>{message.author_name || ticketAuthorLabel(message.author_type)}</strong>
-              {message.author_type === 'host' && <span className="chat-role host">机主</span>}
-              {message.author_type === 'staff' && detail.ticket.host_account_id && <span className="chat-role staff">平台</span>}
+              {message.author_type === 'host' && <span className="chat-role host">{t('机主')}</span>}
+              {message.author_type === 'staff' && detail.ticket.host_account_id && <span className="chat-role staff">{t('平台')}</span>}
               <span>
-                {message.internal ? '内部备忘 · ' : ''}
+                {message.internal ? t('内部备忘 · ') : ''}
                 {formatTime(message.created_at)}
               </span>
             </header>
@@ -424,19 +426,19 @@ export function TicketConversation({
             maxLength={10000}
             value={body}
             onChange={event => setBody(event.target.value)}
-            placeholder={admin ? '回复客户，或勾选内部备忘记录后台信息…' : '请在此输入需要补充的信息…'}
+            placeholder={admin ? t('回复客户，或勾选内部备忘记录后台信息…') : t('请在此输入需要补充的信息…')}
             required={!files.length}
           />
           <AttachmentPicker files={files} onChange={setFiles} maxMB={maxMB} onError={onError} />
           <div className="reply-form-actions">
             {admin && (
               <label className="checkbox">
-                <input type="checkbox" checked={internal} onChange={event => setInternal(event.target.checked)} /> 仅客服内部可见
+                <input type="checkbox" checked={internal} onChange={event => setInternal(event.target.checked)} /> {t('仅客服内部可见')}
               </label>
             )}
             <button className="primary-button compact" disabled={sending}>
               <Send size={14} />
-              {sending ? '正在发送…' : '发送回复'}
+              {sending ? t('正在发送…') : t('发送回复')}
             </button>
           </div>
         </form>
@@ -445,13 +447,13 @@ export function TicketConversation({
       {admin && (
         <div className="ticket-actions">
           <button className="secondary-button" onClick={() => onStatus?.('open')}>
-            重新标记待处理
+            {t('重新标记待处理')}
           </button>
           <button className="secondary-button" onClick={() => onStatus?.('resolved')}>
-            标记已解决
+            {t('标记已解决')}
           </button>
           <button className="secondary-button" onClick={() => onStatus?.('closed')}>
-            关闭工单
+            {t('关闭工单')}
           </button>
         </div>
       )}
@@ -471,7 +473,7 @@ export function SecuritySettings({ enabled: initialEnabled, customer = false }: 
       setSetup(await api<{ secret: string; otpauth_uri: string }>(`${base}/setup`, { method: 'POST' }))
       setError('')
     } catch (err) {
-      setError(err instanceof Error ? err.message : '设置失败')
+      setError(err instanceof Error ? err.message : t('设置失败'))
     }
   }
 
@@ -482,10 +484,10 @@ export function SecuritySettings({ enabled: initialEnabled, customer = false }: 
       setSetup(null)
       setCode('')
       setError('')
-      toast('success', '二步验证已启用')
+      toast('success', t('二步验证已启用'))
     } catch (err) {
-      toast('error', '启用二步验证失败', err instanceof Error ? err.message : undefined)
-      setError(err instanceof Error ? err.message : '验证码无效')
+      toast('error', t('启用二步验证失败'), err instanceof Error ? err.message : undefined)
+      setError(err instanceof Error ? err.message : t('验证码无效'))
     }
   }
 
@@ -495,10 +497,10 @@ export function SecuritySettings({ enabled: initialEnabled, customer = false }: 
       setEnabled(false)
       setCode('')
       setError('')
-      toast('success', '二步验证已关闭')
+      toast('success', t('二步验证已关闭'))
     } catch (err) {
-      toast('error', '关闭二步验证失败', err instanceof Error ? err.message : undefined)
-      setError(err instanceof Error ? err.message : '验证码无效')
+      toast('error', t('关闭二步验证失败'), err instanceof Error ? err.message : undefined)
+      setError(err instanceof Error ? err.message : t('验证码无效'))
     }
   }
 
@@ -509,10 +511,10 @@ export function SecuritySettings({ enabled: initialEnabled, customer = false }: 
       <div className="panel-heading">
         <div>
           <p className="eyebrow">TWO-FACTOR AUTHENTICATION</p>
-          <h3>二步验证（TOTP）</h3>
+          <h3>{t('二步验证（TOTP）')}</h3>
         </div>
         <span className={`status-badge ${enabled ? 'online' : 'disabled'}`}>
-          {enabled ? '已启用防护' : '未启用'}
+          {enabled ? t('已启用防护') : t('未启用')}
         </span>
       </div>
 
@@ -521,23 +523,23 @@ export function SecuritySettings({ enabled: initialEnabled, customer = false }: 
       {!enabled && !setup && (
         <>
           <p>
-            启用二步验证后，在每次登录时除输入密码外，还需输入验证器应用生成的 6 位动态验证码，有效保护您的云资产与账单安全。
+            {t('启用二步验证后，在每次登录时除输入密码外，还需输入验证器应用生成的 6 位动态验证码，有效保护您的云资产与账单安全。')}
           </p>
           <button className="primary-button compact" onClick={() => void start()}>
-            <ShieldCheck size={16} />开始配置二步验证
+            <ShieldCheck size={16} />{t('开始配置二步验证')}
           </button>
         </>
       )}
 
       {setup && (
         <>
-          <p>请在 Authenticator 验证器中手动添加以下密钥，或直接点击配置链接：</p>
+          <p>{t('请在 Authenticator 验证器中手动添加以下密钥，或直接点击配置链接：')}</p>
           <code className="mfa-secret">{setup.secret}</code>
           <a className="secondary-button mfa-link" href={setup.otpauth_uri}>
-            在系统默认验证器中打开
+            {t('在系统默认验证器中打开')}
           </a>
           <label className="field" style={{ maxWidth: '320px', marginTop: '16px' }}>
-            <span>输入 6 位动态验证码确认绑定</span>
+            <span>{t('输入 6 位动态验证码确认绑定')}</span>
             <input
               value={code}
               inputMode="numeric"
@@ -547,16 +549,16 @@ export function SecuritySettings({ enabled: initialEnabled, customer = false }: 
             />
           </label>
           <button className="primary-button compact" disabled={code.length !== 6} onClick={() => void confirm()}>
-            确认并启用
+            {t('确认并启用')}
           </button>
         </>
       )}
 
       {enabled && (
         <>
-          <p>二步验证已在当前账号生效。如需停用，请先输入验证器中显示的 6 位验证码以确认身份。</p>
+          <p>{t('二步验证已在当前账号生效。如需停用，请先输入验证器中显示的 6 位验证码以确认身份。')}</p>
           <label className="field" style={{ maxWidth: '320px' }}>
-            <span>当前 6 位验证码</span>
+            <span>{t('当前 6 位验证码')}</span>
             <input
               value={code}
               inputMode="numeric"
@@ -566,7 +568,7 @@ export function SecuritySettings({ enabled: initialEnabled, customer = false }: 
             />
           </label>
           <button className="secondary-button" disabled={code.length !== 6} onClick={() => void disable()}>
-            关闭二步验证
+            {t('关闭二步验证')}
           </button>
         </>
       )}
@@ -587,7 +589,7 @@ export function PasswordSettings({ customer }: { customer: boolean }) {
     event.preventDefault()
     setMessage('')
     if (next !== repeat) {
-      setError('两次输入的新密码不一致')
+      setError(t('两次输入的新密码不一致'))
       return
     }
     setSaving(true)
@@ -600,9 +602,9 @@ export function PasswordSettings({ customer }: { customer: boolean }) {
       setCurrent('')
       setNext('')
       setRepeat('')
-      setMessage('密码已更新，其他设备上的登录已全部退出。')
+      setMessage(t('密码已更新，其他设备上的登录已全部退出。'))
     } catch (err) {
-      setError(err instanceof Error ? err.message : '修改失败')
+      setError(err instanceof Error ? err.message : t('修改失败'))
     } finally {
       setSaving(false)
     }
@@ -613,18 +615,18 @@ export function PasswordSettings({ customer }: { customer: boolean }) {
       <div className="panel-heading">
         <div>
           <p className="eyebrow">PASSWORD</p>
-          <h3>修改登录密码</h3>
+          <h3>{t('修改登录密码')}</h3>
         </div>
       </div>
       {error && <div className="form-error">{error}</div>}
       {message && <div className="form-success">{message}</div>}
       <div className="password-fields">
-        <Field label="当前密码" value={current} onChange={setCurrent} type="password" autoComplete="current-password" />
-        <Field label="新密码" value={next} onChange={setNext} type="password" autoComplete="new-password" hint="至少 12 个字符" />
-        <Field label="确认新密码" value={repeat} onChange={setRepeat} type="password" autoComplete="new-password" />
+        <Field label={t('当前密码')} value={current} onChange={setCurrent} type="password" autoComplete="current-password" />
+        <Field label={t('新密码')} value={next} onChange={setNext} type="password" autoComplete="new-password" hint={t('至少 12 个字符')} />
+        <Field label={t('确认新密码')} value={repeat} onChange={setRepeat} type="password" autoComplete="new-password" />
       </div>
       <button className="primary-button compact" disabled={saving || !current || !next || !repeat}>
-        {saving ? '正在保存…' : '更新密码'}
+        {saving ? t('正在保存…') : t('更新密码')}
       </button>
     </form>
   )
