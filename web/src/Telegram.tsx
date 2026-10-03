@@ -26,6 +26,10 @@ export type TelegramRecord = {
     invite_daily_cap: number
     rebate_percent?: number
     rebate_max_minor?: number
+    streak_bonuses?: { days: number; amount_minor: number }[]
+    leaderboards?: boolean
+    leaderboard_prizes?: number[]
+    tickets?: boolean
   }
   // rewards says when rewards are paid: open now, not started yet, or over.
   rewards?: { state: 'open' | 'upcoming' | 'ended'; from: string | null; until: string | null }
@@ -330,8 +334,22 @@ export function TelegramPanel() {
             {t('{0}。', !!rules.rebate_max_minor && t('（单笔最多 {0}）', money(rules.rebate_max_minor)))}
           </li>
         )}
+        {!!rules.streak_bonuses?.some(item => item.amount_minor > 0) && (
+          <li>
+            <Gift size={14} />{t('连续签到额外奖励：')}
+            {rules.streak_bonuses.filter(item => item.amount_minor > 0).map(item => t('满 {0} 天 {1}', item.days, money(item.amount_minor))).join(t('、'))}
+            {t('。')}
+          </li>
+        )}
+        {rules.leaderboards && !!rules.leaderboard_prizes?.some(prize => prize > 0) && (
+          <li>
+            <Gift size={14} />{t('每周一在群里公布上周签到榜和邀请榜，前 {0} 名分别奖励 {1}；群里发 /rank 查看本周排名。', rules.leaderboard_prizes.filter(prize => prize > 0).length, rules.leaderboard_prizes.filter(prize => prize > 0).map(prize => money(prize)).join(' / '))}
+          </li>
+        )}
+        <li><Gift size={14} />{t('管理员不定期在群里发红包，绑定后即可领取。')}</li>
         <li className="muted-text">{t('奖励存入账户余额，可用于购买和续费，不能提现。')}</li>
         <li className="muted-text">{t('绑定后私聊机器人：/services 查看 VPS，/balance 查看余额，/invoices 用余额支付待付账单；到期提醒里可以直接点按钮续费。')}</li>
+        {rules.tickets && <li className="muted-text">{t('也可以私聊机器人发送 /ticket 提交工单；收到工单回复后，直接回复那条消息即可继续沟通。')}</li>}
       </ul>
 
       {!data.linked && (

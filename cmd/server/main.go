@@ -119,6 +119,9 @@ func main() {
 	go mailNotifier.RunStock(workCtx)
 	go fx.Run(workCtx, runtime, logger)
 	telegramBot := telegram.New(postgres.NewTelegramStore(db), runtime, logger)
+	// Tickets opened or answered on Telegram are told about like the
+	// site's.
+	telegramBot.SetTicketEvents(mailNotifier)
 	go telegramBot.Run(workCtx)
 	marketStore := postgres.NewMarketplaceStore(db)
 	// Escrow release and clearance are idempotent, so every replica may run it.

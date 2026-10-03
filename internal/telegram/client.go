@@ -108,15 +108,50 @@ type Message struct {
 	Text           string `json:"text"`
 	NewChatMembers []User `json:"new_chat_members"`
 	LeftChatMember *User  `json:"left_chat_member"`
+	// ReplyTo is the message this one answers.
+	ReplyTo *Message `json:"reply_to_message"`
+	// A photo or a file, with Caption as its text.
+	Caption         string      `json:"caption"`
+	Photo           []PhotoSize `json:"photo"`
+	Document        *Document   `json:"document"`
+	Entities        []Entity    `json:"entities"`
+	CaptionEntities []Entity    `json:"caption_entities"`
+}
+
+// Content is what the message says: its text, or a photo's caption.
+func (m *Message) Content() string {
+	if m.Text != "" {
+		return m.Text
+	}
+	return m.Caption
+}
+
+// PhotoSize is one size of a photo; Telegram lists them small to large.
+type PhotoSize struct {
+	FileID   string `json:"file_id"`
+	FileSize int64  `json:"file_size"`
+}
+
+type Document struct {
+	FileID   string `json:"file_id"`
+	FileName string `json:"file_name"`
+	MimeType string `json:"mime_type"`
+	FileSize int64  `json:"file_size"`
+}
+
+// Entity marks a part of a message, such as a link.
+type Entity struct {
+	Type string `json:"type"`
 }
 
 type ChatMember struct {
 	Status string `json:"status"`
 	User   User   `json:"user"`
 	// IsMember is set for restricted members who are still in the chat.
-	IsMember         bool `json:"is_member"`
-	CanInviteUsers   bool `json:"can_invite_users"`
-	CanDeleteMessage bool `json:"can_delete_messages"`
+	IsMember           bool `json:"is_member"`
+	CanInviteUsers     bool `json:"can_invite_users"`
+	CanDeleteMessage   bool `json:"can_delete_messages"`
+	CanRestrictMembers bool `json:"can_restrict_members"`
 }
 
 // Present reports whether the member is in the chat.
@@ -197,6 +232,71 @@ func (c *Client) CreateInviteLink(ctx context.Context, chatID int64, name string
 	err := c.call(ctx, "createChatInviteLink", map[string]any{"chat_id": chatID, "name": name}, &link)
 	return link.InviteLink, err
 }
+
+// RestrictMember lets a member write (allow) or holds them silent.
+func (c *Client) RestrictMember(ctx context.Context, chatID, userID int64, allow bool) error {
+	permissions := map[string]bool{}
+	for _, name := range []string{"can_send_messages", "can_send_audios", "can_send_documents", "can_send_photos", "can_send_videos",
+		"can_send_video_notes", "can_send_voice_notes", "can_send_polls", "can_send_other_messages", "can_add_web_page_previews", "can_invite_users"} {
+		permissions[name] = allow
+	}
+	return c.call(ctx, "restrictChatMember", map[string]any{"chat_id": chatID, "user_id": userID, "permissions": permissions, "use_independent_chat_permissions": true}, nil)
+}
+
+// KickMember removes a member, who may join again later.
+func (c *Client) KickMember(ctx context.Context, chatID, userID int64) error {
+	if err := c.call(ctx, "banChatMember", map[string]any{"chat_id": chatID, "user_id": userID, "until_date": time.Now().Add(time.Minute).Unix()}, nil); err != nil {
+		return err
+	}
+	return c.call(ctx, "unbanChatMember", map[string]any{"chat_id": chatID, "user_id": userID, "only_if_banned": true}, nil)
+}
+
+// ChatAdministrators lists a chat's administrators.
+func (c *Client) ChatAdministrators(ctx context.Context, chatID int64) ([]ChatMember, error) {
+	var members []ChatMember
+	return members, c.call(ctx, "getChatAdministrators", map[string]any{"chat_id": chatID}, &members)
+}
+
+// maxDownload is the most a bot may download from Telegram.
+const maxDownload = 20 << 20
+
+// Download fetches a file someone sent the bot, up to limit bytes.
+func (c *Client) Download(ctx context.Context, fileID string, limit int64) ([]byte, error) {
+	var file struct {
+		FilePath string `json:"file_path"`
+		FileSize int64  `json:"file_size"`
+	}
+	if err := c.call(ctx, "getFile", map[string]any{"file_id": fileID}, &file); err != nil {
+		return nil, err
+	}
+	limit = min(limit, maxDownload)
+	if file.FileSize > limit {
+		return nil, ErrFileTooLarge
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+"/file/bot"+c.token+"/"+file.FilePath, nil)
+	if err != nil {
+		return nil, err
+	}
+	response, err := c.http.Do(request)
+	if err != nil {
+		return nil, errors.New("telegram: download failed: " + strings.ReplaceAll(err.Error(), c.token, "***"))
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("telegram: download answered %d", response.StatusCode)
+	}
+	data, err := io.ReadAll(io.LimitReader(response.Body, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > limit {
+		return nil, ErrFileTooLarge
+	}
+	return data, nil
+}
+
+// ErrFileTooLarge is a file above the size limit.
+var ErrFileTooLarge = errors.New("telegram: file too large")
 
 // Button is one button under a message: it opens URL, or sends Data back
 // to the bot as a callback.

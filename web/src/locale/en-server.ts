@@ -3,6 +3,24 @@
 // serverWords are whole messages; serverRules are messages with changing
 // parts, where $1 puts a captured group as it is and %1 translates it.
 export const serverWords: Record<string, string> = {
+  '机器人没有「封禁用户」权限：入群验证和移出未验证的成员无法使用。': 'The bot lacks the “Ban users” right, so new members cannot be checked or removed.',
+  '连续签到奖励最多设置 5 档': 'At most 5 streak bonuses',
+  '排行榜奖金最多设置前 10 名': 'Prizes for the top 10 at most',
+  '红包要求的绑定天数必须在 0–365 之间': 'The days linked for red packets must be between 0 and 365',
+  '入群验证方式无效': 'Invalid check for new members',
+  '入群验证时限必须在 1–1440 分钟之间': 'The time to pass must be between 1 and 1440 minutes',
+  '屏蔽词最多 200 个': 'At most 200 blocked words',
+  '未绑定成员每分钟发言上限必须在 0–60 之间': 'Messages per minute must be between 0 and 60',
+  '连续签到天数必须在 2–365 之间': 'Streak days must be between 2 and 365',
+  '连续签到天数不能重复': 'Streak days must differ',
+  'Telegram 机器人还没有启用': 'The Telegram bot is not enabled yet',
+  '你已经绑定了 Telegram': 'You have linked Telegram already',
+  '你没有绑定 Telegram': 'You have not linked Telegram',
+  '红包有效期必须在 1–168 小时之间': 'A red packet lasts between 1 and 168 hours',
+  '红包金额或个数无效：每个至少 0.01，最多 100 个，总额不超过 10000，口令为 2–32 个字': 'Invalid red packet: at least 0.01 a share, 100 shares at most, 10000 in all at most, a password of 2–32 characters',
+  '已有一个进行中的红包用了这个口令': 'An active red packet already uses this password',
+  '这个红包已经结束': 'This red packet is over',
+  'Telegram 红包': 'Telegram red packet',
   '套餐不存在或已下架': 'The plan does not exist or is no longer sold',
   '活动结束时间必须晚于开始时间': 'The period must end after it starts',
   '首单返利比例必须在 0–50 之间': 'The rebate must be between 0 and 50 percent',
@@ -437,6 +455,13 @@ export const serverWords: Record<string, string> = {
 }
 
 export const serverRules: [RegExp, string][] = [
+  [new RegExp('^Telegram 连续签到 (\\d+) 天奖励$'), 'Telegram bonus for $1 check-ins in a row'],
+  [new RegExp('^Telegram (\\S+) 签到榜 第 (\\d+) 名奖励$'), 'Telegram check-in board of $1: prize for place $2'],
+  [new RegExp('^Telegram (\\S+) 邀请榜 第 (\\d+) 名奖励$'), 'Telegram invite board of $1: prize for place $2'],
+  [new RegExp('^屏蔽词「(.+?)」太长（最多 40 个字）$'), 'The blocked word “$1” is too long (40 characters at most)'],
+  [new RegExp('^连续签到奖励必须在 0–(\\d+) 之间$'), 'Streak bonuses must be between 0 and $1'],
+  [new RegExp('^排行榜奖金必须在 0–(\\d+) 之间$'), 'Prizes must be between 0 and $1'],
+  [new RegExp('^红包没有发到群里：([\\s\\S]*)$'), 'The red packet was not posted in the group: %1'],
   [new RegExp('^节点名称、地区、API 地址、(.+) 和虚拟化类型不能为空$'), 'The node name, region, API address, %1 and virtualization types are required'],
   [new RegExp('^(.+) 支持的虚拟化类型为 (.+)$'), '$1 supports these virtualization types: $2'],
   [new RegExp('^无法验证 (.+?) 节点连接：([\\s\\S]*)$'), 'The connection to the $1 node could not be verified: %2'],

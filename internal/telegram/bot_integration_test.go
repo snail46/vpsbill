@@ -26,7 +26,40 @@ type fakeAPI struct {
 	answers []string
 	links   int
 	noLinks bool
+	// What the group's moderation did.
+	restricted map[int64]bool
+	kicked     []int64
+	deleted    []int64
+	admins     []ChatMember
 }
+
+func (f *fakeAPI) RestrictMember(_ context.Context, _, userID int64, allow bool) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.restricted == nil {
+		f.restricted = map[int64]bool{}
+	}
+	f.restricted[userID] = allow
+	return nil
+}
+
+func (f *fakeAPI) KickMember(_ context.Context, _, userID int64) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.kicked = append(f.kicked, userID)
+	return nil
+}
+
+func (f *fakeAPI) ChatAdministrators(context.Context, int64) ([]ChatMember, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.admins, nil
+}
+
+// pngImage is the start of a PNG file, which is enough to be sniffed as one.
+var pngImage = []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00")
+
+func (f *fakeAPI) Download(context.Context, string, int64) ([]byte, error) { return pngImage, nil }
 
 type sentMessage struct {
 	chat    int64
@@ -95,12 +128,17 @@ func (f *fakeAPI) SendMessage(_ context.Context, chatID int64, html string, _ in
 	f.sent = append(f.sent, sentMessage{chatID, html, nil})
 	return Message{MessageID: int64(len(f.sent))}, nil
 }
-func (f *fakeAPI) DeleteMessage(context.Context, int64, int64) error { return nil }
+func (f *fakeAPI) DeleteMessage(_ context.Context, _, messageID int64) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.deleted = append(f.deleted, messageID)
+	return nil
+}
 func (f *fakeAPI) GetChat(context.Context, any) (Chat, error) {
 	return Chat{ID: groupID, Type: "supergroup", Title: "Site Group", Username: "sitegroup"}, nil
 }
 func (f *fakeAPI) GetChatMember(context.Context, int64, int64) (ChatMember, error) {
-	return ChatMember{Status: "administrator", CanInviteUsers: true, CanDeleteMessage: true}, nil
+	return ChatMember{Status: "administrator", CanInviteUsers: true, CanDeleteMessage: true, CanRestrictMembers: true}, nil
 }
 func (f *fakeAPI) CreateInviteLink(_ context.Context, _ int64, name string) (string, error) {
 	f.mu.Lock()

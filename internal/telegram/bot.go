@@ -41,6 +41,10 @@ type API interface {
 	SendButtons(ctx context.Context, chatID int64, html string, buttons [][]Button) (Message, error)
 	EditMessage(ctx context.Context, chatID, messageID int64, html string, buttons [][]Button) error
 	AnswerCallback(ctx context.Context, id, text string) error
+	RestrictMember(ctx context.Context, chatID, userID int64, allow bool) error
+	KickMember(ctx context.Context, chatID, userID int64) error
+	ChatAdministrators(ctx context.Context, chatID int64) ([]ChatMember, error)
+	Download(ctx context.Context, fileID string, limit int64) ([]byte, error)
 }
 
 // SeenChat is a group the bot was added to, offered in the settings.
@@ -77,6 +81,17 @@ type Bot struct {
 	members map[int64]struct{}
 	// inviteMu makes each account's invite link once.
 	inviteMu sync.Mutex
+
+	// ops opens and answers tickets; events tells the other side.
+	ops    *postgres.OperationsStore
+	events TicketEvents
+	// passwords maps the active red packets' passwords to the packets.
+	passwords map[string]string
+	// admins are the group's administrators as of adminsAt.
+	admins   map[int64]struct{}
+	adminsAt time.Time
+	// rates are the recent message times of members without a link.
+	rates map[int64][]time.Time
 }
 
 func New(store *postgres.TelegramStore, runtime *settings.Manager, logger *slog.Logger) *Bot {
@@ -91,6 +106,7 @@ func New(store *postgres.TelegramStore, runtime *settings.Manager, logger *slog.
 			return min + rand.Int64N(max-min+1)
 		},
 		chats: map[int64]SeenChat{}, members: map[int64]struct{}{},
+		ops: postgres.NewOperationsStore(store.Pool()), passwords: map[string]string{}, admins: map[int64]struct{}{}, rates: map[int64][]time.Time{},
 	}
 }
 
@@ -205,9 +221,13 @@ func (b *Bot) budget(cfg settings.TelegramSettings) postgres.TelegramBudget {
 // settle pays the invitations that now meet the rules and tells the
 // inviters.
 func (b *Bot) settle(ctx context.Context, client API, cfg settings.TelegramSettings) {
+	b.expireRedPackets(ctx, client)
+	b.removeUnverified(ctx, client)
+	b.loadPasswords(ctx)
 	if cfg.RewardsState(b.now()) != settings.RewardsOpen {
 		return
 	}
+	b.postLeaderboards(ctx, client, cfg)
 	b.settleRebates(ctx, client, cfg)
 	settled, err := b.store.SettleInvites(ctx, postgres.TelegramInviteRules{
 		RewardMinor: cfg.InviteRewardMinor, Hold: cfg.InviteHold(), RequireLink: cfg.InviteRequireLink, DailyCap: cfg.InviteDailyCap,
@@ -281,10 +301,19 @@ func (b *Bot) handle(ctx context.Context, client API, cfg settings.TelegramSetti
 	case update.Message != nil:
 		b.message(ctx, client, cfg, update.Message)
 	case update.Callback != nil:
-		if cfg.Ready() {
-			b.callback(ctx, client, update.Callback)
+		query := update.Callback
+		if !cfg.Ready() {
+			_ = client.AnswerCallback(ctx, query.ID, "")
+			return
+		}
+		if id, ok := strings.CutPrefix(query.Data, callbackClaim); ok {
+			b.claimTicket(ctx, client, cfg, query, id)
+		} else if id, ok := strings.CutPrefix(query.Data, callbackRedPacket); ok {
+			b.redPacketCallback(ctx, client, cfg, query, id)
+		} else if who, ok := strings.CutPrefix(query.Data, callbackVerify); ok {
+			b.verifyCallback(ctx, client, cfg, query, who)
 		} else {
-			_ = client.AnswerCallback(ctx, update.Callback.ID, "")
+			b.callback(ctx, client, query)
 		}
 	}
 }
@@ -323,6 +352,10 @@ func (b *Bot) membership(ctx context.Context, client API, cfg settings.TelegramS
 			return
 		}
 		b.remember(user.ID)
+		if b.holdNewMember(ctx, client, cfg, user) {
+			// The check's message greets them.
+			return
+		}
 		if cfg.Welcome {
 			site := b.settings.Current().PublicURL
 			b.groupReply(ctx, client, cfg, 0, say(b.langOf(ctx, user), msgWelcome, mention(user), site+"/portal/profile", siteHost(site)))
@@ -332,6 +365,9 @@ func (b *Bot) membership(ctx context.Context, client API, cfg settings.TelegramS
 			b.logger.Error("record telegram member leaving", "error", err)
 		}
 		b.forget(user.ID)
+		if held, ok, _ := b.store.TakeVerification(ctx, user.ID); ok && held.MessageID != 0 {
+			_ = client.DeleteMessage(ctx, held.ChatID, held.MessageID)
+		}
 	}
 }
 
@@ -405,7 +441,15 @@ func (b *Bot) message(ctx context.Context, client API, cfg settings.TelegramSett
 	user := *message.From
 	private := message.Chat.Type == "private"
 	inGroup := cfg.ChatID != 0 && message.Chat.ID == cfg.ChatID
-	if !private && !inGroup {
+	staffChat := cfg.AdminChatID != 0 && message.Chat.ID == cfg.AdminChatID && !inGroup
+	if !private && !inGroup && !staffChat {
+		return
+	}
+	if staffChat {
+		// Staff answer tickets there; nothing else.
+		if cfg.Ready() {
+			b.ticketReply(ctx, client, cfg, message, b.langOf(ctx, user))
+		}
 		return
 	}
 	if inGroup && cfg.Ready() {
@@ -423,11 +467,23 @@ func (b *Bot) message(ctx context.Context, client API, cfg settings.TelegramSett
 			}
 		}
 	}
-	name, argument := command(message.Text, cfg.BotUsername)
-	if name == "" {
+	if inGroup && cfg.Ready() && b.moderate(ctx, client, cfg, message) {
 		return
 	}
+	name, argument := command(message.Content(), cfg.BotUsername)
 	lang := b.langOf(ctx, user)
+	if name == "" {
+		if !cfg.Ready() {
+			return
+		}
+		switch {
+		case b.redPacketPassword(ctx, client, cfg, message):
+		case private && b.ticketReply(ctx, client, cfg, message, lang):
+		case private && cfg.Tickets && strings.TrimSpace(message.Content()) != "":
+			_, _ = client.SendMessage(ctx, message.Chat.ID, say(lang, msgTicketHow), 0)
+		}
+		return
+	}
 	answer := func(text string) {
 		if private {
 			_, _ = client.SendMessage(ctx, message.Chat.ID, text, 0)
@@ -444,7 +500,11 @@ func (b *Bot) message(ctx context.Context, client API, cfg settings.TelegramSett
 	switch name {
 	case "start":
 		if code, ok := strings.CutPrefix(argument, "bind_"); ok && private {
-			answer(b.bind(ctx, cfg, user, code, lang))
+			answer(b.bind(ctx, client, cfg, user, code, lang))
+			return
+		}
+		if code, ok := strings.CutPrefix(argument, "staff_"); ok && private {
+			answer(b.bindStaff(ctx, user, code, lang))
 			return
 		}
 		answer(b.help(cfg, lang))
@@ -462,6 +522,20 @@ func (b *Bot) message(ctx context.Context, client API, cfg settings.TelegramSett
 		b.personal(ctx, client, cfg, message, lang, b.me(ctx, user, lang))
 	case "services", "balance", "invoices":
 		b.account(ctx, client, cfg, message, name, lang)
+	case "ticket":
+		if !private {
+			b.groupReply(ctx, client, cfg, message.MessageID, say(lang, msgPrivateOnly, cfg.BotUsername))
+			return
+		}
+		b.newTicket(ctx, client, cfg, message, lang)
+	case "redpacket", "hb":
+		if private {
+			answer(say(lang, msgRedPacketStaff))
+			return
+		}
+		b.redPacketCommand(ctx, client, cfg, message, argument, lang)
+	case "rank", "top":
+		answer(b.rank(ctx, cfg, lang))
 	}
 }
 
@@ -518,6 +592,13 @@ func (b *Bot) help(cfg settings.TelegramSettings, lang string) string {
 	if cfg.RebatePercent > 0 {
 		text += say(lang, msgHelpRebate, cfg.RebatePercent)
 	}
+	text += b.streakHelp(cfg, lang) + b.boardHelp(cfg, lang)
+	if cfg.Leaderboards {
+		text += say(lang, msgHelpRank)
+	}
+	if cfg.Tickets {
+		text += say(lang, msgHelpTicket)
+	}
 	if note := b.closed(cfg, lang); note != "" {
 		return text + "\n\n" + note
 	}
@@ -532,7 +613,7 @@ func (b *Bot) notLinked(lang string) string {
 	return say(lang, msgNotLinked, site+"/portal/profile", siteHost(site))
 }
 
-func (b *Bot) bind(ctx context.Context, cfg settings.TelegramSettings, user User, code, lang string) string {
+func (b *Bot) bind(ctx context.Context, client API, cfg settings.TelegramSettings, user User, code, lang string) string {
 	// Linking works at any time; the bonus is paid inside the period only.
 	bonus := cfg.BindRewardMinor
 	if cfg.RewardsState(b.now()) != settings.RewardsOpen {
@@ -552,6 +633,8 @@ func (b *Bot) bind(ctx context.Context, cfg settings.TelegramSettings, user User
 		b.logger.Error("link telegram account", "error", err)
 		return say(lang, msgBindInvalid)
 	}
+	// Linking passes the group's check.
+	b.letIn(ctx, client, user.ID)
 	// The site account's own language from here on.
 	lang = b.settings.Current().Lang(firstNonEmpty(result.Link.Locale, lang))
 	text := say(lang, msgBound, maskEmail(result.Link.Email))
@@ -582,7 +665,7 @@ func (b *Bot) checkin(ctx context.Context, cfg settings.TelegramSettings, user U
 		b.logger.Error("telegram check-in", "error", err)
 		return ""
 	}
-	result, err := b.store.Checkin(ctx, link, b.between(cfg.CheckinMinMinor, cfg.CheckinMaxMinor), b.budget(cfg))
+	result, err := b.store.Checkin(ctx, link, b.between(cfg.CheckinMinMinor, cfg.CheckinMaxMinor), b.budget(cfg), streakRules(cfg)...)
 	if err != nil {
 		b.logger.Error("telegram check-in", "error", err)
 		return ""
@@ -593,7 +676,11 @@ func (b *Bot) checkin(ctx context.Context, cfg settings.TelegramSettings, user U
 	case result.Exhausted:
 		return say(lang, msgCheckinExhausted)
 	}
-	return say(lang, msgCheckinDone, mention(user), b.money(result.AmountMinor), b.money(result.BalanceMinor), result.Streak)
+	text := say(lang, msgCheckinDone, mention(user), b.money(result.AmountMinor), b.money(result.BalanceMinor), result.Streak)
+	if result.BonusMinor > 0 {
+		text += say(lang, msgStreakBonus, result.BonusDays, b.money(result.BonusMinor))
+	}
+	return text
 }
 
 // InviteLink is the account's own invite link to the group, made on
@@ -724,6 +811,9 @@ func (b *Bot) Verify(ctx context.Context, apiBase, token, chat string) (Check, e
 		check.Warnings = append(check.Warnings, "机器人不是群管理员：收不到成员进群和退群的消息，邀请奖励无法结算，也不能生成专属邀请链接。")
 	case !member.CanInviteUsers:
 		check.Warnings = append(check.Warnings, "机器人没有「邀请用户」权限，不能生成专属邀请链接。")
+	}
+	if member.Status == "administrator" && !member.CanRestrictMembers {
+		check.Warnings = append(check.Warnings, "机器人没有「封禁用户」权限：入群验证和移出未验证的成员无法使用。")
 	}
 	if member.Status == "administrator" && !member.CanDeleteMessage {
 		check.Warnings = append(check.Warnings, "机器人没有「删除消息」权限，群内回复不会自动清理。")

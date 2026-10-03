@@ -40,6 +40,17 @@ type TelegramSettingsRecord = {
   announce_daily_cap: number
   admin_chat_id: number
   admin_chat_title: string
+  tickets: boolean
+  streak_bonuses: { days: number; amount_minor: number }[]
+  leaderboards: boolean
+  leaderboard_prizes: number[]
+  red_packet_require_spent: boolean
+  red_packet_min_linked_days: number
+  verify: '' | 'button' | 'link'
+  verify_minutes: number
+  filter_links: boolean
+  blocked_words: string[]
+  unlinked_per_minute: number
   status: { running: boolean; last_error: string; last_poll_at?: string; chats: SeenChat[] }
   stats: { links: number; checkins_today: number; rewarded_today_minor: number; rewarded_total_minor: number; invites_rewarded: number; invites_pending: number; members: number }
 }
@@ -82,6 +93,17 @@ export function TelegramSettings() {
   const [announceHosted, setAnnounceHosted] = useState(false)
   const [announceCap, setAnnounceCap] = useState('10')
   const [adminChat, setAdminChat] = useState('')
+  const [tickets, setTickets] = useState(true)
+  const [streaks, setStreaks] = useState<{ days: string; amount: string }[]>([])
+  const [leaderboards, setLeaderboards] = useState(false)
+  const [prizes, setPrizes] = useState('')
+  const [packetSpent, setPacketSpent] = useState(false)
+  const [packetDays, setPacketDays] = useState('0')
+  const [verify, setVerify] = useState<'' | 'button' | 'link'>('')
+  const [verifyMinutes, setVerifyMinutes] = useState('10')
+  const [filterLinks, setFilterLinks] = useState(false)
+  const [blockedWords, setBlockedWords] = useState('')
+  const [unlinkedRate, setUnlinkedRate] = useState('0')
   const [busy, setBusy] = useState(false)
   const [checking, setChecking] = useState(false)
   const [error, setError] = useState('')
@@ -115,6 +137,17 @@ export function TelegramSettings() {
     setAnnounceHosted(value.announce_hosted)
     setAnnounceCap(String(value.announce_daily_cap))
     setAdminChat('')
+    setTickets(value.tickets)
+    setStreaks((value.streak_bonuses ?? []).map(item => ({ days: String(item.days), amount: yuan(item.amount_minor) })))
+    setLeaderboards(value.leaderboards)
+    setPrizes((value.leaderboard_prizes ?? []).map(yuan).join(', '))
+    setPacketSpent(value.red_packet_require_spent)
+    setPacketDays(String(value.red_packet_min_linked_days))
+    setVerify(value.verify ?? '')
+    setVerifyMinutes(String(value.verify_minutes || 10))
+    setFilterLinks(value.filter_links)
+    setBlockedWords((value.blocked_words ?? []).join('\n'))
+    setUnlinkedRate(String(value.unlinked_per_minute))
   }
 
   useEffect(() => {
@@ -133,6 +166,17 @@ export function TelegramSettings() {
       rebate_percent: Number(rebate), rebate_max_minor: minor(rebateMax), rebate_delay_hours: Number(rebateDelay),
       announce_chat: announceChat, announce_new: announceNew, announce_restock: announceRestock, announce_hosted: announceHosted, announce_daily_cap: Number(announceCap),
       admin_chat: adminChat,
+      tickets,
+      streak_bonuses: streaks.filter(item => item.days.trim() !== '').map(item => ({ days: Number(item.days), amount_minor: minor(item.amount) })),
+      leaderboards,
+      leaderboard_prizes: prizes.split(/[,，\s]+/).filter(Boolean).map(minor),
+      red_packet_require_spent: packetSpent,
+      red_packet_min_linked_days: Number(packetDays),
+      verify,
+      verify_minutes: Number(verifyMinutes),
+      filter_links: filterLinks,
+      blocked_words: blockedWords.split(/[\n,，]+/).map(word => word.trim()).filter(Boolean),
+      unlinked_per_minute: Number(unlinkedRate),
     })
 
   async function save(event: FormEvent) {
@@ -365,6 +409,95 @@ export function TelegramSettings() {
           )}
         </label>
       </div>
+
+      <h4 className="settings-subheading">{t('在 Telegram 里收发工单')}</h4>
+      <p className="muted-text">{t('开启后，客户可以私聊机器人发送 /ticket 提交工单；工单通知发到 Telegram 时，客户、机主直接回复（引用）那条消息即可回复工单，可以带图片。管理员先在「安全中心」绑定自己的 Telegram，就可以在管理群里回复工单通知、点「认领」。')}</p>
+      <div className="form-grid">
+        <label className="check-row wide">
+          <input type="checkbox" checked={tickets} onChange={event => setTickets(event.target.checked)} />
+          {t('允许在 Telegram 里提交和回复工单')}
+        </label>
+      </div>
+
+      <h4 className="settings-subheading">{t('连续签到奖励')}</h4>
+      <p className="muted-text">{t('连续签到满指定天数（以及它的整数倍）时额外奖励，同一天满足多档时发天数最多的一档。计入每日奖励总预算。')}</p>
+      <div className="streak-rows">
+        {streaks.map((item, index) => (
+          <div className="inline-fields" key={index}>
+            <label>
+              <span>{t('连续天数')}</span>
+              <input type="number" min="2" max="365" step="1" value={item.days} onChange={event => setStreaks(rows => rows.map((row, i) => (i === index ? { ...row, days: event.target.value } : row)))} />
+            </label>
+            <label>
+              <span>{t('额外奖励（{0}）', unit)}</span>
+              <input type="number" min="0" max="1000" step="0.01" value={item.amount} onChange={event => setStreaks(rows => rows.map((row, i) => (i === index ? { ...row, amount: event.target.value } : row)))} />
+            </label>
+            <button type="button" className="text-button" onClick={() => setStreaks(rows => rows.filter((_, i) => i !== index))}>{t('删除')}</button>
+          </div>
+        ))}
+        {streaks.length < 5 && (
+          <button type="button" className="secondary-button compact" onClick={() => setStreaks(rows => [...rows, { days: '', amount: '1' }])}>{t('添加一档')}</button>
+        )}
+      </div>
+
+      <h4 className="settings-subheading">{t('每周排行榜')}</h4>
+      <p className="muted-text">{t('每周一 10:00（北京时间）在交流群公布上周的签到榜和邀请榜，并按名次发奖金；群成员随时可以发 /rank 查看本周排名。只在活动时间内公布。奖金计入当天已发放的奖励，但不受每日总预算限制。')}</p>
+      <div className="form-grid">
+        <label className="check-row">
+          <input type="checkbox" checked={leaderboards} onChange={event => setLeaderboards(event.target.checked)} />
+          {t('公布每周排行榜')}
+        </label>
+        <label>
+          <span>{t('前几名的奖金（{0}，用逗号分隔，依次为第 1、2、3… 名）', unit)}</span>
+          <input value={prizes} onChange={event => setPrizes(event.target.value)} placeholder="5, 3, 1" />
+        </label>
+      </div>
+
+      <h4 className="settings-subheading">{t('红包')}</h4>
+      <p className="muted-text">{t('管理员在后台下方的「红包」里发，或者在交流群发送 /redpacket 总金额 个数 [口令]（需要先在「安全中心」绑定 Telegram，且有财务权限）。下面两项是群里发红包时的领取条件。红包计入当天已发放的奖励，但不受每日总预算限制。')}</p>
+      <div className="form-grid">
+        <label className="check-row">
+          <input type="checkbox" checked={packetSpent} onChange={event => setPacketSpent(event.target.checked)} />
+          {t('仅限消费过的账号领取')}
+        </label>
+        <label>
+          <span>{t('仅限绑定满几天的账号（0 为不限）')}</span>
+          <input type="number" min="0" max="365" step="1" value={packetDays} onChange={event => setPacketDays(event.target.value)} required />
+        </label>
+      </div>
+
+      <h4 className="settings-subheading">{t('入群验证与群管理')}</h4>
+      <p className="muted-text">{t('需要机器人有「封禁用户」和「删除消息」权限。群管理员和已绑定的管理员不受下面的限制。')}</p>
+      <div className="form-grid">
+        <label>
+          <span>{t('新成员入群验证')}</span>
+          <select value={verify} onChange={event => setVerify(event.target.value as '' | 'button' | 'link')}>
+            <option value="">{t('不验证')}</option>
+            <option value="button">{t('点按钮验证（挡机器人）')}</option>
+            <option value="link">{t('绑定站点账号后才能发言')}</option>
+          </select>
+          <small>{t('已绑定站点账号的成员进群不需要验证。')}</small>
+        </label>
+        <label>
+          <span>{t('验证时限（分钟）')}</span>
+          <input type="number" min="1" max="1440" step="1" value={verifyMinutes} onChange={event => setVerifyMinutes(event.target.value)} required />
+          <small>{t('超时未通过的成员会被移出群（之后仍可重新加入）。')}</small>
+        </label>
+        <label className="check-row">
+          <input type="checkbox" checked={filterLinks} onChange={event => setFilterLinks(event.target.checked)} />
+          {t('删除未绑定成员发的链接')}
+        </label>
+        <label>
+          <span>{t('未绑定成员每分钟最多发言（条，0 为不限）')}</span>
+          <input type="number" min="0" max="60" step="1" value={unlinkedRate} onChange={event => setUnlinkedRate(event.target.value)} required />
+        </label>
+        <label className="wide">
+          <span>{t('屏蔽词（每行一个，命中即删除消息）')}</span>
+          <textarea rows={3} value={blockedWords} onChange={event => setBlockedWords(event.target.value)} placeholder={t('例如：代开发票')} />
+        </label>
+      </div>
+      <p className="muted-text">{t('群头衔：Telegram 只允许给管理员设置头衔，给客户或机主加头衔需要把他们设为管理员，风险太大，所以没有提供。')}</p>
+
       <div className="form-actions">
         <button type="button" className="secondary-button" disabled={checking} onClick={() => void check()}>
           <PlugZap size={15} />{checking ? t('正在连接…') : t('测试连接')}

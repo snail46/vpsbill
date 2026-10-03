@@ -316,11 +316,22 @@ type TelegramCheckin struct {
 	BalanceMinor int64
 	// Streak counts consecutive days checked in, today included.
 	Streak int
+	// BonusMinor is what today's streak paid on top, for BonusDays in a
+	// row (0 when nothing).
+	BonusMinor int64
+	BonusDays  int
+}
+
+// StreakRule pays AmountMinor when a check-in makes a streak of Days, or
+// of a multiple of it.
+type StreakRule struct {
+	Days        int
+	AmountMinor int64
 }
 
 // Checkin pays today's check-in reward to the linked account, once per
 // site account and Telegram account a day.
-func (s *TelegramStore) Checkin(ctx context.Context, link TelegramLink, amountMinor int64, budget TelegramBudget) (TelegramCheckin, error) {
+func (s *TelegramStore) Checkin(ctx context.Context, link TelegramLink, amountMinor int64, budget TelegramBudget, streaks ...StreakRule) (TelegramCheckin, error) {
 	day := budget.Now.In(clock.Zone).Format("2006-01-02")
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
@@ -361,6 +372,32 @@ func (s *TelegramStore) Checkin(ctx context.Context, link TelegramLink, amountMi
 		) recent WHERE day=$2::date-(position-1)::int
 	`, link.AccountID, day).Scan(&result.Streak); err != nil {
 		return TelegramCheckin{}, err
+	}
+	// A streak bonus for the longest rule today's streak reaches, when the
+	// check-in itself was paid.
+	if result.AmountMinor > 0 {
+		best := StreakRule{}
+		for _, rule := range streaks {
+			if rule.Days > 1 && rule.AmountMinor > 0 && result.Streak%rule.Days == 0 && rule.Days > best.Days {
+				best = rule
+			}
+		}
+		if best.Days > 0 {
+			fits, err := budget.reserve(ctx, tx, best.AmountMinor)
+			if err != nil {
+				return TelegramCheckin{}, err
+			}
+			if fits {
+				paid, err := streakBonus(ctx, tx, link, day, best.Days, best.AmountMinor)
+				if err != nil {
+					return TelegramCheckin{}, err
+				}
+				if paid {
+					result.BonusMinor, result.BonusDays = best.AmountMinor, best.Days
+					result.BalanceMinor += best.AmountMinor
+				}
+			}
+		}
 	}
 	return result, tx.Commit(ctx)
 }

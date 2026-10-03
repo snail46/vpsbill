@@ -134,15 +134,15 @@ func TestNotificationChannelsIntegration(t *testing.T) {
 		mailed = append(mailed, to)
 		return nil
 	}
-	n.sendTelegram = func(_ context.Context, config settings.TelegramSettings, chatID int64, text string, _ [][]telegram.Button) error {
+	n.sendTelegram = func(_ context.Context, config settings.TelegramSettings, chatID int64, text string, _ [][]telegram.Button) (int64, error) {
 		if config.BotToken != "1:token" {
 			t.Errorf("sent with token %q", config.BotToken)
 		}
 		if chatID == 1003 {
-			return &telegram.APIError{Code: 403, Description: "Forbidden: bot was blocked by the user"}
+			return 0, &telegram.APIError{Code: 403, Description: "Forbidden: bot was blocked by the user"}
 		}
 		sent[chatID] = text
-		return nil
+		return int64(len(sent)), nil
 	}
 	n.sendDue(ctx)
 	if len(mailed) != 3 || len(sent) != 2 {
@@ -156,6 +156,47 @@ func TestNotificationChannelsIntegration(t *testing.T) {
 		if got[key] != status {
 			t.Errorf("%s is %s, want %s", key, got[key], status)
 		}
+	}
+
+	// A ticket's notices on Telegram say how to answer them and remember
+	// their ticket, so a reply lands there; the staff group's carries a
+	// button to claim the ticket.
+	bot.AdminChatID = -200
+	if err = runtime.SetTelegram(ctx, bot, installed.Identity.UserID); err != nil {
+		t.Fatal(err)
+	}
+	var tgAccount, tgUserID string
+	if err = db.QueryRow(ctx, `SELECT m.account_id,u.id FROM users u JOIN memberships m ON m.user_id=u.id WHERE u.email='tg@example.com'`).Scan(&tgAccount, &tgUserID); err != nil {
+		t.Fatal(err)
+	}
+	ticket, err := postgres.NewOperationsStore(db).CreateTicket(ctx, tgAccount, tgUserID, "", "SSH is down", "normal", "help", "", "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	n.TicketCreated(ctx, ticket.Ticket.ID, ticket.Messages[0].ID, "help")
+	n.TicketReplied(ctx, ticket.Ticket.ID, "m-staff", "staff", "try again", false)
+	sent = map[int64]string{}
+	buttons := map[int64][][]telegram.Button{}
+	n.sendTelegram = func(_ context.Context, _ settings.TelegramSettings, chatID int64, text string, rows [][]telegram.Button) (int64, error) {
+		sent[chatID], buttons[chatID] = text, rows
+		return 4000 + int64(len(sent)), nil
+	}
+	n.sendDue(ctx)
+	if text := sent[-200]; !strings.Contains(text, "SSH is down") || !strings.Contains(text, "回复这条消息") {
+		t.Fatalf("staff group ticket notice: %s", text)
+	}
+	if rows := buttons[-200]; len(rows) != 1 || rows[0][0].Data != "tk:"+ticket.Ticket.ID {
+		t.Fatalf("staff group claim button: %+v", rows)
+	}
+	if text := sent[1001]; !strings.Contains(text, "回复（引用）这条消息") {
+		t.Fatalf("customer ticket notice: %s", text)
+	}
+	var refs int
+	if err = db.QueryRow(ctx, `SELECT count(*) FROM telegram_message_refs WHERE ticket_id=$1 AND chat_id IN (-200,1001)`, ticket.Ticket.ID).Scan(&refs); err != nil || refs != 2 {
+		t.Fatalf("remembered %d ticket messages, err=%v", refs, err)
+	}
+	if _, err = db.Exec(ctx, `DELETE FROM mail_queue WHERE dedup_key LIKE 'ticket-message:%'`); err != nil {
+		t.Fatal(err)
 	}
 
 	// Without the bot, a Telegram-only reader is told by mail; unlinking

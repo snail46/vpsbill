@@ -33,7 +33,7 @@ func (n *Notifier) TicketCreated(ctx context.Context, ticketID, messageID, body 
 			"您好，%s：\n\n购买您托管母机实例的用户 %s 提交了工单，请及时处理。\n\n编号：%s\n主题：%s\n优先级：%s\n\n%s\n\n处理工单：%s\n",
 			"Hello %s,\n\n%s, who bought an instance on your hosted server, opened a ticket. Please handle it soon.\n\nNumber: %s\nSubject: %s\nPriority: %s\n\n%s\n\nHandle the ticket: %s\n"),
 			ticket.HostName, ticket.CustomerName, ticket.Number, ticket.Subject, priorityName(lang, ticket.Priority), excerpt(body, 800), n.link("/portal/hosting"))
-		n.enqueue(ctx, ticket.HostEmail, subject, text, "ticket-message:"+messageID+":"+ticket.HostEmail)
+		n.enqueueTicket(ctx, ticket.HostEmail, subject, text, "ticket-message:"+messageID+":"+ticket.HostEmail, ticketID)
 		return
 	}
 	if !n.settings.Current().MailNotifications.AdminTicket {
@@ -46,7 +46,7 @@ func (n *Notifier) TicketCreated(ctx context.Context, ticketID, messageID, body 
 			"客户 %s 提交了新工单。\n\n编号：%s\n主题：%s\n优先级：%s\n\n%s\n\n处理工单：%s\n",
 			"Customer %s opened a ticket.\n\nNumber: %s\nSubject: %s\nPriority: %s\n\n%s\n\nHandle the ticket: %s\n"),
 			ticket.CustomerName, ticket.Number, ticket.Subject, priorityName(lang, ticket.Priority), excerpt(body, 800), n.adminLink("/admin/support"))
-		n.enqueue(ctx, to, subject, text, "ticket-message:"+messageID+":"+to)
+		n.enqueueTicket(ctx, to, subject, text, "ticket-message:"+messageID+":"+to, ticketID)
 	}
 }
 
@@ -73,7 +73,7 @@ func (n *Notifier) TicketReplied(ctx context.Context, ticketID, messageID, autho
 				"您好，%s：\n\n平台客服在托管工单「%s」中回复了用户：\n\n%s\n\n查看工单：%s\n",
 				"Hello %s,\n\nPlatform support replied to the user in the hosting ticket “%s”:\n\n%s\n\nSee the ticket: %s\n"),
 				ticket.HostName, ticket.Subject, excerpt(body, 1500), n.link("/portal/hosting"))
-			n.enqueue(ctx, ticket.HostEmail, subject, text, "ticket-message:"+messageID+":"+ticket.HostEmail)
+			n.enqueueTicket(ctx, ticket.HostEmail, subject, text, "ticket-message:"+messageID+":"+ticket.HostEmail, ticketID)
 		}
 		if !preferences.CustomerTicketReply {
 			return
@@ -88,7 +88,7 @@ func (n *Notifier) TicketReplied(ctx context.Context, ticketID, messageID, autho
 			"您好，%s：\n\n您的工单「%s」收到了%s回复：\n\n%s\n\n查看并回复：%s\n",
 			"Hello %s,\n\nYour ticket “%s” has a reply from %s:\n\n%s\n\nRead and reply: %s\n"),
 			ticket.CustomerName, ticket.Subject, who, excerpt(body, 1500), n.link("/portal/support"))
-		n.enqueue(ctx, ticket.RequesterEmail, subject, text, "ticket-message:"+messageID+":"+ticket.RequesterEmail)
+		n.enqueueTicket(ctx, ticket.RequesterEmail, subject, text, "ticket-message:"+messageID+":"+ticket.RequesterEmail, ticketID)
 	case "customer":
 		if ticket.HostEmail != "" {
 			lang := n.lang(ctx, ticket.HostEmail)
@@ -97,7 +97,7 @@ func (n *Notifier) TicketReplied(ctx context.Context, ticketID, messageID, autho
 				"您好，%s：\n\n用户 %s 回复了托管工单 %s。\n\n%s\n\n处理工单：%s\n",
 				"Hello %s,\n\n%s replied to hosting ticket %s.\n\n%s\n\nHandle the ticket: %s\n"),
 				ticket.HostName, ticket.CustomerName, ticket.Number, excerpt(body, 800), n.link("/portal/hosting"))
-			n.enqueue(ctx, ticket.HostEmail, subject, text, "ticket-message:"+messageID+":"+ticket.HostEmail)
+			n.enqueueTicket(ctx, ticket.HostEmail, subject, text, "ticket-message:"+messageID+":"+ticket.HostEmail, ticketID)
 			return
 		}
 		if !preferences.AdminTicket {
@@ -110,7 +110,7 @@ func (n *Notifier) TicketReplied(ctx context.Context, ticketID, messageID, autho
 				"客户 %s 回复了工单 %s。\n\n%s\n\n处理工单：%s\n",
 				"Customer %s replied to ticket %s.\n\n%s\n\nHandle the ticket: %s\n"),
 				ticket.CustomerName, ticket.Number, excerpt(body, 800), n.adminLink("/admin/support"))
-			n.enqueue(ctx, to, subject, text, "ticket-message:"+messageID+":"+to)
+			n.enqueueTicket(ctx, to, subject, text, "ticket-message:"+messageID+":"+to, ticketID)
 		}
 	}
 }

@@ -7,6 +7,7 @@ import type { ContactLink } from '../shared/contact'
 import { ContactSettings } from './ContactSettings'
 import { LedgerSettings, LocaleSettings } from './LocaleSettings'
 import { TelegramSettings } from './TelegramSettings'
+import { RedPackets } from './TelegramCommunity'
 import { t, tr } from '../shared/i18n'
 
 export function PaymentSettingsView() {
@@ -458,6 +459,7 @@ export function SiteSettingsView() {
       <LocaleSettings />
       <LedgerSettings />
       <TelegramSettings />
+      <RedPackets />
 
       <form className="panel site-settings" onSubmit={submit}>
         <div className="form-grid">

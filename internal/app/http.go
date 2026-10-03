@@ -277,6 +277,13 @@ func NewHandler(deps Dependencies) (http.Handler, error) {
 	mux.Handle("POST /api/v1/customer/telegram/bind", auth.requireCustomer(http.HandlerFunc(tg.customerBind)))
 	mux.Handle("POST /api/v1/customer/telegram/invite-link", auth.requireCustomer(http.HandlerFunc(tg.customerInviteLink)))
 	mux.Handle("DELETE /api/v1/customer/telegram", auth.requireCustomer(http.HandlerFunc(tg.customerUnlink)))
+	// Any staff member may link their own Telegram account.
+	mux.Handle("GET /api/v1/admin/telegram/me", auth.require("", http.HandlerFunc(tg.staffLink)))
+	mux.Handle("POST /api/v1/admin/telegram/me/bind", auth.require("", http.HandlerFunc(tg.staffBind)))
+	mux.Handle("DELETE /api/v1/admin/telegram/me", auth.require("", http.HandlerFunc(tg.staffUnlink)))
+	mux.Handle("GET /api/v1/admin/telegram/red-packets", auth.require("billing:read", http.HandlerFunc(tg.redPackets)))
+	mux.Handle("POST /api/v1/admin/telegram/red-packets", auth.require("billing:write", http.HandlerFunc(tg.createRedPacket)))
+	mux.Handle("POST /api/v1/admin/telegram/red-packets/{id}/cancel", auth.require("billing:write", http.HandlerFunc(tg.cancelRedPacket)))
 	mux.Handle("GET /api/v1/customer/plan-watches", auth.requireCustomer(http.HandlerFunc(portal.planWatches)))
 	mux.Handle("PUT /api/v1/customer/plans/{id}/watch", auth.requireCustomer(http.HandlerFunc(portal.watchPlan)))
 	mux.Handle("DELETE /api/v1/customer/plans/{id}/watch", auth.requireCustomer(http.HandlerFunc(portal.unwatchPlan)))

@@ -110,6 +110,8 @@ var (
 		"<b>%s</b> bot\n\n• Link Telegram on the site under Profile%s\n• Send /checkin in the group every day for %s of balance\n• /invite gives you your own invite link%s\n• /me shows your check-ins and rewards\n• In a private chat: /services lists your VPS, /balance shows your balance, /invoices pays unpaid invoices\n\nBalance pays for purchases and renewals at <a href=\"%s\">%s</a>; it cannot be withdrawn.",
 	}
 	msgHelpBind   = text{"，奖励 %s", " and get %s"}
+	msgHelpRank   = text{"\n• /rank 查看本周签到榜和邀请榜", "\n• /rank shows this week's check-in and invite boards"}
+	msgHelpTicket = text{"\n• 私聊发送 /ticket 主题 提交工单；直接回复机器人发来的工单消息即可回复", "\n• In a private chat, /ticket subject opens a ticket; reply to the bot's ticket messages to answer"}
 	msgHelpInvite = text{"，每邀请一人奖励 %s", ", %s per member invited"}
 	msgWelcome    = text{
 		"👋 欢迎 %s！在 <a href=\"%s\">%s</a> 绑定 Telegram 后，每天在群里发「签到」可领余额，/invite 邀请好友还有奖励。",

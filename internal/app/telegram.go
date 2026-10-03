@@ -79,6 +79,18 @@ type telegramInput struct {
 	AnnounceHosted   bool   `json:"announce_hosted"`
 	AnnounceDailyCap int    `json:"announce_daily_cap"`
 	AdminChat        string `json:"admin_chat"`
+
+	Tickets                bool                   `json:"tickets"`
+	StreakBonuses          []settings.StreakBonus `json:"streak_bonuses"`
+	Leaderboards           bool                   `json:"leaderboards"`
+	LeaderboardPrizes      []int64                `json:"leaderboard_prizes"`
+	RedPacketRequireSpent  bool                   `json:"red_packet_require_spent"`
+	RedPacketMinLinkedDays int                    `json:"red_packet_min_linked_days"`
+	Verify                 string                 `json:"verify"`
+	VerifyMinutes          int                    `json:"verify_minutes"`
+	FilterLinks            bool                   `json:"filter_links"`
+	BlockedWords           []string               `json:"blocked_words"`
+	UnlinkedPerMinute      int                    `json:"unlinked_per_minute"`
 }
 
 // otherChat resolves the announcement or staff chat typed in the
@@ -162,6 +174,9 @@ func (a *telegramAPI) adminUpdate(w http.ResponseWriter, r *http.Request) {
 		RewardsFrom: input.RewardsFrom, RewardsUntil: input.RewardsUntil,
 		RebatePercent: input.RebatePercent, RebateMaxMinor: input.RebateMaxMinor, RebateDelayHours: input.RebateDelayHours,
 		AnnounceNew: input.AnnounceNew, AnnounceRestock: input.AnnounceRestock, AnnounceHosted: input.AnnounceHosted, AnnounceDailyCap: input.AnnounceDailyCap,
+		Tickets: input.Tickets, StreakBonuses: input.StreakBonuses, Leaderboards: input.Leaderboards, LeaderboardPrizes: input.LeaderboardPrizes,
+		RedPacketRequireSpent: input.RedPacketRequireSpent, RedPacketMinLinkedDays: input.RedPacketMinLinkedDays,
+		Verify: input.Verify, VerifyMinutes: input.VerifyMinutes, FilterLinks: input.FilterLinks, BlockedWords: input.BlockedWords, UnlinkedPerMinute: input.UnlinkedPerMinute,
 	}
 	check, token, err := a.check(r.Context(), input)
 	if err == nil {
@@ -213,6 +228,7 @@ func (a *telegramAPI) customerTelegram(w http.ResponseWriter, r *http.Request) {
 		"bind_reward_minor": cfg.BindRewardMinor, "checkin_min_minor": cfg.CheckinMinMinor, "checkin_max_minor": cfg.CheckinMaxMinor,
 		"invite_reward_minor": cfg.InviteRewardMinor, "invite_hold_hours": cfg.InviteHoldHours, "invite_require_link": cfg.InviteRequireLink,
 		"invite_daily_cap": cfg.InviteDailyCap, "rebate_percent": cfg.RebatePercent, "rebate_max_minor": cfg.RebateMaxMinor,
+		"streak_bonuses": cfg.StreakBonuses, "leaderboards": cfg.Leaderboards, "leaderboard_prizes": cfg.LeaderboardPrizes, "tickets": cfg.Tickets,
 	}
 	// When rewards are paid: the portal says so wherever it offers them.
 	data["rewards"] = map[string]any{"state": cfg.RewardsState(time.Now()), "from": cfg.RewardsFrom, "until": cfg.RewardsUntil}
@@ -341,5 +357,127 @@ func (a *telegramAPI) customerInviteLink(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, http.StatusBadGateway, map[string]any{"error": "telegram_failed", "message": "暂时无法生成邀请链接，请稍后再试或联系客服"})
 	default:
 		writeJSON(w, http.StatusOK, map[string]any{"data": map[string]string{"invite_link": link}})
+	}
+}
+
+// ---- Staff ----
+
+// staffLink is the signed-in staff member's own Telegram link.
+func (a *telegramAPI) staffLink(w http.ResponseWriter, r *http.Request) {
+	cfg := a.settings.Current().Telegram
+	data := map[string]any{"enabled": cfg.Ready(), "bot_username": cfg.BotUsername, "admin_chat": cfg.AdminChatTitle, "linked": nil}
+	link, err := a.store.StaffLink(r.Context(), principalFromContext(r.Context()).UserID)
+	switch {
+	case errors.Is(err, postgres.ErrTelegramNotLinked):
+	case err != nil:
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "internal_error"})
+		return
+	default:
+		data["linked"] = link
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": data})
+}
+
+// staffBind makes a link that ties the Telegram account that follows it to
+// the signed-in staff member.
+func (a *telegramAPI) staffBind(w http.ResponseWriter, r *http.Request) {
+	cfg := a.settings.Current().Telegram
+	if !cfg.Ready() {
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "telegram_disabled", "message": "Telegram 机器人还没有启用"})
+		return
+	}
+	raw := make([]byte, 20)
+	if _, err := rand.Read(raw); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "internal_error"})
+		return
+	}
+	code := hex.EncodeToString(raw)
+	expires := time.Now().Add(telegram.BindCodeTTL)
+	err := a.store.CreateStaffBindCode(r.Context(), principalFromContext(r.Context()).UserID, security.HashToken(code), expires)
+	switch {
+	case errors.Is(err, postgres.ErrTelegramAlreadyLinked):
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "already_linked", "message": "你已经绑定了 Telegram"})
+	case errors.Is(err, postgres.ErrNotStaff):
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": "forbidden"})
+	case err != nil:
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "internal_error"})
+	default:
+		writeJSON(w, http.StatusOK, map[string]any{"data": map[string]any{"url": "https://t.me/" + cfg.BotUsername + "?start=staff_" + code, "expires_at": expires}})
+	}
+}
+
+func (a *telegramAPI) staffUnlink(w http.ResponseWriter, r *http.Request) {
+	err := a.store.UnlinkStaff(r.Context(), principalFromContext(r.Context()).UserID)
+	switch {
+	case errors.Is(err, postgres.ErrTelegramNotLinked):
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "not_linked", "message": "你没有绑定 Telegram"})
+	case err != nil:
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "internal_error"})
+	default:
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+// ---- Red packets ----
+
+func (a *telegramAPI) redPackets(w http.ResponseWriter, r *http.Request) {
+	packets, err := a.store.RedPackets(r.Context(), 50)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "internal_error"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": packets})
+}
+
+// createRedPacket hands out a red packet in the group. The amount is in
+// the site's default currency, like the other Telegram amounts.
+func (a *telegramAPI) createRedPacket(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		TotalMinor    int64  `json:"total_minor"`
+		Count         int    `json:"count"`
+		Password      string `json:"password"`
+		RequireSpent  bool   `json:"require_spent"`
+		MinLinkedDays int    `json:"min_linked_days"`
+		Hours         int    `json:"hours"`
+		// Post announces a password packet in the group too.
+		Post bool `json:"post"`
+	}
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	if input.Hours < 1 || input.Hours > 168 {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "validation_error", "message": "红包有效期必须在 1–168 小时之间"})
+		return
+	}
+	locale := a.settings.Current().Locale
+	ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
+	defer cancel()
+	packet, err := a.bot.CreateRedPacket(ctx, postgres.RedPacketInput{
+		CreatedBy: principalFromContext(r.Context()).UserID, TotalMinor: locale.Convert(input.TotalMinor, locale.Currency(), locale.Ledger()), Count: input.Count,
+		Password: input.Password, RequireSpent: input.RequireSpent, MinLinkedDays: input.MinLinkedDays, ExpiresAt: time.Now().Add(time.Duration(input.Hours) * time.Hour),
+	}, input.Post)
+	switch {
+	case errors.Is(err, telegram.ErrNotReady):
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "telegram_disabled", "message": "Telegram 机器人还没有启用"})
+	case errors.Is(err, postgres.ErrRedPacketInvalid):
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "validation_error", "message": "红包金额或个数无效：每个至少 0.01，最多 100 个，总额不超过 10000，口令为 2–32 个字"})
+	case errors.Is(err, postgres.ErrRedPacketPassword):
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "password_taken", "message": "已有一个进行中的红包用了这个口令"})
+	case err != nil:
+		writeJSON(w, http.StatusBadGateway, map[string]any{"error": "telegram_failed", "message": "红包没有发到群里：" + err.Error()})
+	default:
+		writeJSON(w, http.StatusCreated, map[string]any{"data": packet})
+	}
+}
+
+func (a *telegramAPI) cancelRedPacket(w http.ResponseWriter, r *http.Request) {
+	packet, err := a.bot.CancelRedPacket(r.Context(), r.PathValue("id"), principalFromContext(r.Context()).UserID)
+	switch {
+	case errors.Is(err, postgres.ErrRedPacketGone):
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "not_active", "message": "这个红包已经结束"})
+	case err != nil:
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "internal_error"})
+	default:
+		writeJSON(w, http.StatusOK, map[string]any{"data": packet})
 	}
 }

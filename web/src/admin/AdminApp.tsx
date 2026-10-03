@@ -8,6 +8,7 @@ import { AdminTradeListings } from '../Trade'
 import { ThemeToggle } from '../ThemeToggle'
 import { LocaleMenu } from '../shared/LocaleMenu'
 import { Meta, SessionLoading, Field, SecuritySettings, Brand, BrandMark } from '../shared/ui'
+import { StaffTelegram } from './TelegramCommunity'
 import { Boot, freshBoot, inlineBoot, loadBoot } from '../shared/boot'
 import { Overview } from './Overview'
 import { CustomersView } from './Customers'
@@ -566,7 +567,12 @@ export function AdminShell({ meta, user, onLogout }: { meta: Meta | null; user: 
         {view === 'audit' && <AuditView />}
         {view === 'announcements' && <AnnouncementsView />}
         {view === 'staff' && <StaffView user={user} />}
-        {view === 'security' && <SecuritySettings enabled={user.mfa_enabled} />}
+        {view === 'security' && (
+          <>
+            <SecuritySettings enabled={user.mfa_enabled} />
+            <StaffTelegram />
+          </>
+        )}
         </>
         )}
         </Fragment>

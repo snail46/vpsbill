@@ -47,6 +47,15 @@ func TestDetect(t *testing.T) {
 		"南非":                "ZA",
 		"阿联酋 迪拜":            "AE",
 		"老挝 万象":             "LA",
+		// Cities and sites belong to their country; Hong Kong, Macau and
+		// Taiwan are their own.
+		"纽约": "US", "New York": "US", "西雅图": "US", "芝加哥": "US", "达拉斯": "US", "阿什本": "US", "圣何塞 CN2": "US", "Kansas City": "US", "波士顿": "US", "美西 9929": "US",
+		"东京": "JP", "大阪 软银": "JP", "Osaka": "JP", "京都": "JP", "横滨": "JP", "札幌": "JP",
+		"首尔": "KR", "春川": "KR", "釜山": "KR",
+		"九龙": "HK", "新界 屯门": "HK", "长沙湾": "HK", "Kowloon": "HK", "HKBN": "HK",
+		"氹仔": "MO", "Taipa": "MO",
+		"台北 HiNet": "TW", "新竹": "TW", "台中": "TW",
+		"长沙": "CN", "法兰克福": "DE", "阿姆斯特丹": "NL", "伦敦": "GB", "悉尼": "AU", "多伦多": "CA", "吉隆坡": "MY", "胡志明市": "VN",
 	} {
 		if got := Detect(text); got != want {
 			t.Errorf("Detect(%q) = %q, want %q", text, got, want)

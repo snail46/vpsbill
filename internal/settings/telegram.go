@@ -73,7 +73,48 @@ type TelegramSettings struct {
 	// (0 = none).
 	AdminChatID    int64  `json:"admin_chat_id"`
 	AdminChatTitle string `json:"admin_chat_title"`
+
+	// Tickets lets customers open and answer tickets in a private chat
+	// with the bot, and staff answer them in the staff group, by replying
+	// to the bot's notice.
+	Tickets bool `json:"tickets"`
+	// StreakBonuses pay extra when a check-in makes a streak of so many
+	// days (and each multiple of it).
+	StreakBonuses []StreakBonus `json:"streak_bonuses"`
+	// Leaderboards posts last week's check-in and invite boards in the
+	// group on Monday at 10:00 (UTC+8), paying LeaderboardPrizes by rank.
+	Leaderboards      bool    `json:"leaderboards"`
+	LeaderboardPrizes []int64 `json:"leaderboard_prizes"`
+	// Red packets sent from the group by staff take these conditions:
+	// only accounts that paid for something, linked at least so many days.
+	RedPacketRequireSpent  bool `json:"red_packet_require_spent"`
+	RedPacketMinLinkedDays int  `json:"red_packet_min_linked_days"`
+	// Verify holds new members silent until they press a button
+	// ("button") or link a site account ("link"); "" lets everyone in.
+	// Who does not pass within VerifyMinutes is removed.
+	Verify        string `json:"verify"`
+	VerifyMinutes int    `json:"verify_minutes"`
+	// FilterLinks deletes links posted by members without a linked site
+	// account; BlockedWords deletes messages with any of the words;
+	// UnlinkedPerMinute caps the messages of members without a linked
+	// account (0 = no cap). Group administrators and linked staff are
+	// exempt.
+	FilterLinks       bool     `json:"filter_links"`
+	BlockedWords      []string `json:"blocked_words"`
+	UnlinkedPerMinute int      `json:"unlinked_per_minute"`
 }
+
+// StreakBonus is paid for checking in Days days in a row.
+type StreakBonus struct {
+	Days        int   `json:"days"`
+	AmountMinor int64 `json:"amount_minor"`
+}
+
+// Verification modes for new members.
+const (
+	VerifyButton = "button"
+	VerifyLink   = "link"
+)
 
 // Rewards periods, as RewardsState reports them.
 const (
@@ -103,6 +144,8 @@ func DefaultTelegramSettings() TelegramSettings {
 		InviteRewardMinor: 100, InviteHoldHours: 24, InviteRequireLink: true, InviteDailyCap: 10,
 		DailyBudgetMinor: 10000, ReplyTTLSeconds: 60, Welcome: true,
 		RebateMaxMinor: 2000, RebateDelayHours: 72, AnnounceNew: true, AnnounceRestock: true, AnnounceDailyCap: 10,
+		Tickets: true, StreakBonuses: []StreakBonus{{Days: 7, AmountMinor: 100}, {Days: 30, AmountMinor: 500}},
+		LeaderboardPrizes: []int64{500, 300, 100}, VerifyMinutes: 10,
 	}
 }
 
@@ -115,6 +158,17 @@ func (t TelegramSettings) In(locale LocaleSettings, currency string) TelegramSet
 	for _, amount := range []*int64{&t.BindRewardMinor, &t.CheckinMinMinor, &t.CheckinMaxMinor, &t.InviteRewardMinor, &t.DailyBudgetMinor, &t.RebateMaxMinor} {
 		*amount = locale.Convert(*amount, from, currency)
 	}
+	// The lists are copied: the stored settings must not change.
+	bonuses := make([]StreakBonus, len(t.StreakBonuses))
+	for i, bonus := range t.StreakBonuses {
+		bonuses[i] = StreakBonus{Days: bonus.Days, AmountMinor: locale.Convert(bonus.AmountMinor, from, currency)}
+	}
+	t.StreakBonuses = bonuses
+	prizes := make([]int64, len(t.LeaderboardPrizes))
+	for i, prize := range t.LeaderboardPrizes {
+		prizes[i] = locale.Convert(prize, from, currency)
+	}
+	t.LeaderboardPrizes = prizes
 	t.Currency = currency
 	return t
 }
@@ -169,12 +223,69 @@ func (t TelegramSettings) validate() error {
 		return fmt.Errorf("Bot API 地址必须是完整的 http(s):// 地址，或者留空")
 	case t.ChatURL != "" && absoluteURL(t.ChatURL, true) != nil:
 		return fmt.Errorf("群链接必须是完整的 https://t.me/… 地址，或者留空")
+	case len(t.StreakBonuses) > 5:
+		return fmt.Errorf("连续签到奖励最多设置 5 档")
+	case len(t.LeaderboardPrizes) > 10:
+		return fmt.Errorf("排行榜奖金最多设置前 10 名")
+	case t.RedPacketMinLinkedDays < 0 || t.RedPacketMinLinkedDays > 365:
+		return fmt.Errorf("红包要求的绑定天数必须在 0–365 之间")
+	case t.Verify != "" && t.Verify != VerifyButton && t.Verify != VerifyLink:
+		return fmt.Errorf("入群验证方式无效")
+	case t.VerifyMinutes < 1 || t.VerifyMinutes > 1440:
+		return fmt.Errorf("入群验证时限必须在 1–1440 分钟之间")
+	case len(t.BlockedWords) > 200:
+		return fmt.Errorf("屏蔽词最多 200 个")
+	case t.UnlinkedPerMinute < 0 || t.UnlinkedPerMinute > 60:
+		return fmt.Errorf("未绑定成员每分钟发言上限必须在 0–60 之间")
 	case t.Enabled && t.BotToken == "":
 		return fmt.Errorf("启用前需要填写 Bot Token")
 	case t.Enabled && t.ChatID == 0:
 		return fmt.Errorf("启用前需要设置群")
 	}
 	return nil
+}
+
+// validateLists checks the streak bonuses and prizes.
+func (t TelegramSettings) validateLists() error {
+	seen := map[int]bool{}
+	for _, bonus := range t.StreakBonuses {
+		switch {
+		case bonus.Days < 2 || bonus.Days > 365:
+			return fmt.Errorf("连续签到天数必须在 2–365 之间")
+		case seen[bonus.Days]:
+			return fmt.Errorf("连续签到天数不能重复")
+		case bonus.AmountMinor < 0 || bonus.AmountMinor > maxTelegramReward:
+			return fmt.Errorf("连续签到奖励必须在 0–%d 之间", maxTelegramReward/100)
+		}
+		seen[bonus.Days] = true
+	}
+	for _, prize := range t.LeaderboardPrizes {
+		if prize < 0 || prize > maxTelegramReward {
+			return fmt.Errorf("排行榜奖金必须在 0–%d 之间", maxTelegramReward/100)
+		}
+	}
+	for _, word := range t.BlockedWords {
+		if len([]rune(word)) > 40 {
+			return fmt.Errorf("屏蔽词「%s」太长（最多 40 个字）", word)
+		}
+	}
+	return nil
+}
+
+// cleanWords trims the blocked words and drops empty and repeated ones.
+func cleanWords(words []string) []string {
+	result := make([]string, 0, len(words))
+	seen := map[string]bool{}
+	for _, word := range words {
+		word = strings.TrimSpace(word)
+		key := strings.ToLower(word)
+		if word == "" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		result = append(result, word)
+	}
+	return result
 }
 
 func (m *Manager) decodeTelegram(sealed []byte) (TelegramSettings, error) {
@@ -204,7 +315,14 @@ func (m *Manager) SetTelegram(ctx context.Context, in TelegramSettings, actorID 
 	if in.Currency != "USD" {
 		in.Currency = "CNY"
 	}
+	in.BlockedWords = cleanWords(in.BlockedWords)
+	if in.VerifyMinutes == 0 {
+		in.VerifyMinutes = 10
+	}
 	if err := in.validate(); err != nil {
+		return fmt.Errorf("%w: %v", ErrInvalidSettings, err)
+	}
+	if err := in.validateLists(); err != nil {
 		return fmt.Errorf("%w: %v", ErrInvalidSettings, err)
 	}
 	plain, err := json.Marshal(in)

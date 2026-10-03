@@ -38,8 +38,9 @@ type Notifier struct {
 	box      *security.SecretBox
 	logger   *slog.Logger
 	send     func(ctx context.Context, config mail.Config, to, subject, body string) error
-	// sendTelegram delivers one message to a Telegram chat.
-	sendTelegram func(ctx context.Context, config settings.TelegramSettings, chatID int64, text string, buttons [][]telegram.Button) error
+	// sendTelegram delivers one message to a Telegram chat and returns its
+	// id there.
+	sendTelegram func(ctx context.Context, config settings.TelegramSettings, chatID int64, text string, buttons [][]telegram.Button) (int64, error)
 	now          func() time.Time
 }
 
@@ -75,14 +76,37 @@ func encodeButtons(buttons [][]telegram.Button) ([]byte, error) {
 // enqueueWith is enqueue with buttons under the Telegram message; mail
 // carries the same links in its text.
 func (n *Notifier) enqueueWith(ctx context.Context, to, subject, body, dedupKey string, buttons [][]telegram.Button) {
+	n.enqueueFull(ctx, to, subject, body, dedupKey, buttons, "")
+}
+
+// enqueueTicket queues a notice about a ticket. On Telegram it says that
+// replying to it answers the ticket, and in the staff group it carries a
+// button to claim the ticket.
+func (n *Notifier) enqueueTicket(ctx context.Context, to, subject, body, dedupKey, ticketID string) {
+	n.enqueueFull(ctx, to, subject, body, dedupKey, nil, ticketID)
+}
+
+func (n *Notifier) enqueueFull(ctx context.Context, to, subject, body, dedupKey string, buttons [][]telegram.Button, ticketID string) {
 	current := n.settings.Current()
+	tickets := ticketID != "" && current.Telegram.Tickets
+	if !tickets {
+		ticketID = ""
+	}
 	markup, err := encodeButtons(buttons)
 	if err != nil {
 		n.logger.Error("encode notification buttons", "error", err)
 	}
 	if to == adminChat {
 		if current.Telegram.Ready() && current.Telegram.AdminChatID != 0 {
-			if _, err := n.store.EnqueueTelegram(ctx, current.Telegram.AdminChatID, subject, body, dedupKey, markup); err != nil {
+			text := body
+			if tickets {
+				lang := current.Lang("")
+				text += "\n\n" + say(lang, "↩️ 已绑定 Telegram 的管理员直接回复这条消息即可回复客户。", "↩️ Staff with a linked Telegram account can answer the customer by replying to this message.")
+				if claim, err := encodeButtons([][]telegram.Button{{telegram.ClaimButton(say(lang, "认领", "Claim"), ticketID)}}); err == nil {
+					markup = claim
+				}
+			}
+			if _, err := n.store.EnqueueTelegramTicket(ctx, current.Telegram.AdminChatID, subject, text, dedupKey, markup, ticketID); err != nil {
 				n.logger.Error("queue staff group notice", "error", err)
 			}
 		}
@@ -99,7 +123,11 @@ func (n *Notifier) enqueueWith(ctx context.Context, to, subject, body, dedupKey 
 		if key != "" {
 			key += ":telegram"
 		}
-		if _, err := n.store.EnqueueTelegram(ctx, target.TelegramID, subject, body, key, markup); err != nil {
+		text := body
+		if tickets {
+			text += "\n\n" + say(n.lang(ctx, to), "↩️ 直接回复（引用）这条消息即可回复工单，可以附带图片。", "↩️ Reply to this message to answer the ticket; images may be attached.")
+		}
+		if _, err := n.store.EnqueueTelegramTicket(ctx, target.TelegramID, subject, text, key, markup, ticketID); err != nil {
 			n.logger.Error("queue telegram notification", "to", to, "error", err)
 		}
 	}
@@ -201,10 +229,16 @@ func (n *Notifier) sendDue(ctx context.Context) {
 			if len(item.Buttons) > 0 {
 				_ = json.Unmarshal(item.Buttons, &buttons)
 			}
-			err = n.sendTelegram(ctx, config, chatID, telegramText(item.Subject, item.Body), buttons)
+			messageID, err := n.sendTelegram(ctx, config, chatID, telegramText(item.Subject, item.Body), buttons)
 			if telegram.Forbidden(err) {
 				// The user blocked the bot; trying again will not help.
 				return finalError{err}
+			}
+			if err == nil && item.TicketID != "" && messageID != 0 {
+				// Replies to this message go to the ticket.
+				if err := n.store.SaveTelegramRef(ctx, chatID, messageID, item.TicketID); err != nil {
+					n.logger.Error("remember the ticket of a telegram notice", "error", err)
+				}
 			}
 			return err
 		})
@@ -249,11 +283,11 @@ func telegramText(subject, body string) string {
 	return "<b>" + html.EscapeString(subject) + "</b>\n\n" + html.EscapeString(excerpt(body, 3200))
 }
 
-func sendTelegram(ctx context.Context, config settings.TelegramSettings, chatID int64, text string, buttons [][]telegram.Button) error {
+func sendTelegram(ctx context.Context, config settings.TelegramSettings, chatID int64, text string, buttons [][]telegram.Button) (int64, error) {
 	client := telegram.NewClient(config.APIBase, config.BotToken)
 	if len(buttons) > 0 {
-		if _, err := client.SendButtons(ctx, chatID, text, buttons); err == nil {
-			return nil
+		if sent, err := client.SendButtons(ctx, chatID, text, buttons); err == nil {
+			return sent.MessageID, nil
 		}
 		// Telegram refuses buttons whose address it does not like (a
 		// site without a public address); the text has the links too, so
@@ -271,13 +305,13 @@ func sendTelegram(ctx context.Context, config settings.TelegramSettings, chatID 
 			}
 		}
 		if len(actions) > 0 {
-			if _, err := client.SendButtons(ctx, chatID, text, actions); err == nil {
-				return nil
+			if sent, err := client.SendButtons(ctx, chatID, text, actions); err == nil {
+				return sent.MessageID, nil
 			}
 		}
 	}
-	_, err := client.SendMessage(ctx, chatID, text, 0)
-	return err
+	sent, err := client.SendMessage(ctx, chatID, text, 0)
+	return sent.MessageID, err
 }
 
 // excerpt shortens message text for a notification body.

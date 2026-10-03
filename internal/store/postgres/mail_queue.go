@@ -24,6 +24,9 @@ type QueuedMail struct {
 	Attempts  int
 	// Buttons are the rows of buttons under a Telegram message, as JSON.
 	Buttons []byte
+	// TicketID is the ticket a Telegram notice is about; replying to the
+	// sent message answers it.
+	TicketID string
 }
 
 // AnnouncementKey starts the deduplication key of every announcement of a
@@ -46,7 +49,7 @@ func (s *MailStore) Pool() *pgxpool.Pool { return s.db }
 // verified them are skipped, so a sign-up with someone else's address
 // cannot make the platform mail them.
 func (s *MailStore) EnqueueMail(ctx context.Context, recipient, subject, body, dedupKey string) (bool, error) {
-	return s.enqueue(ctx, ChannelMail, recipient, subject, body, dedupKey, nil)
+	return s.enqueue(ctx, ChannelMail, recipient, subject, body, dedupKey, nil, "")
 }
 
 // The channels a queued message goes out through. A Telegram message's
@@ -59,20 +62,25 @@ const (
 // EnqueueTelegram queues a message for a Telegram chat; buttons, when not
 // nil, is the JSON of the rows of buttons under it.
 func (s *MailStore) EnqueueTelegram(ctx context.Context, chatID int64, subject, body, dedupKey string, buttons []byte) (bool, error) {
-	return s.enqueue(ctx, ChannelTelegram, strconv.FormatInt(chatID, 10), subject, body, dedupKey, buttons)
+	return s.enqueue(ctx, ChannelTelegram, strconv.FormatInt(chatID, 10), subject, body, dedupKey, buttons, "")
 }
 
-func (s *MailStore) enqueue(ctx context.Context, channel, recipient, subject, body, dedupKey string, buttons []byte) (bool, error) {
+// EnqueueTelegramTicket is EnqueueTelegram for a notice about a ticket.
+func (s *MailStore) EnqueueTelegramTicket(ctx context.Context, chatID int64, subject, body, dedupKey string, buttons []byte, ticketID string) (bool, error) {
+	return s.enqueue(ctx, ChannelTelegram, strconv.FormatInt(chatID, 10), subject, body, dedupKey, buttons, ticketID)
+}
+
+func (s *MailStore) enqueue(ctx context.Context, channel, recipient, subject, body, dedupKey string, buttons []byte, ticketID string) (bool, error) {
 	var markup any
 	if len(buttons) > 0 {
 		markup = string(buttons)
 	}
 	command, err := s.db.Exec(ctx, `
-		INSERT INTO mail_queue(channel,recipient,subject,body,dedup_key,buttons)
-		SELECT $5,$1,$2,$3,nullif($4,''),$6::jsonb
+		INSERT INTO mail_queue(channel,recipient,subject,body,dedup_key,buttons,ticket_id)
+		SELECT $5,$1,$2,$3,nullif($4,''),$6::jsonb,nullif($7,'')::uuid
 		WHERE $5<>'mail' OR NOT EXISTS(SELECT 1 FROM users u WHERE lower(u.email)=lower($1) AND u.email_verified_at IS NULL)
 		ON CONFLICT (dedup_key) DO NOTHING
-	`, recipient, subject, body, dedupKey, channel, markup)
+	`, recipient, subject, body, dedupKey, channel, markup, ticketID)
 	if err != nil {
 		return false, err
 	}
@@ -111,7 +119,7 @@ func (s *MailStore) ClaimMail(ctx context.Context, channel string, limit int) ([
 			WHERE channel=$2 AND ((status='pending' AND next_attempt_at<=now()) OR (status='sending' AND locked_until<now()))
 			ORDER BY created_at LIMIT $1 FOR UPDATE SKIP LOCKED
 		)
-		RETURNING id,recipient,subject,body,attempts,coalesce(buttons::text,'')
+		RETURNING id,recipient,subject,body,attempts,coalesce(buttons::text,''),coalesce(ticket_id::text,'')
 	`, limit, channel)
 	if err != nil {
 		return nil, err
@@ -121,7 +129,7 @@ func (s *MailStore) ClaimMail(ctx context.Context, channel string, limit int) ([
 	for rows.Next() {
 		var row QueuedMail
 		var buttons string
-		if err := rows.Scan(&row.ID, &row.Recipient, &row.Subject, &row.Body, &row.Attempts, &buttons); err != nil {
+		if err := rows.Scan(&row.ID, &row.Recipient, &row.Subject, &row.Body, &row.Attempts, &buttons, &row.TicketID); err != nil {
 			return nil, err
 		}
 		row.Buttons = []byte(buttons)

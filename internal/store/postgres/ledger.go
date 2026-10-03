@@ -48,6 +48,10 @@ var ledgerAmounts = []struct {
 	{"telegram_checkins", []string{"amount_minor"}, ""},
 	{"telegram_invites", []string{"reward_minor"}, ""},
 	{"telegram_rebates", []string{"paid_minor", "amount_minor"}, ""},
+	{"telegram_red_packets", []string{"total_minor", "remaining_minor"}, ""},
+	{"telegram_red_packet_claims", []string{"amount_minor"}, ""},
+	{"telegram_streak_bonuses", []string{"amount_minor"}, ""},
+	{"telegram_leaderboard_prizes", []string{"amount_minor"}, ""},
 }
 
 // LedgerConversion counts what a switch converted.
