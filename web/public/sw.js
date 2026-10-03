@@ -61,7 +61,9 @@ function page(event, url) {
   const key = pageKey(url)
   let saved = Promise.resolve()
   const network = fetch(event.request).then(response => {
-    saved = remember(key, response.clone()).catch(() => undefined)
+    // A redirect is a proxy's login (Cloudflare Access and the like): the
+    // stored page must not stand in for it next time.
+    saved = (response.type === 'opaqueredirect' ? forget(key) : remember(key, response.clone())).catch(() => undefined)
     return response
   })
   // Keeping the fresh copy may outlast the response served now.
@@ -82,6 +84,11 @@ async function remember(key, response) {
   const previous = await cache.match(key)
   await cache.put(key, response.clone())
   await pruneAssets(previous, response)
+}
+
+async function forget(key) {
+  const cache = await caches.open(PAGES)
+  await cache.delete(key)
 }
 
 // The stored page's boot data may be out of date (a sign-out elsewhere, an

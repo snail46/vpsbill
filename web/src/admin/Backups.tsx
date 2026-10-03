@@ -6,6 +6,7 @@ import { formatTime } from '../shared/time'
 import { confirmDialog } from '../shared/dialog'
 import { toast } from '../shared/toast'
 import { t, tr } from '../shared/i18n'
+import { Backdrop } from '../shared/backdrop'
 
 type BackupSettings = {
   schedule: 'off' | 'daily' | 'interval'
@@ -595,7 +596,7 @@ function RestoreDialog({ file, onClose, onStarted }: { file: LocalBackup; onClos
   }
 
   return (
-    <div className="modal-backdrop" role="dialog" aria-modal="true">
+    <Backdrop role="dialog" aria-modal="true">
       <form className="modal panel" onSubmit={submit}>
         <div className="panel-heading">
           <h3>{t('还原数据')}</h3>
@@ -645,7 +646,7 @@ function RestoreDialog({ file, onClose, onStarted }: { file: LocalBackup; onClos
           </button>
         </div>
       </form>
-    </div>
+    </Backdrop>
   )
 }
 

@@ -282,6 +282,7 @@ export const ui: Record<string, string> = {
   '重置密码': 'Reset password',
   '重装系统': 'Reinstall',
   '正在打开控制台…': 'Opening the console…',
+  '站点的访问验证（如 Cloudflare Access）已过期，请刷新页面重新验证': 'The site’s access check (such as Cloudflare Access) has expired; reload the page to pass it again',
   '正在删除旧系统': 'Removing the old system',
   '正在创建新系统': 'Creating the new system',
   '正在设置 root 密码和网络': 'Setting the root password and network',

@@ -38,6 +38,7 @@ import { CountryLabel, Flag, countryName } from './shared/country'
 import { currencySymbol, displayCurrency, plainMoney } from './shared/currency'
 import { arrangeMarket, headlinePrice, narrowing, noFilter, type MarketFilter, type MarketNode, type MarketSort } from './shared/market'
 import { TagInput } from './shared/tags'
+import { Backdrop } from './shared/backdrop'
 
 type Tab = 'market' | 'mine' | 'coupons' | 'tickets' | 'chat'
 const tabs: [Tab, string, typeof Store][] = [
@@ -501,7 +502,7 @@ function BuyDialog({
 
   const enough = wallet && order ? wallet.balance_minor >= order.total_minor : false
   return (
-    <div className="modal-backdrop" role="dialog" aria-modal="true">
+    <Backdrop role="dialog" aria-modal="true">
       <div className="modal panel">
         <div className="panel-heading">
           <div>
@@ -583,7 +584,7 @@ function BuyDialog({
           </div>
         )}
       </div>
-    </div>
+    </Backdrop>
   )
 }
 

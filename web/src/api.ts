@@ -541,7 +541,7 @@ async function request<T>(path: string, init: RequestInit): Promise<T> {
   if (init.method && !['GET', 'HEAD'].includes(init.method.toUpperCase())) {
     headers.set('X-CSRF-Token', csrfToken(path))
   }
-  const response = await fetch(path, { ...init, headers, credentials: 'same-origin' })
+  const response = await siteFetch(path, { ...init, headers, credentials: 'same-origin' })
   if (response.status === 204) return undefined as T
   const payload = (await response.json().catch(() => ({}))) as Partial<Envelope<T>>
   if (!response.ok) {
@@ -552,6 +552,41 @@ async function request<T>(path: string, init: RequestInit): Promise<T> {
     throw error
   }
   return payload.data as T
+}
+
+// The API never redirects. A proxy in front of the site that signs people
+// in itself (Cloudflare Access and the like) does, once its own session
+// ends: it answers API calls with a redirect to its login page on another
+// site, which the browser refuses to follow ("Failed to fetch"). siteFetch
+// does not follow redirects, so that answer shows here, and loads the page
+// again for the proxy to sign the visitor in.
+export async function siteFetch(path: string, init: RequestInit = {}) {
+  const response = await fetch(path, { ...init, redirect: 'manual' })
+  if (response.type === 'opaqueredirect') {
+    proxySignIn()
+    throw new Error(t('站点的访问验证（如 Cloudflare Access）已过期，请刷新页面重新验证'))
+  }
+  return response
+}
+
+let signingIn = false
+
+function proxySignIn() {
+  if (signingIn) return
+  try {
+    // Once a minute at most, so a proxy that keeps redirecting cannot
+    // make the page reload without end.
+    const last = Number(sessionStorage.getItem('vpsbill:proxy-sign-in') || 0)
+    if (Date.now() - last < 60000) return
+    sessionStorage.setItem('vpsbill:proxy-sign-in', String(Date.now()))
+  } catch {
+    return
+  }
+  signingIn = true
+  // The service worker would open its stored copy of the page instead of
+  // going to the network, where the proxy's login is (public/sw.js).
+  const forget = typeof caches === 'undefined' ? Promise.resolve(false) : caches.delete('vpsbill-pages-v1').catch(() => false)
+  void forget.then(() => window.location.reload())
 }
 
 // Every successful GET is kept for this page, so a view opened again (or

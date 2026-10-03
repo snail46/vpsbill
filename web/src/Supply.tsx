@@ -3,6 +3,7 @@ import { X } from 'lucide-react'
 import { api, type NodeSupply, type Overcommit } from './api'
 import { formatTime } from './shared/time'
 import { t, tr } from './shared/i18n'
+import { Backdrop } from './shared/backdrop'
 
 const ratio = (value: number) => `${Number(value.toFixed(2))}×`
 
@@ -87,7 +88,7 @@ export function OvercommitDialog({ node, name, limits, endpoint, onClose, onSave
   }
 
   return (
-    <div className="modal-backdrop" role="dialog" aria-modal="true">
+    <Backdrop role="dialog" aria-modal="true">
       <div className="modal panel">
         <div className="panel-heading">
           <h3>{t('超售设置：{0}', name)}</h3>
@@ -120,6 +121,6 @@ export function OvercommitDialog({ node, name, limits, endpoint, onClose, onSave
           <button className="primary-button compact" disabled={busy} onClick={() => void save()}>{busy ? t('保存中…') : t('保存')}</button>
         </div>
       </div>
-    </div>
+    </Backdrop>
   )
 }

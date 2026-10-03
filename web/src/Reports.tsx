@@ -4,6 +4,7 @@ import { api, cached, type ReportRecord } from './api'
 import { formatTime } from './shared/time'
 import { promptDialog } from './shared/dialog'
 import { t } from './shared/i18n'
+import { Backdrop } from './shared/backdrop'
 
 export const reportReasons: Record<string, string> = {
   resources: t('实际资源与宣传不符'),
@@ -44,7 +45,7 @@ export function ReportDialog({ nodeID, nodeName, messageID, onClose }: { nodeID:
   }
 
   return (
-    <div className="modal-backdrop" role="dialog" aria-modal="true">
+    <Backdrop role="dialog" aria-modal="true">
       <form className="modal panel" onSubmit={submit}>
         <div className="panel-heading">
           <h3>
@@ -85,7 +86,7 @@ export function ReportDialog({ nodeID, nodeName, messageID, onClose }: { nodeID:
           </div>
         )}
       </form>
-    </div>
+    </Backdrop>
   )
 }
 

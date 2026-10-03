@@ -10,6 +10,7 @@ import { StatusBadge } from './shared/ui'
 import { overcommitText } from './Supply'
 import { promptDialog } from './shared/dialog'
 import { t, tr } from './shared/i18n'
+import { Backdrop } from './shared/backdrop'
 
 function offlineFor(node: HostedNodeRecord) {
   if (node.status === 'online' || !node.last_seen_at) return ''
@@ -275,7 +276,7 @@ function ClearDialog({ node, onClose, onCleared }: { node: HostedNodeRecord; onC
   }
 
   return (
-    <div className="modal-backdrop" role="dialog" aria-modal="true">
+    <Backdrop role="dialog" aria-modal="true">
       <div className="modal panel">
         <div className="panel-heading">
           <h3>{t('清退母机 {0}', node.name)}</h3>
@@ -307,7 +308,7 @@ function ClearDialog({ node, onClose, onCleared }: { node: HostedNodeRecord; onC
           </button>
         </div>
       </div>
-    </div>
+    </Backdrop>
   )
 }
 
@@ -376,7 +377,7 @@ function CapDialog({ node, onClose, onSaved }: { node: HostedNodeRecord; onClose
   }
 
   return (
-    <div className="modal-backdrop" role="dialog" aria-modal="true">
+    <Backdrop role="dialog" aria-modal="true">
       <div className="modal panel">
         <div className="panel-heading">
           <h3>{t('核定资源：{0}', node.name)}</h3>
@@ -398,6 +399,6 @@ function CapDialog({ node, onClose, onSaved }: { node: HostedNodeRecord; onClose
           <button className="primary-button compact" disabled={busy} onClick={() => void save()}>{busy ? t('保存中…') : t('保存')}</button>
         </div>
       </div>
-    </div>
+    </Backdrop>
   )
 }

@@ -34,6 +34,7 @@ import { PasswordInput } from './shared/password'
 import { bandwidthLabel, statusLabel } from './shared/ui'
 import { toast } from './shared/toast'
 import { t, tr } from './shared/i18n'
+import { Backdrop } from './shared/backdrop'
 
 // The console (xterm.js and noVNC) is loaded on demand; the detail page
 // fetches it in the background so the first click opens it at once.
@@ -554,7 +555,7 @@ function ServiceManager({ service, onReload }: { service: CustomerServiceRecord;
       </>)}
 
       {consoleKind && (
-        <Suspense fallback={<div className="modal-backdrop"><div className="console-loading"><div className="spinner" />{t('正在打开控制台…')}</div></div>}>
+        <Suspense fallback={<Backdrop><div className="console-loading"><div className="spinner" />{t('正在打开控制台…')}</div></Backdrop>}>
           <ServiceConsole serviceID={service.id} name={service.instance_name} kind={consoleKind} onClose={() => setConsoleKind(null)} />
         </Suspense>
       )}
@@ -720,7 +721,7 @@ function ServiceDialog({
   }
 
   return (
-    <div className="modal-backdrop">
+    <Backdrop>
       <section className="action-modal">
         <header>
           <div>
@@ -826,7 +827,7 @@ function ServiceDialog({
           </div>
         </form>
       </section>
-    </div>
+    </Backdrop>
   )
 }
 

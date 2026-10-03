@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react'
-import { adoptCache, type CustomerIdentity, type StaffUser } from '../api'
+import { adoptCache, siteFetch, type CustomerIdentity, type StaffUser } from '../api'
 import type { Meta } from './ui'
 import { setCurrencyRates } from './currency'
 
@@ -59,7 +59,7 @@ export function loadBoot(): Promise<Boot> {
 }
 
 function fetchBoot(): Promise<Boot> {
-  return fetch(`/api/v1/boot?surface=${surfaceFromPath()}`, { credentials: 'same-origin', headers: { Accept: 'application/json' }, cache: 'no-store' })
+  return siteFetch(`/api/v1/boot?surface=${surfaceFromPath()}`, { credentials: 'same-origin', headers: { Accept: 'application/json' }, cache: 'no-store' })
     .then(response => {
       if (response.status === 404) return { data: null }
       return response.ok ? response.json() : Promise.reject(new Error('boot failed'))
@@ -82,7 +82,7 @@ export function freshBoot(): Promise<Boot | null> {
 // upgrade when the web image is newer than the API.
 async function legacyBoot(): Promise<Boot> {
   const read = async <T,>(path: string): Promise<T | null> => {
-    const response = await fetch(path, { credentials: 'same-origin', headers: { Accept: 'application/json' } })
+    const response = await siteFetch(path, { credentials: 'same-origin', headers: { Accept: 'application/json' } })
     return response.ok ? ((await response.json()) as { data: T }).data : null
   }
   const admin = surfaceFromPath() === 'admin'

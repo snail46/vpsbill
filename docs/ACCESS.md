@@ -168,6 +168,12 @@ Web 容器的 nginx 在返回页面时，通过 SSI 把 `/api/v1/boot`（站点�
 2. 在 Cloudflare 后台核对隧道的服务地址，注意前台、后台两条都要改；多个连接器（connector）连着同一条隧道时，每个连接器所在的机器都要能访问这个地址。
 3. 打开一次前台和后台页面。下一个经 Cloudflare 正确转发的请求到达时，提示自动消失（2026-10-01 之前的版本要等 24 小时或重启 API 才消失）。后台「审计日志」里新的记录应显示访客的公网 IP。
 
+### 用 Cloudflare Access 保护后台时，页面提示 Failed to fetch
+
+Access 的登录有效期（默认 24 小时）到了以后，Cloudflare 会把接口请求重定向到 `*.cloudflareaccess.com` 的登录页。浏览器不允许网页的接口请求跳到别的网站，于是报「Failed to fetch」（开发者工具里是 CORS 错误）。HTTPS 站点的 Service Worker 会先显示上次保存的页面，所以刷新后看到的仍是旧页面，而不是 Access 登录页。
+
+2026-10-03 之后的版本会识别这种重定向：清掉保存的页面并自动刷新一次，浏览器随即进入 Access 登录，验证后回到原页面。旧版本可以在浏览器里清除该站点的数据（或在开发者工具「应用」里注销 Service Worker）后再刷新。想少遇到，可以在 Cloudflare Zero Trust 里把这个应用的会话时长调长。
+
 ## 从旧版本升级
 
 旧版只有一个 `APP_PORT`，前台和后台在同一个端口。升级后 `deploy.sh` 会把 `APP_PORT` 当作 `PORTAL_PORT`，后台默认在 8081；填了 `DOMAIN` 的旧配置按 `caddy` 处理，但还需要补上 `ADMIN_DOMAIN`。管理员的登录 Cookie 改了名字，升级后需要重新登录一次。

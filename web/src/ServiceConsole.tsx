@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
@@ -203,7 +204,8 @@ export function ServiceConsole({
     return cleanup
   }, [serviceID, kind])
 
-  return (
+  // At the end of <body>, like every modal (see shared/backdrop.tsx).
+  return createPortal(
     <div className={minimized ? 'console-dock-host' : 'modal-backdrop'}>
       <section ref={panel} className={['console-modal', minimized && 'minimized', full && 'full'].filter(Boolean).join(' ')}>
         <header onDoubleClick={() => (minimized ? restore() : undefined)}>
@@ -245,6 +247,7 @@ export function ServiceConsole({
         <div ref={target} className="console-screen" />
         {error && <div className="console-error">{error}</div>}
       </section>
-    </div>
+    </div>,
+    document.body,
   )
 }

@@ -12,6 +12,7 @@ import { bandwidthLabel } from './shared/ui'
 import { toast } from './shared/toast'
 import { navigatePortal } from './shared/nav'
 import { t, tr } from './shared/i18n'
+import { Backdrop } from './shared/backdrop'
 
 const statusNames: Record<TradeListingRecord['status'], string> = { listed: t('挂售中'), sold: t('已售出'), cancelled: t('已下架') }
 
@@ -288,7 +289,7 @@ function BuyListing({ listing, onClose, onDone }: { listing: TradeListingRecord;
   }
 
   return (
-    <div className="modal-backdrop" role="dialog" aria-modal="true">
+    <Backdrop role="dialog" aria-modal="true">
       <div className="modal panel">
         <div className="panel-heading">
           <div>
@@ -320,7 +321,7 @@ function BuyListing({ listing, onClose, onDone }: { listing: TradeListingRecord;
           </button>
         </div>
       </div>
-    </div>
+    </Backdrop>
   )
 }
 
@@ -408,7 +409,7 @@ export function ListServiceDialog({ service, onClose, onDone }: { service: Custo
   }
 
   return (
-    <div className="modal-backdrop" role="dialog" aria-modal="true">
+    <Backdrop role="dialog" aria-modal="true">
       <form className="modal panel" onSubmit={submit}>
         <div className="panel-heading">
           <div>
@@ -439,7 +440,7 @@ export function ListServiceDialog({ service, onClose, onDone }: { service: Custo
           </div>
         </div>
       </form>
-    </div>
+    </Backdrop>
   )
 }
 
