@@ -1660,8 +1660,13 @@ textarea {
   position: fixed;
   z-index: 100;
   inset: 0;
-  display: grid;
-  place-items: center;
+  /* Flex, not grid: a dialog's width: min(640px, 100%) then resolves
+     against the screen at once. In a grid (an auto-sized track) Safari
+     first laid the dialog out at its narrowest, tall and thin, until the
+     next layout (a click) widened it. */
+  display: flex;
+  align-items: center;
+  justify-content: center;
   padding: 24px;
   background: var(--backdrop);
   backdrop-filter: blur(8px);
@@ -2935,8 +2940,10 @@ textarea {
 }
 
 .auth-form-panel {
-  display: grid;
-  place-items: center;
+  /* Flex for the same reason as .modal-backdrop. */
+  display: flex;
+  align-items: center;
+  justify-content: center;
   padding: 40px 24px;
 }
 
