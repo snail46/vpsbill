@@ -424,7 +424,7 @@ export function ListServiceDialog({ service, onClose, onDone }: { service: Custo
         <div className="form-grid">
           <label>
             <span>{t('挂售价格（{0}）', ledgerUnit())}{converted() && price > 0 && <small> ≈ {walletMoney(Math.round(price * 100))}</small>}</span>
-            <input name="price" type="number" min="1" max="100000" step="0.01" required onChange={event => setPrice(Number(event.target.value))} />
+            <input name="price" type="number" min="0.01" max="100000" step="0.01" required onChange={event => setPrice(Number(event.target.value))} />
           </label>
           <label className="wide">
             <span>{t('说明（可选，买家可见）')}</span>

@@ -177,7 +177,7 @@ func TestLedgerSwitchIntegration(t *testing.T) {
 	if locale.Ledger() != "USD" || locale.Currency() != "USD" || !locale.USDEnabled || counts.Accounts != 2 || counts.PlanPrices != 2 {
 		t.Fatalf("after the switch: locale=%+v counts=%+v", locale, counts)
 	}
-	// 6500/7 = 928.57, 3500/7 = 500, 2100/7 = 300, 1400/7 = 200.
+	// 6500/7 = 928.57, 3500/7 = 500, 2100/7 = 300, 1400/7 = 200, 300/7 = 42.86.
 	if balance() != 929 {
 		t.Errorf("balance = %d, want 929", balance())
 	}
@@ -193,7 +193,7 @@ func TestLedgerSwitchIntegration(t *testing.T) {
 		`SELECT amount_minor FROM transactions WHERE invoice_id='` + hostedOrder.InvoiceID + `'`:                 500,
 		`SELECT discount_value FROM coupons WHERE code='SEVEN'`:                                                  100,
 		`SELECT discount_value FROM coupons WHERE code='TENPCT'`:                                                 10,
-		`SELECT price_minor FROM service_listings`:                                                               100,
+		`SELECT price_minor FROM service_listings`:                                                               43,
 		`SELECT count(*) FROM wallet_entries WHERE currency<>'USD'`:                                              0,
 		`SELECT count(*) FROM invoices WHERE currency<>'USD'`:                                                    0,
 		`SELECT count(*) FROM accounts WHERE default_currency<>'USD'`:                                            0,

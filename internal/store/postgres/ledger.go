@@ -125,8 +125,8 @@ func ConvertLedger(ctx context.Context, tx pgx.Tx, from, to string, usdRate floa
 			case "marketplace_escrows.released_host_minor":
 				value = fmt.Sprintf(`least(%s, (CASE WHEN host_share_minor=gross_minor-fee_minor THEN %s-%s ELSE %s END))`, conv("released_host_minor"), conv("gross_minor"), conv("fee_minor"), conv("host_share_minor"))
 			case "service_listings.price_minor":
-				// The table allows prices of 1.00 to 100000.00.
-				value = fmt.Sprintf(`least(greatest(%s, 100), 10000000)`, conv("price_minor"))
+				// The table allows prices of 0.01 to 100000.00.
+				value = fmt.Sprintf(`least(greatest(%s, 1), 10000000)`, conv("price_minor"))
 			}
 			sets = append(sets, column+"="+value)
 		}

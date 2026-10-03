@@ -276,8 +276,18 @@ func tradeMarket(t *testing.T, ctx context.Context, db *pgxpool.Pool, serviceID,
 	if _, err := trade.CreateListing(ctx, buyerID, sellerUser, serviceID, 5000, "", snapshot); !errors.Is(err, ErrServiceNotFound) {
 		t.Fatalf("listed someone else's instance: %v", err)
 	}
+	if _, err := trade.CreateListing(ctx, sellerID, sellerUser, serviceID, 0, "", snapshot); !errors.As(err, &rule) {
+		t.Fatalf("listed for nothing: %v", err)
+	}
 	listingID, err := trade.CreateListing(ctx, sellerID, sellerUser, serviceID, 5000, "急出", snapshot)
 	if err != nil {
+		t.Fatal(err)
+	}
+	// The lowest price the table takes is 0.01.
+	if _, err := db.Exec(ctx, `UPDATE service_listings SET price_minor=1 WHERE id=$1`, listingID); err != nil {
+		t.Fatalf("price of 0.01: %v", err)
+	}
+	if _, err := db.Exec(ctx, `UPDATE service_listings SET price_minor=5000 WHERE id=$1`, listingID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := trade.CreateListing(ctx, sellerID, sellerUser, serviceID, 6000, "", snapshot); !errors.As(err, &rule) {

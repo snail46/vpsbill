@@ -522,8 +522,8 @@ func (in *hostedPlanInput) plan(node postgres.Node) (postgres.Plan, string) {
 			return postgres.Plan{}, "计费周期无效（自定义周期为 1-365 天或 1-60 个月）"
 		case seen[cycle]:
 			return postgres.Plan{}, "计费周期不能重复"
-		case amount < 100 || amount > 10_000_000:
-			return postgres.Plan{}, "价格需在 1 到 100000 之间"
+		case amount < 1 || amount > 10_000_000:
+			return postgres.Plan{}, "价格需在 0.01 到 100000 之间"
 		}
 		seen[cycle] = true
 		price := postgres.Price{BillingCycle: cycle, AmountMinor: amount}
